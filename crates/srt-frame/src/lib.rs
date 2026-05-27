@@ -46,7 +46,7 @@ pub struct PassthroughEncoder;
 impl FrameEncoder for PassthroughEncoder {
     fn encode<'a>(&mut self, payload: &[u8], out: &'a mut [u8]) -> Result<&'a [u8]> {
         if out.len() < payload.len() {
-            return Err(Error::BufferTooSmall);
+            return Err(Error::buffer_too_small());
         }
 
         let len = payload.len();

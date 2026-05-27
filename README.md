@@ -18,6 +18,7 @@ See [SPEC.md](SPEC.md) for the current standard boundary.
 ## Workspace
 
 - `srt-core`: core protocol primitives.
+- `srt-error`: shared protocol error types.
 - `srt-frame`: frame encoding and decoding boundary.
 - `srt-reliability`: reliability traits and modules.
 - `srt-runtime`: protocol runtime boundary for send, receive, response, and progress.

@@ -1,6 +1,8 @@
 #![no_std]
 #![doc = "Core protocol primitives for Serial Realtime Transport."]
 
+pub use srt_error::{Error, ErrorKind, Result};
+
 /// A logical stream identifier.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct StreamId(pub u16);
@@ -32,17 +34,3 @@ pub enum PacketKind {
     /// Transport control packet.
     Control,
 }
-
-/// Shared SRT error surface.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Error {
-    /// The input was malformed.
-    Malformed,
-    /// The provided buffer was too small.
-    BufferTooSmall,
-    /// The requested operation is unsupported by this implementation.
-    Unsupported,
-}
-
-/// Shared result type for SRT crates.
-pub type Result<T> = core::result::Result<T, Error>;

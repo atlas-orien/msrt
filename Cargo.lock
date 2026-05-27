@@ -30,6 +30,13 @@ dependencies = [
 [[package]]
 name = "srt-core"
 version = "0.1.0"
+dependencies = [
+ "srt-error",
+]
+
+[[package]]
+name = "srt-error"
+version = "0.1.0"
 
 [[package]]
 name = "srt-frame"

@@ -39,6 +39,7 @@ Both runtime families must implement the same protocol. Runtime-specific crates 
 ## Current Crates
 
 - `srt-core`: shared primitive types and errors.
+- `srt-error`: shared protocol error types and result alias.
 - `srt-frame`: frame encoder and decoder boundary.
 - `srt-reliability`: partial-reliability module boundaries.
 - `srt-runtime`: protocol runtime boundary that coordinates send, receive, response, and progress.
