@@ -1,0 +1,28 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/srt-core",
+    "crates/srt-frame",
+    "crates/srt-reliability",
+    "crates/srt-runtime",
+    "crates/srt-stream",
+]
+
+[workspace.package]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/example/srt"
+readme = "README.md"
+rust-version = "1.85"
+
+[workspace.dependencies]
+heapless = "0.9"
+
+[workspace.lints.rust]
+missing_docs = "warn"
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+alloc_instead_of_core = "warn"
+std_instead_of_alloc = "warn"
+std_instead_of_core = "warn"

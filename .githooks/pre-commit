@@ -1,0 +1,14 @@
+#!/usr/bin/env sh
+set -eu
+
+echo "Running cargo fmt --all -- --check"
+cargo fmt --all -- --check
+
+echo "Running cargo check --workspace"
+cargo check --workspace
+
+echo "Running cargo test --workspace"
+cargo test --workspace
+
+echo "Running cargo clippy --workspace --all-targets --all-features -- -D warnings"
+cargo clippy --workspace --all-targets --all-features -- -D warnings
