@@ -101,22 +101,33 @@ pub use srt_error::{Error, ErrorKind, Result};
 
 ## 模块布局
 
+目录结构应该直接表达 `Packet` 是核心入口：
+
+```text
+srt-core/src/
+├── lib.rs
+├── packet.rs
+└── packet/
+    ├── header.rs
+    ├── kind.rs
+    ├── payload.rs
+    └── header/
+        ├── flags.rs
+        ├── seq.rs
+        └── stream_id.rs
+```
+
 `lib.rs` 应该保持很小：
 
 ```rust
 pub mod flags;
-pub mod id;
 pub mod packet;
-pub mod seq;
 
-pub use flags::Flags;
-pub use id::StreamId;
-pub use packet::{Packet, PacketHeader, PacketKind};
-pub use seq::Seq;
+pub use packet::{Flags, Packet, PacketHeader, PacketKind, Payload, Seq, StreamId};
 pub use srt_error::{Error, ErrorKind, Result};
 ```
 
-具体类型定义由各个模块文件负责。`lib.rs` 只作为公开出口。
+`packet.rs` 是 `srt-core` 的语义入口。`PacketHeader`、`Payload`、`PacketKind` 分别放在 `packet/header.rs`、`packet/payload.rs`、`packet/kind.rs`。`StreamId`、`Seq`、`Flags` 是 header 的组成部分，所以放在 `packet/header/` 下。这样搜索和阅读代码时可以直接定位到 packet 入口，也能从目录上看到：Packet 由 header 和 payload 组成，Header 又由 stream id、seq、flags 等字段组成。
 
 ## 当前阶段
 

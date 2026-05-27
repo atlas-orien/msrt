@@ -1,49 +1,12 @@
 //! Packet-level protocol primitives.
 
-use crate::{Flags, Seq, StreamId};
+pub mod header;
+pub mod kind;
+pub mod payload;
 
-/// Coarse packet categories reserved by the core protocol.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum PacketKind {
-    /// User message packet.
-    Data,
-    /// Acknowledgement packet.
-    Ack,
-    /// Transport control packet reserved for protocol runtime use.
-    Control,
-}
-
-/// Metadata shared by every protocol packet.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct PacketHeader {
-    /// Packet category.
-    pub kind: PacketKind,
-    /// Logical stream that owns the packet.
-    pub stream_id: StreamId,
-    /// Packet sequence number.
-    pub seq: Seq,
-    /// Packet flags.
-    pub flags: Flags,
-}
-
-impl PacketHeader {
-    /// Creates a packet header.
-    #[must_use]
-    pub const fn new(kind: PacketKind, stream_id: StreamId, seq: Seq, flags: Flags) -> Self {
-        Self {
-            kind,
-            stream_id,
-            seq,
-            flags,
-        }
-    }
-
-    /// Returns whether this packet should elicit an acknowledgement.
-    #[must_use]
-    pub const fn is_ack_eliciting(self) -> bool {
-        self.flags.contains(Flags::ACK_ELICITING)
-    }
-}
+pub use header::{Flags, PacketHeader, Seq, StreamId};
+pub use kind::PacketKind;
+pub use payload::Payload;
 
 /// Borrowed protocol packet.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -51,13 +14,22 @@ pub struct Packet<'a> {
     /// Packet metadata.
     pub header: PacketHeader,
     /// Borrowed packet payload.
-    pub payload: &'a [u8],
+    pub payload: Payload<'a>,
 }
 
 impl<'a> Packet<'a> {
     /// Creates a borrowed packet.
     #[must_use]
     pub const fn new(header: PacketHeader, payload: &'a [u8]) -> Self {
+        Self {
+            header,
+            payload: Payload::new(payload),
+        }
+    }
+
+    /// Creates a borrowed packet from an existing payload view.
+    #[must_use]
+    pub const fn from_parts(header: PacketHeader, payload: Payload<'a>) -> Self {
         Self { header, payload }
     }
 

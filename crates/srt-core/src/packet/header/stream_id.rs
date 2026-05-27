@@ -1,4 +1,4 @@
-//! Protocol identifiers.
+//! Packet header stream identifier primitive.
 
 /// A logical stream identifier.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]

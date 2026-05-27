@@ -1,4 +1,4 @@
-//! Protocol flag primitives.
+//! Packet header flag primitives.
 
 /// Protocol flags carried by packets.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
