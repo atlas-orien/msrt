@@ -13,7 +13,6 @@
 - packet 结构
 - packet header 结构
 - packet kind 定义
-- frame kind 标记，如果它属于共享协议词汇
 - stream identifier
 - sequence number
 - flags
@@ -60,6 +59,16 @@ pub struct Packet<'a> {
 - MCU 和上位机环境都可用
 - 不绑定 frame 编码
 
+## Flags
+
+`Flags` 当前使用 `u8`。
+
+原因是 SRT 面向串口和 MCU，每个 byte 都应该谨慎使用。当前阶段只有少量 packet flags，不应该提前使用 `u16` 扩大所有 packet 的 header。
+
+这也更接近 QUIC 的思路：header bits 应该紧凑，并且根据 packet/header 类型解释，而不是预先放一个很宽的通用 flags 字段。
+
+如果未来 8 bit 不够，可以通过版本化 header、扩展 header、control packet 或 packet kind 扩展，而不是在第一版协议里提前增加固定开销。
+
 ## Packet 与 Frame 的边界
 
 `Packet` 属于 `srt-core`。
@@ -96,13 +105,11 @@ pub use srt_error::{Error, ErrorKind, Result};
 
 ```rust
 pub mod flags;
-pub mod frame;
 pub mod id;
 pub mod packet;
 pub mod seq;
 
 pub use flags::Flags;
-pub use frame::FrameKind;
 pub use id::StreamId;
 pub use packet::{Packet, PacketHeader, PacketKind};
 pub use seq::Seq;
