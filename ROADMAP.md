@@ -27,6 +27,19 @@ This milestone is not a usable transport implementation yet. It defines the prot
 6. Add heapless/no-alloc buffer strategies.
 7. Add host and MCU adapters after the standard core stabilizes.
 
+## v0.2 Wire Format Draft
+
+Status: design in progress.
+
+The next milestone focuses on the first concrete wire format draft:
+
+- Wire Envelope layout
+- Packet Header layout
+- Protocol Frame layout
+- CRC16 coverage and parameters
+- decoder state-machine strategy
+- table-driven encode/decode tests
+
 ## Current Non-goals
 
 - no UART driver

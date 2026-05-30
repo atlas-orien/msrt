@@ -2,10 +2,13 @@
 
 这个目录用于记录 SRT 在实现协议细节之前的架构决策。
 
-文档列表：
+## 版本目录
 
-- [SRT 总设计](srt-design.md)：整体协议设计方向。
-- [srt-core 设计](srt-core-design.md)：`srt-core` crate 的设计边界。
-- [srt-reliability 设计](srt-reliability-design.md)：`srt-reliability` crate 的可靠性策略边界。
-- [srt-runtime 设计](srt-runtime-design.md)：`srt-runtime` crate 的协议运行时边界。
-- [srt-wire 设计](srt-wire-design.md)：`srt-wire` crate 的串口字节流边界。
+- [v1](v1/README.md)：no_std protocol scaffold，冻结 crate 边界。
+- [v2](v2/README.md)：wire format draft，开始冻结第一版字节格式。
+
+## 当前阶段
+
+当前进入 v2 设计阶段。
+
+v2 的目标不是实现完整 runtime，而是先定义第一版可讨论的 wire format、packet/frame 编码方向、错误边界和测试策略。
