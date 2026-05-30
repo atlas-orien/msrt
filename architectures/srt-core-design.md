@@ -1,136 +1,283 @@
 # srt-core 设计
 
-`srt-core` 是最小、最核心的协议 crate。
+`srt-core` 是 SRT 协议模型的中心 crate。
 
-它的目标是定义所有 SRT 协议 crate 共同认可的基础结构。它应该足够简单、稳定、`no_std`、无堆分配，并且容易推理。
+SRT 借鉴 QUIC 的 packet/frame 分层思想：**Packet 是传输单元，Frame 是 Packet payload 内的语义单元**。
+
+参考图：
+
+![QUIC 数据传输基本单位](image.png)
+
+SRT 不实现 QUIC，也不使用 UDP。SRT 面向串口类字节流，所以还需要在后续设计中处理串口字节边界。但在协议模型中，`srt-core` 只关注 Packet 和 Protocol Frame。
+
+## 核心分层
+
+SRT 的核心协议分层：
+
+```text
+SRT Packet
+├── Packet Header
+├── Packet Number
+└── Packet Payload
+    ├── SRT Frame 1
+    ├── SRT Frame 2
+    └── SRT Frame N
+```
+
+串口传输时还需要外层 envelope：
+
+```text
+Serial Byte Stream
+└── Serial Envelope / Wire Packet Boundary
+    └── SRT Packet
+```
+
+`Serial Envelope` 负责 magic、length、crc、resync、半包、粘包等字节流问题。它不是 SRT Protocol Frame。
 
 ## 职责
 
-`srt-core` 定义 SRT packet 是什么，以及描述 packet 所需的基础类型。
+`srt-core` 定义：
 
-它应该包含：
+- `Packet`
+- `PacketHeader`
+- `PacketNumber`
+- `PacketPayload`
+- `PacketType`
+- `Frame`
+- `FrameKind`
+- `StreamFrame`
+- `AckFrame`
+- `PingFrame`
+- `ResetStreamFrame`
+- `StreamId`
+- `MessageId`
+- 协议基础常量和限制
 
-- packet 结构
-- packet header 结构
-- packet kind 定义
-- stream identifier
-- sequence number
-- flags
-- 协议常量和限制
+`srt-core` 不实现：
 
-它不应该包含：
+- 串口驱动
+- DMA 驱动
+- 操作系统适配
+- runtime event loop
+- ack 算法
+- retransmit 算法
+- sliding window 算法
+- 串口 envelope 编解码
 
-- 字节编码或解码
-- CRC 实现
-- packet 重新同步
-- 重传算法
-- ack 跟踪
-- stream 调度
-- runtime 状态机
-- UART 或操作系统适配
+## Packet
 
-## Packet 是中心
-
-`srt-core` 的中心结构应该是 `Packet`。
-
-SRT 在原始字节流上传输消息，但协议本身应该以 packet 为单位进行思考。Packet 是 runtime 发送、接收、ack、重传、路由和调度的语义传输单元。
-
-预期结构如下：
+`Packet` 是 SRT 的协议传输单元。
 
 ```rust
-pub struct PacketHeader {
-    pub kind: PacketKind,
-    pub stream_id: StreamId,
-    pub seq: Seq,
-    pub flags: Flags,
-}
-
 pub struct Packet<'a> {
     pub header: PacketHeader,
-    pub payload: &'a [u8],
+    pub payload: PacketPayload<'a>,
 }
 ```
 
-这样可以让核心 packet 模型保持：
+`PacketPayload` 在当前阶段使用 borrowed bytes 表示。这些 bytes 的语义是：**encoded SRT protocol frames**，不是单一用户 message。
 
-- `no_std`
-- 无堆分配
-- 不绑定 payload 容器
-- MCU 和上位机环境都可用
-- 不绑定 frame 编码
+## Packet Header
 
-## Flags
+Packet header 采用紧凑设计，借鉴 QUIC 的 header bits 思路。
 
-`Flags` 当前使用 `u8`。
-
-原因是 SRT 面向串口和 MCU，每个 byte 都应该谨慎使用。当前阶段只有少量 packet flags，不应该提前使用 `u16` 扩大所有 packet 的 header。
-
-这也更接近 QUIC 的思路：header bits 应该紧凑，并且根据 packet/header 类型解释，而不是预先放一个很宽的通用 flags 字段。
-
-如果未来 8 bit 不够，可以通过版本化 header、扩展 header、control packet 或 packet kind 扩展，而不是在第一版协议里提前增加固定开销。
-
-## Packet 与 Frame 的边界
-
-`Packet` 属于 `srt-core`。
-
-Frame 编码属于 `srt-frame`。
-
-这个边界很重要：
+当前保留这些概念：
 
 ```text
-Packet
-  协议含义。
-  被 runtime、stream、reliability 逻辑使用。
+PacketType
+  区分 packet 形态。
 
-Frame
-  字节流边界。
-  用于在串口类链路上编码和解码 packet。
+Flags
+  紧凑 bit 字段。
+
+PacketNumber
+  用于 ack、去重、重传。
 ```
 
-`srt-core` 不应该知道字节如何转义、校验、拆分或重新同步。它只定义协议各层共同认可的数据结构。
+`stream_id` 不属于 packet header。它属于 `STREAM Frame`。
 
-## Error 依赖
+## Frame
 
-`srt-core` 可以为了使用方便 re-export `srt-error` 的类型：
+`Frame` 是 packet payload 内的语义单元。
 
-```rust
-pub use srt_error::{Error, ErrorKind, Result};
+初版 frame 类型：
+
+```text
+STREAM
+  承载一段 message fragment。
+
+ACK
+  承载确认信息。
+
+PING
+  心跳或保活。
+
+RESET_STREAM
+  重置某个 stream。
 ```
 
-规范的错误定义位于 `srt-error`，不是 `srt-core`。
+后续可以扩展：
 
-## 模块布局
+```text
+MAX_DATA
+MAX_STREAMS
+CONNECTION_CLOSE
+...
+```
 
-目录结构应该直接表达 `Packet` 是核心入口：
+## Message-Oriented Stream
+
+SRT stream 是 message-oriented，不是 TCP 式无限 byte-stream。
+
+上层应用负责：
+
+```text
+protobuf / postcard / cbor / 自定义结构
+  -> bytes
+```
+
+SRT 负责：
+
+```text
+message bytes
+  -> 分片成 STREAM Frames
+  -> 放入 Packet Payload
+  -> 接收端重组成完整 message bytes
+  -> 交付给上层
+```
+
+上层应用不需要自己处理 message length、半包、粘包或 fragment reassembly。
+
+## STREAM Frame
+
+`StreamFrame` 承载某个 stream 上的一段 message fragment。
+
+```text
+StreamFrame
+├── stream_id
+├── message_id
+├── message_len
+├── fragment_offset
+├── flags
+└── data
+```
+
+字段含义：
+
+- `stream_id`：逻辑 stream。
+- `message_id`：这个 stream 上的一条 message。
+- `message_len`：完整 message 的总长度。
+- `fragment_offset`：当前 fragment 在 message bytes 中的位置。
+- `flags`：例如 first、last 等 fragment 语义。
+- `data`：当前 fragment 的 bytes。
+
+接收端根据：
+
+```text
+stream_id + message_id + message_len + fragment_offset
+```
+
+重组完整 message。
+
+当已收到的 fragment 覆盖：
+
+```text
+[0, message_len)
+```
+
+就可以交付完整 message bytes。
+
+## StreamId
+
+协议 wire format 必须携带 `stream_id`。否则接收端无法判断 message 属于哪个逻辑通道，也无法做 QoS、可靠性、重组和 runtime 路由。
+
+用户 API 可以不直接暴露 `stream_id`。
+
+```text
+低层 API
+  send(stream_id, message_bytes)
+
+高层 API
+  send_control(message_bytes)
+  send_telemetry(message_bytes)
+  send_topic("imu", message_bytes)
+```
+
+高层 API 可以由 runtime 做映射：
+
+```text
+channel / topic / actor
+  -> stream_id
+  -> STREAM frame
+  -> Packet
+```
+
+## StreamId 分配与双向通信
+
+双向通信时，stream id 需要表达发起方和方向。可以借鉴 QUIC 的思想，在 stream id 的低 bits 中编码属性：
+
+```text
+StreamId(u16)
+
+bit 0: initiator
+  0 = endpoint A initiated
+  1 = endpoint B initiated
+
+bit 1: direction
+  0 = bidirectional
+  1 = unidirectional
+
+high bits: stream index
+```
+
+这只是方向，不是最终定稿。
+
+嵌入式场景也可以支持静态划分：
+
+```text
+0..63
+  reserved system streams
+
+64..1023
+  static application streams
+
+1024..
+  dynamic streams
+```
+
+固定 `StreamId` 适合 MCU 固定协议、控制链路、遥测链路。动态 `StreamId` 适合 actor/topic/runtime 自动分配。
+
+## 目录结构
+
+`srt-core` 目录结构：
 
 ```text
 srt-core/src/
 ├── lib.rs
 ├── packet.rs
-└── packet/
-    ├── header.rs
+├── frame.rs
+├── packet/
+│   ├── header.rs
+│   ├── number.rs
+│   ├── payload.rs
+│   └── ty.rs
+└── frame/
     ├── kind.rs
-    ├── payload.rs
-    └── header/
-        ├── flags.rs
-        ├── seq.rs
-        └── stream_id.rs
+    ├── stream.rs
+    ├── ack.rs
+    ├── ping.rs
+    └── reset_stream.rs
 ```
 
-`lib.rs` 应该保持很小：
+`lib.rs` 只做模块声明和 re-export。
 
-```rust
-pub mod flags;
-pub mod packet;
+## 核心原则
 
-pub use packet::{Flags, Packet, PacketHeader, PacketKind, Payload, Seq, StreamId};
-pub use srt_error::{Error, ErrorKind, Result};
+```text
+Packet 是传输单元。
+Frame 是 packet payload 内的语义单元。
+STREAM Frame 承载 message fragment。
+Stream 是逻辑通道。
+SRT 保留 message 边界。
+串口 envelope 是字节流边界，不是 protocol frame。
 ```
-
-`packet.rs` 是 `srt-core` 的语义入口。`PacketHeader`、`Payload`、`PacketKind` 分别放在 `packet/header.rs`、`packet/payload.rs`、`packet/kind.rs`。`StreamId`、`Seq`、`Flags` 是 header 的组成部分，所以放在 `packet/header/` 下。这样搜索和阅读代码时可以直接定位到 packet 入口，也能从目录上看到：Packet 由 header 和 payload 组成，Header 又由 stream id、seq、flags 等字段组成。
-
-## 当前阶段
-
-当前阶段，`srt-core` 只应该定义结构。
-
-未来可以添加简单 constructor 或 accessor 来维护不变量，但协议行为不应该进入这个 crate。

@@ -8,17 +8,14 @@ impl Flags {
     /// Empty flag set.
     pub const EMPTY: Self = Self(0);
 
-    /// Packet carries data that should be acknowledged.
-    pub const ACK_ELICITING: Self = Self(1 << 0);
+    /// Packet uses a long header form.
+    pub const LONG_HEADER: Self = Self(1 << 0);
 
-    /// Packet is itself an acknowledgement.
-    pub const ACK: Self = Self(1 << 1);
+    /// Packet is ack-eliciting.
+    pub const ACK_ELICITING: Self = Self(1 << 1);
 
-    /// Packet may be dropped in favor of fresher data.
-    pub const PARTIAL_RELIABLE: Self = Self(1 << 2);
-
-    /// Packet is marked as realtime-sensitive.
-    pub const REALTIME: Self = Self(1 << 3);
+    /// Packet contains realtime-sensitive frames.
+    pub const REALTIME: Self = Self(1 << 2);
 
     /// Creates flags from raw bits.
     #[must_use]
@@ -55,6 +52,6 @@ mod tests {
 
         assert!(flags.contains(Flags::ACK_ELICITING));
         assert!(flags.contains(Flags::REALTIME));
-        assert!(!flags.contains(Flags::ACK));
+        assert!(!flags.contains(Flags::LONG_HEADER));
     }
 }

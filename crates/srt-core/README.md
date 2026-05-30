@@ -2,16 +2,18 @@
 
 Core protocol primitives for SRT.
 
-This crate owns packet type markers, flags, stream identifiers, and sequence identifiers for the common SRT protocol standard. Shared errors live in `srt-error`. It is `no_std` and avoids allocation by default.
+This crate owns packet and protocol frame primitives for the common SRT protocol standard. Shared errors live in `srt-error`. It is `no_std` and avoids allocation by default.
 
-`lib.rs` is intentionally kept as a small module and re-export surface. `packet/` is the main entry point for the protocol structure:
+`lib.rs` is intentionally kept as a small module and re-export surface.
 
-- `packet`: packet entry point.
+- `packet`: packet transport unit.
 - `packet/header`: packet metadata.
-- `packet/header/stream_id`: stream identifier.
-- `packet/header/seq`: sequence number.
-- `packet/header/flags`: packet flags.
-- `packet/payload`: borrowed payload view.
-- `packet/kind`: packet categories.
+- `packet/number`: packet number.
+- `packet/payload`: borrowed payload view containing encoded protocol frames.
+- `frame`: protocol frame entry point.
+- `frame/stream`: message-oriented STREAM frame.
+- `frame/ack`: ACK frame.
+- `frame/ping`: PING frame.
+- `frame/reset_stream`: RESET_STREAM frame.
 
 Current status: boundary-only scaffold.

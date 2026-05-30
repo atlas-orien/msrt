@@ -1,20 +1,25 @@
 //! Packet-level protocol primitives.
 
 pub mod header;
-pub mod kind;
+pub mod number;
 pub mod payload;
+pub mod ty;
 
-pub use header::{Flags, PacketHeader, Seq, StreamId};
-pub use kind::PacketKind;
-pub use payload::Payload;
+pub use header::{Flags, PacketHeader};
+pub use number::PacketNumber;
+pub use payload::PacketPayload;
+pub use ty::PacketType;
 
 /// Borrowed protocol packet.
+///
+/// A packet is the protocol transport unit. Its payload contains encoded SRT
+/// protocol frames.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Packet<'a> {
     /// Packet metadata.
     pub header: PacketHeader,
-    /// Borrowed packet payload.
-    pub payload: Payload<'a>,
+    /// Borrowed packet payload containing encoded protocol frames.
+    pub payload: PacketPayload<'a>,
 }
 
 impl<'a> Packet<'a> {
@@ -23,13 +28,13 @@ impl<'a> Packet<'a> {
     pub const fn new(header: PacketHeader, payload: &'a [u8]) -> Self {
         Self {
             header,
-            payload: Payload::new(payload),
+            payload: PacketPayload::new(payload),
         }
     }
 
     /// Creates a borrowed packet from an existing payload view.
     #[must_use]
-    pub const fn from_parts(header: PacketHeader, payload: Payload<'a>) -> Self {
+    pub const fn from_parts(header: PacketHeader, payload: PacketPayload<'a>) -> Self {
         Self { header, payload }
     }
 
@@ -48,18 +53,13 @@ impl<'a> Packet<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Packet, PacketHeader, PacketKind};
-    use crate::{Flags, Seq, StreamId};
+    use super::{Flags, Packet, PacketHeader, PacketNumber, PacketType};
 
     #[test]
-    fn packet_borrows_payload_without_allocation() {
+    fn packet_payload_contains_encoded_frames() {
         let payload = [1, 2, 3];
-        let header = PacketHeader::new(
-            PacketKind::Data,
-            StreamId::new(7),
-            Seq::new(9),
-            Flags::ACK_ELICITING,
-        );
+        let header =
+            PacketHeader::new(PacketType::Data, PacketNumber::new(9), Flags::ACK_ELICITING);
         let packet = Packet::new(header, &payload);
 
         assert_eq!(packet.payload_len(), 3);

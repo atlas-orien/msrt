@@ -1,12 +1,14 @@
 //! Packet payload view.
 
 /// Borrowed packet payload bytes.
+///
+/// These bytes represent encoded SRT protocol frames.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct Payload<'a> {
+pub struct PacketPayload<'a> {
     bytes: &'a [u8],
 }
 
-impl<'a> Payload<'a> {
+impl<'a> PacketPayload<'a> {
     /// Empty payload.
     pub const EMPTY: Self = Self { bytes: &[] };
 

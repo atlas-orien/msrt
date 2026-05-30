@@ -1,8 +1,7 @@
 #![no_std]
 #![doc = "Protocol runtime boundaries for Serial Realtime Transport."]
 
-use srt_core::{Result, Seq, StreamId};
-use srt_stream::{Priority, Qos};
+use srt_core::{PacketNumber, Result, StreamId};
 
 /// A monotonic protocol time value supplied by the embedding runtime.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -17,10 +16,6 @@ pub struct Duration(pub u64);
 pub struct SendOptions {
     /// Target logical stream.
     pub stream_id: StreamId,
-    /// Requested quality-of-service behavior.
-    pub qos: Qos,
-    /// Relative scheduling priority.
-    pub priority: Priority,
 }
 
 /// Events emitted by the protocol runtime to its embedding environment.
@@ -30,15 +25,15 @@ pub enum RuntimeEvent {
     Message {
         /// Stream that owns the received message.
         stream_id: StreamId,
-        /// Sequence number associated with the received message.
-        seq: Seq,
+        /// Packet number associated with the received message.
+        packet_number: PacketNumber,
     },
     /// A protocol response should be written to the raw link.
     LinkWrite,
     /// A retransmission became due.
     Retransmit {
-        /// Sequence number selected for retransmission.
-        seq: Seq,
+        /// Packet number selected for retransmission.
+        packet_number: PacketNumber,
     },
     /// The runtime needs to be ticked again at a later instant.
     WakeAt(Instant),

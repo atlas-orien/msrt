@@ -19,12 +19,10 @@ See [SPEC.md](SPEC.md) for the current standard boundary.
 
 - `srt-core`: core protocol primitives.
 - `srt-error`: shared protocol error types.
-- `srt-frame`: frame encoding and decoding boundary.
 - `srt-reliability`: reliability traits and modules.
 - `srt-runtime`: protocol runtime boundary for send, receive, response, and progress.
-- `srt-stream`: stream routing and state boundary.
 
-No MCU HAL, async runtime, serial driver, operating-system adapter, simulator, or CLI implementation is included at this stage.
+No MCU HAL, async runtime, serial driver, operating-system adapter, simulator, CLI implementation, or separate stream/frame crate is included at this stage.
 
 ## Development
 

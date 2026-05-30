@@ -30,37 +30,33 @@ MCU 实现通常是 `no_std`、资源受限、可能没有堆分配，并且由 
 
 ## 分层
 
-当前 workspace 只定义协议标准 crate。
+当前 workspace 只保留协议标准层的核心 crate。
 
 ```text
 srt-error
   共享的 no_std 协议错误面。
 
 srt-core
-  核心协议结构：packet、标识符、序列号、flags、协议类型。
-
-srt-frame
-  原始串口字节流与协议 packet/frame 之间的转换边界。
-
-srt-stream
-  stream 标识、QoS、优先级、stream 状态语义。
+  核心协议结构：Packet、Packet Header、Packet Number、Packet Payload、Protocol Frames。
 
 srt-reliability
   ack、重传、超时、去重、滑动窗口的边界。
 
 srt-runtime
-  协议 runtime 边界：send、receive、tick、响应生成、协议推进。
+  协议 runtime 边界。
 ```
 
 ## Packet 与 Frame
 
-SRT 需要区分 packet 语义和 frame 编码。
+SRT 需要区分 packet、protocol frame 和串口 envelope。
 
-Packet 是协议层传输单元。它承载 packet kind、stream id、sequence number、flags、payload metadata 等协议含义。
+Packet 是协议层传输单元。
 
-Frame 是字节流层传输单元。它解决串口传输中的边界问题，例如粘包、半包、重新同步、校验等。
+Protocol Frame 是 packet payload 内的语义单元，例如 STREAM、ACK、PING。
 
-这种区分可以让核心协议不绑定具体 wire encoding。未来 frame codec 可以演进，而不影响核心 packet 模型。
+Serial Envelope 是串口字节流上的外层边界。它解决串口传输中的边界问题，例如粘包、半包、重新同步、校验等。
+
+这三个概念不能混在一起。Protocol Frame 属于 `srt-core`。Serial Envelope 后续如果需要独立实现，应该使用不会和 Protocol Frame 混淆的命名。
 
 ## 可靠性
 
@@ -82,3 +78,13 @@ SRT 的可靠性应该同时理解 packet 和 stream。
 - 不冻结最终 wire format。
 
 当前目标是先冻结架构和 crate 边界，再实现协议行为。
+
+## 当前推进顺序
+
+当前项目应按以下顺序推进：
+
+1. 完成 `srt-core` 的 Packet / Protocol Frame 模型。
+2. 重新审视 `srt-reliability`。
+3. 推进 `srt-runtime`。
+4. 后续再设计串口 Serial Envelope 层。
+5. 如果需要，再恢复独立 stream 状态管理 crate。
