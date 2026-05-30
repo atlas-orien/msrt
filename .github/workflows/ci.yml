@@ -21,5 +21,7 @@ jobs:
         run: cargo check --workspace
       - name: Run tests
         run: cargo test --workspace --verbose
+      - name: Smoke test
+        run: cargo run -p srt --bin srt-smoke
       - name: Clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings

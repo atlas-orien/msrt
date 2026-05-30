@@ -14,6 +14,7 @@ The same standard protocol should be usable from two future runtime families:
 Those runtimes must adapt to the protocol. The protocol must not depend on those runtimes.
 
 See [SPEC.md](SPEC.md) for the current standard boundary.
+See [ROADMAP.md](ROADMAP.md) for the current scaffold scope and next phases.
 
 ## Workspace
 
@@ -33,4 +34,5 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo check --workspace
 cargo test --workspace
+cargo run -p srt --bin srt-smoke
 ```

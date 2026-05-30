@@ -4,6 +4,8 @@ SRT, Serial Realtime Transport, is a protocol standard for message-oriented real
 
 This document is intentionally high level. The current goal is to freeze protocol ownership and crate boundaries before defining wire-level details.
 
+The current version is a protocol scaffold, not a finalized interoperable transport implementation.
+
 ## Scope
 
 The SRT standard owns:

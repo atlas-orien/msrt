@@ -10,5 +10,8 @@ cargo check --workspace
 echo "Running cargo test --workspace"
 cargo test --workspace
 
+echo "Running cargo run -p srt --bin srt-smoke"
+cargo run -p srt --bin srt-smoke
+
 echo "Running cargo clippy --workspace --all-targets --all-features -- -D warnings"
 cargo clippy --workspace --all-targets --all-features -- -D warnings
