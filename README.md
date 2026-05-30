@@ -22,7 +22,7 @@ See [ROADMAP.md](ROADMAP.md) for the current scaffold scope and next phases.
 - `srt-core`: core protocol primitives.
 - `srt-error`: shared protocol error types.
 - `srt-reliability`: reliability traits and modules.
-- `srt-runtime`: protocol runtime boundary for send, receive, response, and progress.
+- `srt-engine`: protocol engine boundary for send, receive, response, and progress.
 - `srt-wire`: wire envelope boundaries for byte stream transport.
 
 No MCU HAL, async runtime, serial driver, operating-system adapter, simulator, CLI implementation, or separate stream/frame crate is included at this stage.

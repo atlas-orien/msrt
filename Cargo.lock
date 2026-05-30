@@ -7,9 +7,9 @@ name = "srt"
 version = "0.1.0"
 dependencies = [
  "srt-core",
+ "srt-engine",
  "srt-error",
  "srt-reliability",
- "srt-runtime",
  "srt-wire",
 ]
 
@@ -21,6 +21,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "srt-engine"
+version = "0.1.0"
+dependencies = [
+ "srt-core",
+ "srt-reliability",
+]
+
+[[package]]
 name = "srt-error"
 version = "0.1.0"
 
@@ -29,14 +37,6 @@ name = "srt-reliability"
 version = "0.1.0"
 dependencies = [
  "srt-core",
-]
-
-[[package]]
-name = "srt-runtime"
-version = "0.1.0"
-dependencies = [
- "srt-core",
- "srt-reliability",
 ]
 
 [[package]]

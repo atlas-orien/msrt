@@ -23,14 +23,14 @@ srt-core
 srt-reliability
   定义可靠性策略边界。
 
-srt-runtime
+srt-engine
   根据 core 和 reliability 组织发送、接收、响应、调度。
 
 Serial Envelope / Wire Boundary
   后续负责串口字节流边界、magic、length、crc、resync。
 ```
 
-`srt-reliability` 依赖 `srt-core`，但不依赖 `srt-runtime`。
+`srt-reliability` 依赖 `srt-core`，但不依赖 `srt-engine`。
 
 这样 runtime 可以自由选择不同可靠性策略：
 
@@ -50,14 +50,14 @@ Serial Envelope / Wire Boundary
 
 ## 与 runtime 的关系
 
-`srt-runtime` 是协议如何通信的中心：什么时候发 packet，收到 packet 后如何响应，如何把完整 message 交付给上层。
+`srt-engine` 是协议如何通信的中心：什么时候发 packet，收到 packet 后如何响应，如何把完整 message 交付给上层。
 
 `srt-reliability` 不是 runtime。它是 runtime 使用的可靠性策略工具箱。
 
 可以这样理解：
 
 ```text
-srt-runtime
+srt-engine
   负责驱动协议状态机。
 
 srt-reliability
@@ -254,7 +254,7 @@ message reassembly budget
 - mailbox / scheduler / dispatcher
 - 完整 message buffer 分配策略
 
-这些内容应该分别由 `srt-core`、后续 wire 层和 `srt-runtime` 处理。
+这些内容应该分别由 `srt-core`、后续 wire 层和 `srt-engine` 处理。
 
 ## 目录结构
 

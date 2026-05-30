@@ -1,4 +1,4 @@
-//! Runtime events.
+//! Engine events.
 
 use srt_core::{PacketNumber, StreamId};
 use srt_reliability::{MessageKey, PacketReliabilityEvent};
@@ -7,7 +7,7 @@ use crate::time::Instant;
 
 /// Lightweight event kind without associated data.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RuntimeEventKind {
+pub enum EngineEventKind {
     /// A full message can be delivered to the caller.
     MessageReceived,
     /// Protocol bytes should be written to the lower link.
@@ -22,9 +22,9 @@ pub enum RuntimeEventKind {
     Reliability,
 }
 
-/// Events emitted by the protocol runtime to its embedding environment.
+/// Events emitted by the protocol engine to its embedding environment.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RuntimeEvent {
+pub enum EngineEvent {
     /// A complete message is available for a stream.
     MessageReceived {
         /// Stream that owns the message.
@@ -50,17 +50,17 @@ pub enum RuntimeEvent {
     Reliability(PacketReliabilityEvent),
 }
 
-impl RuntimeEvent {
+impl EngineEvent {
     /// Returns this event's kind.
     #[must_use]
-    pub const fn kind(self) -> RuntimeEventKind {
+    pub const fn kind(self) -> EngineEventKind {
         match self {
-            Self::MessageReceived { .. } => RuntimeEventKind::MessageReceived,
-            Self::LinkWrite => RuntimeEventKind::LinkWrite,
-            Self::AckRequired { .. } => RuntimeEventKind::AckRequired,
-            Self::Retransmit { .. } => RuntimeEventKind::Retransmit,
-            Self::WakeAt(_) => RuntimeEventKind::WakeAt,
-            Self::Reliability(_) => RuntimeEventKind::Reliability,
+            Self::MessageReceived { .. } => EngineEventKind::MessageReceived,
+            Self::LinkWrite => EngineEventKind::LinkWrite,
+            Self::AckRequired { .. } => EngineEventKind::AckRequired,
+            Self::Retransmit { .. } => EngineEventKind::Retransmit,
+            Self::WakeAt(_) => EngineEventKind::WakeAt,
+            Self::Reliability(_) => EngineEventKind::Reliability,
         }
     }
 }

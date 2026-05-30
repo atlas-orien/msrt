@@ -58,7 +58,7 @@ Serial Byte Stream
 - 串口驱动
 - DMA 驱动
 - 操作系统适配
-- runtime event loop
+- engine event loop
 - ack 算法
 - retransmit 算法
 - sliding window 算法

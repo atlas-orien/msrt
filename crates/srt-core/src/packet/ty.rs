@@ -7,6 +7,6 @@ pub enum PacketType {
     Initial,
     /// Normal packet carrying protocol frames.
     Data,
-    /// Control packet reserved for protocol runtime use.
+    /// Control packet reserved for protocol engine use.
     Control,
 }

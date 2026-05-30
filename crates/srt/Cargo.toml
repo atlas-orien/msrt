@@ -14,7 +14,7 @@ default = []
 srt-core = { workspace = true }
 srt-error = { workspace = true }
 srt-reliability = { workspace = true }
-srt-runtime = { workspace = true }
+srt-engine = { workspace = true }
 srt-wire = { workspace = true }
 
 [lints]

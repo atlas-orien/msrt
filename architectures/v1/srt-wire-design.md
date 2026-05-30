@@ -33,7 +33,7 @@ srt-core
 srt-reliability
   定义 ack、重传、超时、去重、窗口、部分可靠性策略。
 
-srt-runtime
+srt-engine
   组织发送、接收、响应、tick、事件交付。
 
 srt-wire
@@ -81,9 +81,9 @@ Serial Byte Stream
 
 `srt-core` 只定义协议对象。
 
-这些问题也不属于 `srt-runtime`。
+这些问题也不属于 `srt-engine`。
 
-`srt-runtime` 只驱动协议状态机。
+`srt-engine` 只驱动协议状态机。
 
 所以需要独立的 `srt-wire`。
 
@@ -296,7 +296,7 @@ Decoder 不负责：
 - 处理 ACK
 - 做去重
 - 做 message reassembly
-- 触发 runtime event
+- 触发 engine event
 
 这些都属于 runtime 和 reliability。
 
@@ -314,7 +314,7 @@ RawLink reads bytes
   -> runtime receives Packet
 ```
 
-这意味着 `srt-runtime` 最终可能更适合依赖抽象：
+这意味着 `srt-engine` 最终可能更适合依赖抽象：
 
 ```text
 PacketReader
@@ -376,7 +376,7 @@ Wire
 - 去重
 - 滑动窗口
 - message reassembly
-- runtime event
+- engine event
 - UART driver
 - DMA driver
 - tokio

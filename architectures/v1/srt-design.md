@@ -42,7 +42,7 @@ srt-core
 srt-reliability
   ack、重传、超时、去重、滑动窗口的边界。
 
-srt-runtime
+srt-engine
   协议 runtime 边界。
 
 srt-wire
@@ -88,6 +88,6 @@ SRT 的可靠性应该同时理解 packet 和 stream。
 
 1. 完成 `srt-core` 的 Packet / Protocol Frame 模型。
 2. 重新审视 `srt-reliability`。
-3. 推进 `srt-runtime`。
+3. 推进 `srt-engine`。
 4. 设计 `srt-wire` 串口 Serial Envelope 层。
 5. 如果需要，再恢复独立 stream 状态管理 crate。

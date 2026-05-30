@@ -14,7 +14,7 @@ Current status: traits and boundary types only. No complete reliability algorith
 - duplicate packet detection
 - send / receive sliding window
 - message fragment descriptor
-- reliability decisions for runtime implementations
+- reliability decisions for engine implementations
 
 ## Non-goals
 

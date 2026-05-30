@@ -5,8 +5,8 @@ use srt::{
         Flags, MessageId, Packet, PacketHeader, PacketNumber, PacketType, StreamFlags, StreamFrame,
         StreamId,
     },
+    engine::{SendIntent, SendOptions},
     reliability::{FragmentRange, MessageFragment, MessageKey, ReliabilityMode, StreamReliability},
-    runtime::{SendIntent, SendOptions},
     wire::{EnvelopeHeader, EnvelopeMagic, WireEnvelope, WireFlags},
 };
 
@@ -52,7 +52,7 @@ fn facade_exposes_reliability_fragment_view() {
 }
 
 #[test]
-fn facade_exposes_runtime_send_intent_with_reliability_policy() {
+fn facade_exposes_engine_send_intent_with_reliability_policy() {
     let message = [0xaa, 0xbb];
     let stream_id = StreamId::new(3);
     let policy = StreamReliability::new(stream_id, ReliabilityMode::LatestOnly, 1, Some(100));

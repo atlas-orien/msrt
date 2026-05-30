@@ -14,7 +14,7 @@ pub trait LinkWrite {
     fn write(&mut self, buf: &[u8]) -> Result<usize>;
 }
 
-/// Raw byte link used by the protocol runtime.
+/// Raw byte link used by the protocol engine.
 ///
 /// Implementations may be backed by UART, USB CDC, TCP, tests, or any other byte stream.
 pub trait RawLink: LinkRead + LinkWrite {}

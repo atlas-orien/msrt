@@ -1,8 +1,8 @@
-//! Runtime scheduling boundaries.
+//! Engine scheduling boundaries.
 
 use crate::time::Instant;
 
-/// Runtime scheduling decision.
+/// Engine scheduling decision.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Schedule {
     /// No scheduled wakeup is required.

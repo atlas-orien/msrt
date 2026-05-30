@@ -1,10 +1,10 @@
-# srt-runtime 设计
+# srt-engine 设计
 
-`srt-runtime` 是 SRT 的协议运行时边界 crate。
+`srt-engine` 是 SRT 的协议运行时边界 crate。
 
 这里的 runtime 不是操作系统 runtime，也不是 tokio runtime，更不是 MCU HAL。它是 SRT 协议本身如何被驱动的抽象层。
 
-`srt-runtime` 负责回答一个核心问题：
+`srt-engine` 负责回答一个核心问题：
 
 ```text
 当上层要发送一条 message，或者底层收到一段 bytes 时，SRT 协议应该如何推进？
@@ -23,18 +23,18 @@ srt-core
 srt-reliability
   定义 ack、重传、超时、去重、窗口、部分可靠性策略。
 
-srt-runtime
+srt-engine
   组织发送、接收、响应、tick、事件交付。
 
 Serial Envelope / Wire Boundary
   后续负责 Packet 与串口字节流之间的边界、校验和重同步。
 ```
 
-`srt-runtime` 依赖 `srt-core` 和 `srt-reliability` 的概念，但不应该依赖具体硬件、OS、async runtime 或堆分配模型。
+`srt-engine` 依赖 `srt-core` 和 `srt-reliability` 的概念，但不应该依赖具体硬件、OS、async runtime 或堆分配模型。
 
 ## Runtime 是什么
 
-`srt-runtime` 是协议状态机的边界。
+`srt-engine` 是协议状态机的边界。
 
 它应该理解：
 
@@ -72,7 +72,7 @@ srt-core
 srt-reliability
   定义可靠性判断。
 
-srt-runtime
+srt-engine
   使用协议语言和可靠性判断，驱动通信过程。
 ```
 
@@ -126,7 +126,7 @@ raw bytes
   -> complete message event
 ```
 
-当前阶段 wire 层还没有定义，所以 `srt-runtime` 只需要保留接收入口和事件出口。
+当前阶段 wire 层还没有定义，所以 `srt-engine` 只需要保留接收入口和事件出口。
 
 后续当 wire 层出现时，runtime 不应该自己处理：
 
@@ -181,7 +181,7 @@ OS 可以在线程、epoll、tokio 或其它 async runtime 里 poll。
 
 ## Time 与 Tick
 
-`srt-runtime` 不能直接依赖系统时间。
+`srt-engine` 不能直接依赖系统时间。
 
 原因是 MCU、RTOS、裸机和 OS 的时间来源完全不同。
 
@@ -322,7 +322,7 @@ PacketWriter
 
 ## 不属于本 crate 的内容
 
-`srt-runtime` 不负责：
+`srt-engine` 不负责：
 
 - Packet / Frame 数据结构定义
 - CRC
@@ -341,10 +341,10 @@ PacketWriter
 
 ## 当前目录结构
 
-当前 `srt-runtime` 已经按协议运行时边界拆分：
+当前 `srt-engine` 已经按协议运行时边界拆分：
 
 ```text
-srt-runtime/src/
+srt-engine/src/
 ├── lib.rs
 ├── event.rs
 ├── link.rs
@@ -360,7 +360,7 @@ srt-runtime/src/
 
 ## 第一阶段结论
 
-第一阶段的 `srt-runtime` 应该做到：
+第一阶段的 `srt-engine` 应该做到：
 
 1. 明确 runtime 是协议状态机边界，不是 OS runtime。
 2. 定义发送、接收、tick、poll event 的最小接口。
@@ -368,4 +368,4 @@ srt-runtime/src/
 4. 不实现 serial wire codec。
 5. 不绑定 std、tokio、embedded-hal 或具体 MCU。
 
-`srt-runtime` 是 SRT 协议真正“活起来”的地方，但当前阶段只需要把骨架立稳。
+`srt-engine` 是 SRT 协议真正“活起来”的地方，但当前阶段只需要把骨架立稳。

@@ -3,7 +3,7 @@
 use srt_core::{MessageId, PacketNumber, Result, StreamId};
 use srt_reliability::StreamReliability;
 
-/// Outbound message metadata understood by the SRT protocol runtime.
+/// Outbound message metadata understood by the SRT protocol engine.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SendOptions {
     /// Target logical stream.
@@ -43,7 +43,7 @@ impl SendOptions {
     }
 }
 
-/// A send request accepted by the runtime boundary.
+/// A send request accepted by the engine boundary.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SendIntent<'a> {
     /// Complete message bytes supplied by the caller.

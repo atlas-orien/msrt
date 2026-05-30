@@ -9,7 +9,7 @@ This crate does not implement additional protocol logic. It only re-exports the 
 - `srt::core`
 - `srt::error`
 - `srt::reliability`
-- `srt::runtime`
+- `srt::engine`
 - `srt::wire`
 
 ## Non-goals

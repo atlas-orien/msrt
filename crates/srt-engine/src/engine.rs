@@ -1,9 +1,9 @@
-//! Protocol runtime traits.
+//! Protocol engine traits.
 
 use srt_core::Result;
 
 use crate::{
-    event::RuntimeEvent,
+    event::EngineEvent,
     link::RawLink,
     receive::{PacketInput, ReceiveAction, ReceiveInput, Receiver},
     send::{SendIntent, Sender},
@@ -11,7 +11,7 @@ use crate::{
 };
 
 /// Drives SRT protocol communication.
-pub trait ProtocolRuntime: Sender + Receiver {
+pub trait ProtocolEngine: Sender + Receiver {
     /// Queues a user message for protocol transmission.
     fn send_message(&mut self, intent: SendIntent<'_>) -> Result<()> {
         self.send(intent)
@@ -31,15 +31,15 @@ pub trait ProtocolRuntime: Sender + Receiver {
     fn tick(&mut self, now: Instant) -> Result<()>;
 
     /// Attempts to produce the next protocol event.
-    fn poll_event(&mut self) -> Result<Option<RuntimeEvent>>;
+    fn poll_event(&mut self) -> Result<Option<EngineEvent>>;
 }
 
-/// Connects a protocol runtime to a raw link without defining either implementation.
-pub trait RuntimeDriver<R, L>
+/// Connects a protocol engine to a raw link without defining either implementation.
+pub trait EngineDriver<R, L>
 where
-    R: ProtocolRuntime,
+    R: ProtocolEngine,
     L: RawLink,
 {
     /// Runs one unit of protocol progress.
-    fn drive_once(&mut self, runtime: &mut R, link: &mut L, now: Instant) -> Result<()>;
+    fn drive_once(&mut self, engine: &mut R, link: &mut L, now: Instant) -> Result<()>;
 }
