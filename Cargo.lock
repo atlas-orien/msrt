@@ -3,6 +3,17 @@
 version = 4
 
 [[package]]
+name = "srt"
+version = "0.1.0"
+dependencies = [
+ "srt-core",
+ "srt-error",
+ "srt-reliability",
+ "srt-runtime",
+ "srt-wire",
+]
+
+[[package]]
 name = "srt-core"
 version = "0.1.0"
 dependencies = [

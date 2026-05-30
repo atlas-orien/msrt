@@ -10,6 +10,7 @@ The SRT standard owns:
 
 - core protocol primitive types
 - packet and protocol frame boundaries
+- wire envelope boundaries
 - stream identity and routing semantics
 - acknowledgement and partial-reliability concepts
 - ordering, deduplication, timeout, and sliding-window contracts
@@ -38,9 +39,11 @@ Both runtime families must implement the same protocol. Runtime-specific crates 
 
 ## Current Crates
 
-- `srt-core`: shared primitive types and errors.
+- `srt`: no_std facade crate for the protocol standard.
+- `srt-core`: shared primitive types and packet/frame boundaries.
 - `srt-error`: shared protocol error types and result alias.
 - `srt-reliability`: partial-reliability module boundaries.
 - `srt-runtime`: protocol runtime boundary that coordinates send, receive, response, and progress.
+- `srt-wire`: byte-stream wire envelope boundaries.
 
 All current crates are protocol-standard crates. They are kept `no_std` so the standard remains portable to MCU environments.

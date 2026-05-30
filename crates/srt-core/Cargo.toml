@@ -11,7 +11,7 @@ description = "Core protocol primitives for Serial Realtime Transport."
 default = []
 
 [dependencies]
-srt-error = { path = "../srt-error" }
+srt-error = { workspace = true }
 
 [lints]
 workspace = true

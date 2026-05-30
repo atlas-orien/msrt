@@ -17,10 +17,12 @@ See [SPEC.md](SPEC.md) for the current standard boundary.
 
 ## Workspace
 
+- `srt`: no_std facade crate for the protocol standard.
 - `srt-core`: core protocol primitives.
 - `srt-error`: shared protocol error types.
 - `srt-reliability`: reliability traits and modules.
 - `srt-runtime`: protocol runtime boundary for send, receive, response, and progress.
+- `srt-wire`: wire envelope boundaries for byte stream transport.
 
 No MCU HAL, async runtime, serial driver, operating-system adapter, simulator, CLI implementation, or separate stream/frame crate is included at this stage.
 
@@ -30,4 +32,5 @@ No MCU HAL, async runtime, serial driver, operating-system adapter, simulator, C
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo check --workspace
+cargo test --workspace
 ```

@@ -11,7 +11,7 @@ description = "Reliability boundaries for Serial Realtime Transport."
 default = []
 
 [dependencies]
-srt-core = { path = "../srt-core" }
+srt-core = { workspace = true }
 
 [lints]
 workspace = true
