@@ -25,4 +25,5 @@ name = "srt-runtime"
 version = "0.1.0"
 dependencies = [
  "srt-core",
+ "srt-reliability",
 ]

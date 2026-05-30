@@ -12,6 +12,7 @@ default = []
 
 [dependencies]
 srt-core = { path = "../srt-core" }
+srt-reliability = { path = "../srt-reliability" }
 
 [lints]
 workspace = true

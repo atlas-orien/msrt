@@ -1,0 +1,371 @@
+# srt-runtime 设计
+
+`srt-runtime` 是 SRT 的协议运行时边界 crate。
+
+这里的 runtime 不是操作系统 runtime，也不是 tokio runtime，更不是 MCU HAL。它是 SRT 协议本身如何被驱动的抽象层。
+
+`srt-runtime` 负责回答一个核心问题：
+
+```text
+当上层要发送一条 message，或者底层收到一段 bytes 时，SRT 协议应该如何推进？
+```
+
+当前阶段只冻结设计边界，不实现完整协议状态机。
+
+## 位置
+
+SRT 当前分层：
+
+```text
+srt-core
+  定义 Packet、Packet Header、Packet Number、Protocol Frames。
+
+srt-reliability
+  定义 ack、重传、超时、去重、窗口、部分可靠性策略。
+
+srt-runtime
+  组织发送、接收、响应、tick、事件交付。
+
+Serial Envelope / Wire Boundary
+  后续负责 Packet 与串口字节流之间的边界、校验和重同步。
+```
+
+`srt-runtime` 依赖 `srt-core` 和 `srt-reliability` 的概念，但不应该依赖具体硬件、OS、async runtime 或堆分配模型。
+
+## Runtime 是什么
+
+`srt-runtime` 是协议状态机的边界。
+
+它应该理解：
+
+- 上层 message
+- stream 路由
+- Packet Number 分配
+- STREAM Frame 生成
+- ACK Frame 生成
+- PING 响应
+- RESET_STREAM 处理
+- packet 去重
+- packet ack
+- retransmit tick
+- message fragment reassembly
+- message delivery event
+
+它不应该直接理解：
+
+- UART 寄存器
+- DMA descriptor
+- tokio task
+- std socket
+- GitHub CI
+- CLI
+- 具体 MCU HAL
+
+## Runtime 与其它 crate 的关系
+
+可以这样理解三个核心 crate：
+
+```text
+srt-core
+  定义协议语言。
+
+srt-reliability
+  定义可靠性判断。
+
+srt-runtime
+  使用协议语言和可靠性判断，驱动通信过程。
+```
+
+换句话说：
+
+```text
+core 告诉 runtime：协议对象长什么样。
+reliability 告诉 runtime：哪些 packet 应该 ack、重传、丢弃。
+runtime 决定：什么时候发送、什么时候响应、什么时候交付。
+```
+
+## 发送路径
+
+发送路径从一条完整上层 message 开始。
+
+上层看到的是：
+
+```text
+message bytes
+```
+
+runtime 内部需要逐步变成：
+
+```text
+message bytes
+  -> stream routing
+  -> message_id allocation
+  -> STREAM Frame fragments
+  -> Packet payload
+  -> Packet
+  -> 等待 wire 层编码成 bytes
+```
+
+注意：当前 `srt-core` 中 `PacketPayload` 暂时还是 borrowed bytes，表示 encoded protocol frames。真正的 frame 编码格式还没有冻结。
+
+因此第一阶段 runtime 只需要定义发送意图和边界，不应该提前实现最终 packet/frame 编码。
+
+## 接收路径
+
+接收路径从底层收到的数据开始。
+
+未来完整路径应该是：
+
+```text
+raw bytes
+  -> Serial Envelope decode
+  -> SRT Packet
+  -> Protocol Frames
+  -> reliability processing
+  -> message fragment reassembly
+  -> complete message event
+```
+
+当前阶段 wire 层还没有定义，所以 `srt-runtime` 只需要保留接收入口和事件出口。
+
+后续当 wire 层出现时，runtime 不应该自己处理：
+
+- magic
+- length
+- crc
+- resync
+- half packet
+- sticky packet
+
+这些属于 Serial Envelope / Wire Boundary。
+
+## Event Driven
+
+SRT 是 message-driven 和 actor/runtime friendly 的协议。
+
+runtime 不应该强制调用方使用阻塞模型，也不应该强制调用方使用 async 模型。
+
+更合适的边界是事件驱动：
+
+```text
+send(message)
+receive(bytes)
+tick(now)
+poll_event()
+```
+
+runtime 可以产生事件：
+
+```text
+MessageReceived
+  完整 message 已经可以交付给上层。
+
+LinkWrite
+  有协议数据需要写到底层链路。
+
+AckRequired
+  收到 ack-eliciting packet，需要生成 ACK。
+
+Retransmit
+  某个 packet 需要重传。
+
+WakeAt
+  runtime 需要在某个时间点再次 tick。
+```
+
+这些事件不绑定具体执行方式。
+
+MCU 可以在主循环或中断后半部里 poll。
+
+OS 可以在线程、epoll、tokio 或其它 async runtime 里 poll。
+
+## Time 与 Tick
+
+`srt-runtime` 不能直接依赖系统时间。
+
+原因是 MCU、RTOS、裸机和 OS 的时间来源完全不同。
+
+runtime 应该只接受外部传入的单调时间值：
+
+```text
+tick(now)
+```
+
+其中 `now` 的单位可以由嵌入环境定义。
+
+`srt-reliability` 中的 timeout policy 只做判断，不拥有真实 timer。
+
+## ACK 响应
+
+ACK 是 runtime 的核心职责之一。
+
+当收到一个需要确认的 packet 时：
+
+```text
+receive packet
+  -> dedup check
+  -> process frames
+  -> schedule ACK
+  -> poll_event produces LinkWrite / AckRequired
+```
+
+PING 不需要单独的 PONG Frame。
+
+PING 的响应可以是 ACK。
+
+这和 QUIC 的方向一致，也更适合保持 frame 类型精简。
+
+## 重传
+
+重传由 runtime 驱动，但由 reliability 策略判断。
+
+流程大致是：
+
+```text
+packet sent
+  -> runtime 记录 in-flight packet
+  -> tick(now)
+  -> timeout policy 判断是否超时
+  -> retransmit policy 判断是否重传
+  -> runtime 产生 Retransmit 事件
+```
+
+当前阶段不实现 in-flight buffer。
+
+因为这会牵涉：
+
+- 是否允许 heap
+- heapless 容量如何配置
+- packet bytes 是否复制
+- message fragment 是否重新编码
+- 旧 message 是否可被新 message 替换
+- deadline 过期后如何丢弃
+
+这些需要在 runtime 代码边界更清楚后再冻结。
+
+## Message Reassembly
+
+SRT 是 message-oriented，不是无限 byte-stream。
+
+runtime 最终需要负责把 STREAM Frame fragments 重组成完整 message。
+
+核心 key 是：
+
+```text
+stream_id + message_id
+```
+
+完整性判断依赖：
+
+```text
+message_len
+fragment_offset
+data.len()
+```
+
+当收到的 fragment 覆盖：
+
+```text
+[0, message_len)
+```
+
+runtime 才可以交付完整 message bytes。
+
+当前阶段不实现 reassembly buffer，只定义未来边界。
+
+## StreamId 与用户 API
+
+协议 wire format 必须携带 `stream_id`。
+
+但用户 API 不一定必须直接传 `stream_id`。
+
+runtime 可以支持两种层次：
+
+```text
+低层 API
+  send(stream_id, message)
+
+高层 API
+  send_topic("imu", message)
+  send_actor(actor_id, message)
+  send_control(message)
+```
+
+高层 API 可以由 runtime 或上层封装映射到 `StreamId`。
+
+第一阶段 crate 先保留低层 `SendOptions { stream_id }`，避免提前设计 topic/actor 系统。
+
+## RawLink 边界
+
+`RawLink` 是 runtime 与外部字节链路之间的最小抽象。
+
+它可以由很多实现承载：
+
+```text
+UART
+USB CDC
+SPI transport
+TCP mock
+test buffer
+```
+
+但 `RawLink` 本身不属于最终协议 wire format。
+
+未来如果设计独立 wire crate，runtime 可能不会直接面对 raw bytes，而是面对：
+
+```text
+PacketReader
+PacketWriter
+```
+
+因此当前 `RawLink` 只是临时且保守的边界。
+
+## 不属于本 crate 的内容
+
+`srt-runtime` 不负责：
+
+- Packet / Frame 数据结构定义
+- CRC
+- magic
+- serial resync
+- UART driver
+- DMA driver
+- embedded-hal adapter
+- tokio adapter
+- CLI
+- 完整可靠性算法
+- 完整 wire format 编解码
+- 具体 heapless buffer 容量
+
+这些内容应该由 `srt-core`、`srt-reliability`、后续 wire 层和环境适配层分别处理。
+
+## 当前目录结构
+
+当前 `srt-runtime` 已经按协议运行时边界拆分：
+
+```text
+srt-runtime/src/
+├── lib.rs
+├── event.rs
+├── link.rs
+├── message.rs
+├── receive.rs
+├── runtime.rs
+├── scheduler.rs
+├── send.rs
+└── time.rs
+```
+
+其中 `scheduler.rs` 只定义未来唤醒边界，不实现真正调度器。第一阶段不应该引入 mailbox。
+
+## 第一阶段结论
+
+第一阶段的 `srt-runtime` 应该做到：
+
+1. 明确 runtime 是协议状态机边界，不是 OS runtime。
+2. 定义发送、接收、tick、poll event 的最小接口。
+3. 明确 runtime 负责 ACK 响应、重传驱动、message reassembly 的组织。
+4. 不实现 serial wire codec。
+5. 不绑定 std、tokio、embedded-hal 或具体 MCU。
+
+`srt-runtime` 是 SRT 协议真正“活起来”的地方，但当前阶段只需要把骨架立稳。
