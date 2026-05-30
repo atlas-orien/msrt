@@ -1,12 +1,12 @@
 # srt-reliability
 
-`srt-reliability` 是 SRT 的可靠性策略边界 crate。
+Reliability policy boundaries for SRT.
 
-它负责预留 ack、重传、超时、去重和滑动窗口等协议边界。
+This crate defines packet acknowledgement, retransmission, timeout, deduplication, sliding window, and message fragment reliability boundaries.
 
-当前阶段只保留模块与 trait，不实现完整可靠性算法。
+Current status: traits and boundary types only. No complete reliability algorithm is implemented yet.
 
-## 职责
+## Responsibilities
 
 - packet ack tracking
 - packet retransmit policy
@@ -14,22 +14,22 @@
 - duplicate packet detection
 - send / receive sliding window
 - message fragment descriptor
-- 为 runtime 提供可靠性判断接口
+- reliability decisions for runtime implementations
 
-## 非职责
+## Non-goals
 
-- 不定义 Packet / Frame 数据结构
-- 不实现 Packet 编解码
-- 不处理 serial envelope
-- 不处理 magic / length / crc
-- 不绑定 tokio、std、RTOS 或 MCU timer
-- 不实现完整 message reassembly buffer
+- does not define Packet / Frame structures
+- does not encode or decode packets
+- does not handle serial envelopes
+- does not handle magic / length / crc
+- does not bind to tokio, std, RTOS, or MCU timers
+- does not implement a complete message reassembly buffer
 
-## 设计文档
+## Design
 
-见 [srt-reliability 设计](../../architectures/srt-reliability-design.md)。
+See [srt-reliability design](../../architectures/srt-reliability-design.md).
 
-## 当前结构
+## Current Structure
 
 ```text
 srt-reliability/src/

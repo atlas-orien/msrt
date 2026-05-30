@@ -1,12 +1,12 @@
 # srt-wire
 
-`srt-wire` 是 SRT 的串口字节流边界 crate。
+Wire envelope boundaries for SRT.
 
-它负责定义 `SRT Packet <-> Wire Envelope bytes` 的编码、解码、校验和重同步边界。
+This crate defines the `SRT Packet <-> Wire Envelope bytes` boundary, including encoding, decoding, checksum, and resynchronization contracts.
 
-当前阶段只保留 trait、状态和基础类型，不实现完整 wire format。
+Current status: traits, states, and basic types only. No complete wire format is implemented yet.
 
-## 职责
+## Responsibilities
 
 - wire envelope header
 - magic
@@ -17,16 +17,16 @@
 - decoder boundary
 - resync state
 
-## 非职责
+## Non-goals
 
-- 不定义 protocol frame 语义
-- 不处理 ACK
-- 不处理重传
-- 不处理去重
-- 不处理 message reassembly
-- 不绑定 UART / DMA / tokio / std
-- 不使用 `Vec`
+- does not define protocol frame semantics
+- does not handle ACK
+- does not handle retransmission
+- does not handle deduplication
+- does not handle message reassembly
+- does not bind to UART / DMA / tokio / std
+- does not use `Vec`
 
-## 设计文档
+## Design
 
-见 [srt-wire 设计](../../architectures/srt-wire-design.md)。
+See [srt-wire design](../../architectures/srt-wire-design.md).

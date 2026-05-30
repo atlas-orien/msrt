@@ -1,37 +1,37 @@
 # srt-runtime
 
-`srt-runtime` 是 SRT 的协议运行时边界 crate。
+Protocol runtime boundaries for SRT.
 
-这里的 runtime 不是操作系统 runtime，也不是 tokio runtime，更不是 MCU HAL。它表示 SRT 协议状态机如何被驱动。
+This runtime is not an operating-system runtime, not a tokio runtime, and not an MCU HAL. It describes how the SRT protocol state machine is driven.
 
-当前阶段只保留 trait 和基础类型，不实现完整协议状态机。
+Current status: traits and basic types only. No complete protocol state machine is implemented yet.
 
-## 职责
+## Responsibilities
 
-- 定义发送 message 的入口
-- 定义接收 bytes 的入口
-- 定义 runtime tick
-- 定义 runtime event
-- 组织 ACK 响应边界
-- 组织重传驱动边界
-- 组织 message reassembly 边界
-- 为 MCU 和 OS 环境提供同一套协议驱动模型
+- message send entry points
+- byte receive entry points
+- runtime tick boundary
+- runtime events
+- ACK response boundary
+- retransmission driving boundary
+- message reassembly boundary
+- one protocol driving model for MCU and OS environments
 
-## 非职责
+## Non-goals
 
-- 不定义 Packet / Frame 数据结构
-- 不实现 serial envelope
-- 不处理 magic / length / crc
-- 不实现 UART / DMA / embedded-hal
-- 不实现 tokio adapter
-- 不实现 CLI
-- 不绑定 std
+- does not define Packet / Frame structures
+- does not implement serial envelopes
+- does not handle magic / length / crc
+- does not implement UART / DMA / embedded-hal adapters
+- does not implement a tokio adapter
+- does not implement a CLI
+- does not bind to std
 
-## 设计文档
+## Design
 
-见 [srt-runtime 设计](../../architectures/srt-runtime-design.md)。
+See [srt-runtime design](../../architectures/srt-runtime-design.md).
 
-## 当前结构
+## Current Structure
 
 ```text
 srt-runtime/src/
