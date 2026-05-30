@@ -5,6 +5,7 @@ members = [
     "crates/srt-error",
     "crates/srt-reliability",
     "crates/srt-runtime",
+    "crates/srt-wire",
 ]
 
 [workspace.package]

@@ -27,3 +27,10 @@ dependencies = [
  "srt-core",
  "srt-reliability",
 ]
+
+[[package]]
+name = "srt-wire"
+version = "0.1.0"
+dependencies = [
+ "srt-core",
+]

@@ -44,6 +44,9 @@ srt-reliability
 
 srt-runtime
   协议 runtime 边界。
+
+srt-wire
+  串口字节流上的 envelope、编码、解码和重同步边界。
 ```
 
 ## Packet 与 Frame
@@ -86,5 +89,5 @@ SRT 的可靠性应该同时理解 packet 和 stream。
 1. 完成 `srt-core` 的 Packet / Protocol Frame 模型。
 2. 重新审视 `srt-reliability`。
 3. 推进 `srt-runtime`。
-4. 后续再设计串口 Serial Envelope 层。
+4. 设计 `srt-wire` 串口 Serial Envelope 层。
 5. 如果需要，再恢复独立 stream 状态管理 crate。
