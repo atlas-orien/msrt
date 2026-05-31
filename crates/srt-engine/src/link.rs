@@ -21,13 +21,13 @@ pub trait RawLink: LinkRead + LinkWrite {}
 
 impl<T> RawLink for T where T: LinkRead + LinkWrite {}
 
-/// Direction requested by the runtime when interacting with the lower link.
+/// Direction requested by the engine when interacting with the lower link.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LinkIo {
-    /// Runtime wants to read bytes from the lower link.
+    /// Engine wants to read bytes from the lower link.
     Read,
-    /// Runtime wants to write bytes to the lower link.
+    /// Engine wants to write bytes to the lower link.
     Write,
-    /// Runtime does not currently need link progress.
+    /// Engine does not currently need link progress.
     Idle,
 }

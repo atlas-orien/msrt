@@ -3,7 +3,7 @@
 use srt_core::{Result, StreamId};
 use srt_reliability::{MessageFragment, MessageKey, MessageStatus};
 
-/// Borrowed message delivered by the runtime.
+/// Borrowed message delivered by the engine.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DeliveredMessage<'a> {
     /// Stream that owns the message.

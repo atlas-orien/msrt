@@ -28,7 +28,7 @@ Decoder 如何从噪声、半包、粘包中恢复？
 
 ## v2 非目标
 
-- 不实现完整 runtime。
+- 不实现完整 engine。
 - 不实现完整可靠性算法。
 - 不实现 MCU HAL。
 - 不实现 tokio / OS adapter。

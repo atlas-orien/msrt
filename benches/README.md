@@ -2,7 +2,7 @@
 
 Benchmarks are planned but intentionally not implemented in the v0.1 scaffold.
 
-SRT is a low-level transport library, so performance testing will matter once the real wire codec, runtime state machine, reliability policies, and buffer strategies exist.
+SRT is a low-level transport library, so performance testing will matter once the real wire codec, engine state machine, reliability policies, and buffer strategies exist.
 
 ## Future Benchmark Groups
 
@@ -12,7 +12,7 @@ SRT is a low-level transport library, so performance testing will matter once th
 - `crc16`
 - `message_fragment`
 - `message_reassembly`
-- `runtime_tick`
+- `engine_tick`
 - `retransmit_scan`
 - `dedup_window`
 

@@ -58,7 +58,7 @@ Serial Byte Stream
   -> Wire Envelope Decoder
   -> SRT Packet
   -> Protocol Frames
-  -> Runtime / Reliability
+  -> Engine / Reliability
   -> Complete Message
 ```
 
@@ -234,7 +234,7 @@ read #1: envelope A + envelope B + envelope C 的一部分
 
 这两个问题是 wire 层核心职责。
 
-runtime 不应该自己处理半包和粘包。
+engine 不应该自己处理半包和粘包。
 
 ## Resync
 
@@ -298,20 +298,20 @@ Decoder 不负责：
 - 做 message reassembly
 - 触发 engine event
 
-这些都属于 runtime 和 reliability。
+这些都属于 engine 和 reliability。
 
-## 与 runtime 的连接
+## 与 engine 的连接
 
-未来 runtime 可能这样连接 wire：
+未来 engine 可能这样连接 wire：
 
 ```text
-runtime produces Packet
+engine produces Packet
   -> wire encoder writes bytes
   -> RawLink writes bytes
 
 RawLink reads bytes
   -> wire decoder produces Packet
-  -> runtime receives Packet
+  -> engine receives Packet
 ```
 
 这意味着 `srt-engine` 最终可能更适合依赖抽象：
@@ -323,7 +323,7 @@ PacketWriter
 
 而不是直接操作 raw bytes。
 
-当前阶段可以先不修改 runtime，等 wire 边界稳定后再调整。
+当前阶段可以先不修改 engine，等 wire 边界稳定后再调整。
 
 ## 错误边界
 

@@ -1,4 +1,4 @@
-//! Receive-side runtime boundaries.
+//! Receive-side engine boundaries.
 
 use srt_core::{Packet, PacketNumber, Result};
 use srt_reliability::DedupDecision;
@@ -24,7 +24,7 @@ impl<'a> ReceiveInput<'a> {
     }
 }
 
-/// Decoded packet input passed into receive-side runtime logic.
+/// Decoded packet input passed into receive-side engine logic.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PacketInput<'a> {
     /// Borrowed protocol packet.

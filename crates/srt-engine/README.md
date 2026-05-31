@@ -2,7 +2,7 @@
 
 Protocol engine boundaries for SRT.
 
-This engine is not an operating-system runtime, not a tokio runtime, and not an MCU HAL. It describes how the SRT protocol state machine is driven.
+This engine is not an operating-system executor, not a tokio executor, and not an MCU HAL. It describes how the SRT protocol state machine is driven.
 
 Current status: traits and basic types only. No complete protocol state machine is implemented yet.
 

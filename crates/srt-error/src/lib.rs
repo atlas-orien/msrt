@@ -14,8 +14,8 @@ pub enum ErrorKind {
     Reliability,
     /// A stream invariant failed.
     Stream,
-    /// A protocol runtime invariant failed.
-    Runtime,
+    /// A protocol engine invariant failed.
+    Engine,
     /// The requested operation is unsupported by this implementation.
     Unsupported,
 }

@@ -25,19 +25,19 @@ The SRT standard does not own:
 - DMA drivers
 - embedded-hal adapters
 - operating-system serial APIs
-- tokio, async-std, or any other runtime integration
+- tokio, async-std, or any other executor integration
 - CLI tools
 - simulator transport backends
 
-## Runtime Model
+## Implementation Model
 
-SRT is designed to be implemented in at least two runtime families.
+SRT is designed to be implemented in at least two implementation environments.
 
 MCU implementations are expected to use `no_std` and may avoid allocation entirely.
 
 Host implementations are expected to use normal Rust with operating-system support.
 
-Both runtime families must implement the same protocol. Runtime-specific crates may be added later, but they should depend on the standard protocol crates rather than becoming part of the standard itself.
+Both implementation environments must implement the same protocol. Environment-specific crates may be added later, but they should depend on the standard protocol crates rather than becoming part of the standard itself.
 
 ## Current Crates
 

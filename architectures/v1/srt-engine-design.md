@@ -1,8 +1,8 @@
 # srt-engine 设计
 
-`srt-engine` 是 SRT 的协议运行时边界 crate。
+`srt-engine` 是 SRT 的协议引擎边界 crate。
 
-这里的 runtime 不是操作系统 runtime，也不是 tokio runtime，更不是 MCU HAL。它是 SRT 协议本身如何被驱动的抽象层。
+这里的 engine 不是操作系统执行器，也不是 tokio executor，更不是 MCU HAL。它是 SRT 协议本身如何被驱动的抽象层。
 
 `srt-engine` 负责回答一个核心问题：
 
@@ -30,9 +30,9 @@ Serial Envelope / Wire Boundary
   后续负责 Packet 与串口字节流之间的边界、校验和重同步。
 ```
 
-`srt-engine` 依赖 `srt-core` 和 `srt-reliability` 的概念，但不应该依赖具体硬件、OS、async runtime 或堆分配模型。
+`srt-engine` 依赖 `srt-core` 和 `srt-reliability` 的概念，但不应该依赖具体硬件、OS、async executor 或堆分配模型。
 
-## Runtime 是什么
+## Engine 是什么
 
 `srt-engine` 是协议状态机的边界。
 
@@ -61,7 +61,7 @@ Serial Envelope / Wire Boundary
 - CLI
 - 具体 MCU HAL
 
-## Runtime 与其它 crate 的关系
+## Engine 与其它 crate 的关系
 
 可以这样理解三个核心 crate：
 
@@ -79,9 +79,9 @@ srt-engine
 换句话说：
 
 ```text
-core 告诉 runtime：协议对象长什么样。
-reliability 告诉 runtime：哪些 packet 应该 ack、重传、丢弃。
-runtime 决定：什么时候发送、什么时候响应、什么时候交付。
+core 告诉 engine：协议对象长什么样。
+reliability 告诉 engine：哪些 packet 应该 ack、重传、丢弃。
+engine 决定：什么时候发送、什么时候响应、什么时候交付。
 ```
 
 ## 发送路径
@@ -94,7 +94,7 @@ runtime 决定：什么时候发送、什么时候响应、什么时候交付。
 message bytes
 ```
 
-runtime 内部需要逐步变成：
+engine 内部需要逐步变成：
 
 ```text
 message bytes
@@ -108,7 +108,7 @@ message bytes
 
 注意：当前 `srt-core` 中 `PacketPayload` 暂时还是 borrowed bytes，表示 encoded protocol frames。真正的 frame 编码格式还没有冻结。
 
-因此第一阶段 runtime 只需要定义发送意图和边界，不应该提前实现最终 packet/frame 编码。
+因此第一阶段 engine 只需要定义发送意图和边界，不应该提前实现最终 packet/frame 编码。
 
 ## 接收路径
 
@@ -128,7 +128,7 @@ raw bytes
 
 当前阶段 wire 层还没有定义，所以 `srt-engine` 只需要保留接收入口和事件出口。
 
-后续当 wire 层出现时，runtime 不应该自己处理：
+后续当 wire 层出现时，engine 不应该自己处理：
 
 - magic
 - length
@@ -141,9 +141,9 @@ raw bytes
 
 ## Event Driven
 
-SRT 是 message-driven 和 actor/runtime friendly 的协议。
+SRT 是 message-driven 和 actor/engine friendly 的协议。
 
-runtime 不应该强制调用方使用阻塞模型，也不应该强制调用方使用 async 模型。
+engine 不应该强制调用方使用阻塞模型，也不应该强制调用方使用 async 模型。
 
 更合适的边界是事件驱动：
 
@@ -154,7 +154,7 @@ tick(now)
 poll_event()
 ```
 
-runtime 可以产生事件：
+engine 可以产生事件：
 
 ```text
 MessageReceived
@@ -170,14 +170,14 @@ Retransmit
   某个 packet 需要重传。
 
 WakeAt
-  runtime 需要在某个时间点再次 tick。
+  engine 需要在某个时间点再次 tick。
 ```
 
 这些事件不绑定具体执行方式。
 
 MCU 可以在主循环或中断后半部里 poll。
 
-OS 可以在线程、epoll、tokio 或其它 async runtime 里 poll。
+OS 可以在线程、epoll、tokio 或其它 async executor 里 poll。
 
 ## Time 与 Tick
 
@@ -185,7 +185,7 @@ OS 可以在线程、epoll、tokio 或其它 async runtime 里 poll。
 
 原因是 MCU、RTOS、裸机和 OS 的时间来源完全不同。
 
-runtime 应该只接受外部传入的单调时间值：
+engine 应该只接受外部传入的单调时间值：
 
 ```text
 tick(now)
@@ -197,7 +197,7 @@ tick(now)
 
 ## ACK 响应
 
-ACK 是 runtime 的核心职责之一。
+ACK 是 engine 的核心职责之一。
 
 当收到一个需要确认的 packet 时：
 
@@ -217,17 +217,17 @@ PING 的响应可以是 ACK。
 
 ## 重传
 
-重传由 runtime 驱动，但由 reliability 策略判断。
+重传由 engine 驱动，但由 reliability 策略判断。
 
 流程大致是：
 
 ```text
 packet sent
-  -> runtime 记录 in-flight packet
+  -> engine 记录 in-flight packet
   -> tick(now)
   -> timeout policy 判断是否超时
   -> retransmit policy 判断是否重传
-  -> runtime 产生 Retransmit 事件
+  -> engine 产生 Retransmit 事件
 ```
 
 当前阶段不实现 in-flight buffer。
@@ -241,13 +241,13 @@ packet sent
 - 旧 message 是否可被新 message 替换
 - deadline 过期后如何丢弃
 
-这些需要在 runtime 代码边界更清楚后再冻结。
+这些需要在 engine 代码边界更清楚后再冻结。
 
 ## Message Reassembly
 
 SRT 是 message-oriented，不是无限 byte-stream。
 
-runtime 最终需要负责把 STREAM Frame fragments 重组成完整 message。
+engine 最终需要负责把 STREAM Frame fragments 重组成完整 message。
 
 核心 key 是：
 
@@ -269,7 +269,7 @@ data.len()
 [0, message_len)
 ```
 
-runtime 才可以交付完整 message bytes。
+engine 才可以交付完整 message bytes。
 
 当前阶段不实现 reassembly buffer，只定义未来边界。
 
@@ -279,7 +279,7 @@ runtime 才可以交付完整 message bytes。
 
 但用户 API 不一定必须直接传 `stream_id`。
 
-runtime 可以支持两种层次：
+engine 可以支持两种层次：
 
 ```text
 低层 API
@@ -291,13 +291,13 @@ runtime 可以支持两种层次：
   send_control(message)
 ```
 
-高层 API 可以由 runtime 或上层封装映射到 `StreamId`。
+高层 API 可以由 engine 或上层封装映射到 `StreamId`。
 
 第一阶段 crate 先保留低层 `SendOptions { stream_id }`，避免提前设计 topic/actor 系统。
 
 ## RawLink 边界
 
-`RawLink` 是 runtime 与外部字节链路之间的最小抽象。
+`RawLink` 是 engine 与外部字节链路之间的最小抽象。
 
 它可以由很多实现承载：
 
@@ -311,7 +311,7 @@ test buffer
 
 但 `RawLink` 本身不属于最终协议 wire format。
 
-未来如果设计独立 wire crate，runtime 可能不会直接面对 raw bytes，而是面对：
+未来如果设计独立 wire crate，engine 可能不会直接面对 raw bytes，而是面对：
 
 ```text
 PacketReader
@@ -341,7 +341,7 @@ PacketWriter
 
 ## 当前目录结构
 
-当前 `srt-engine` 已经按协议运行时边界拆分：
+当前 `srt-engine` 已经按协议引擎边界拆分：
 
 ```text
 srt-engine/src/
@@ -350,7 +350,7 @@ srt-engine/src/
 ├── link.rs
 ├── message.rs
 ├── receive.rs
-├── runtime.rs
+├── engine.rs
 ├── scheduler.rs
 ├── send.rs
 └── time.rs
@@ -362,9 +362,9 @@ srt-engine/src/
 
 第一阶段的 `srt-engine` 应该做到：
 
-1. 明确 runtime 是协议状态机边界，不是 OS runtime。
+1. 明确 engine 是协议状态机边界，不是 OS executor。
 2. 定义发送、接收、tick、poll event 的最小接口。
-3. 明确 runtime 负责 ACK 响应、重传驱动、message reassembly 的组织。
+3. 明确 engine 负责 ACK 响应、重传驱动、message reassembly 的组织。
 4. 不实现 serial wire codec。
 5. 不绑定 std、tokio、embedded-hal 或具体 MCU。
 

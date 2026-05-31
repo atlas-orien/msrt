@@ -11,4 +11,4 @@
 
 当前进入 v2 设计阶段。
 
-v2 的目标不是实现完整 runtime，而是先定义第一版可讨论的 wire format、packet/frame 编码方向、错误边界和测试策略。
+v2 的目标不是实现完整 engine，而是先定义第一版可讨论的 wire format、packet/frame 编码方向、错误边界和测试策略。

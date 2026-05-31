@@ -1,4 +1,4 @@
-//! Packet reliability events emitted or consumed by runtime code.
+//! Packet reliability events emitted or consumed by engine code.
 
 use srt_core::PacketNumber;
 

@@ -189,7 +189,7 @@ stream_id + message_id + message_len + fragment_offset
 
 ## StreamId
 
-协议 wire format 必须携带 `stream_id`。否则接收端无法判断 message 属于哪个逻辑通道，也无法做 QoS、可靠性、重组和 runtime 路由。
+协议 wire format 必须携带 `stream_id`。否则接收端无法判断 message 属于哪个逻辑通道，也无法做 QoS、可靠性、重组和 engine 路由。
 
 用户 API 可以不直接暴露 `stream_id`。
 
@@ -203,7 +203,7 @@ stream_id + message_id + message_len + fragment_offset
   send_topic("imu", message_bytes)
 ```
 
-高层 API 可以由 runtime 做映射：
+高层 API 可以由 engine 做映射：
 
 ```text
 channel / topic / actor
@@ -245,7 +245,7 @@ high bits: stream index
   dynamic streams
 ```
 
-固定 `StreamId` 适合 MCU 固定协议、控制链路、遥测链路。动态 `StreamId` 适合 actor/topic/runtime 自动分配。
+固定 `StreamId` 适合 MCU 固定协议、控制链路、遥测链路。动态 `StreamId` 适合 actor/topic/engine 自动分配。
 
 ## 目录结构
 

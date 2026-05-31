@@ -1,4 +1,4 @@
-//! Runtime time primitives.
+//! Engine time primitives.
 
 /// A monotonic protocol time value supplied by the embedding environment.
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]

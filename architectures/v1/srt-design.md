@@ -2,9 +2,9 @@
 
 SRT 是 Serial Realtime Transport 的缩写。
 
-SRT 是一套面向原始串口类字节流的 `no_std` 实时消息传输协议标准。它的第一目标是 MCU、机器人、无人机以及 MCU 与上位机之间的通信，但协议本身不能依赖任何 MCU HAL、操作系统、异步运行时或驱动框架。
+SRT 是一套面向原始串口类字节流的 `no_std` 实时消息传输协议标准。它的第一目标是 MCU、机器人、无人机以及 MCU 与上位机之间的通信，但协议本身不能依赖任何 MCU HAL、操作系统、异步执行器或驱动框架。
 
-SRT 会借鉴 QUIC 中适合嵌入式消息系统的思想，例如 stream、packet 级传输语义、ack、重传、部分可靠性等。但 SRT 不是 HTTP/3，不是 TCP clone，也不是通用互联网传输协议。它是一套面向 message-driven embedded systems 的串口消息运行时传输协议。
+SRT 会借鉴 QUIC 中适合嵌入式消息系统的思想，例如 stream、packet 级传输语义、ack、重传、部分可靠性等。但 SRT 不是 HTTP/3，不是 TCP clone，也不是通用互联网传输协议。它是一套面向 message-driven embedded systems 的串口消息传输协议。
 
 ## 设计原则
 
@@ -15,7 +15,7 @@ SRT 会借鉴 QUIC 中适合嵌入式消息系统的思想，例如 stream、pac
 - 使用 stream 做路由和调度。
 - 支持部分可靠性，而不是假设所有消息都需要同一种交付语义。
 - 实时性优先于传统字节流兼容性。
-- 对 runtime 友好，但不绑定任何 runtime。
+- 对 engine 友好，但不绑定任何 engine。
 - 对 MCU 友好，但不绑定任何 MCU HAL。
 
 ## 运行环境家族
@@ -24,7 +24,7 @@ SRT 未来应该可以服务两类实现环境。
 
 MCU 实现通常是 `no_std`、资源受限、可能没有堆分配，并且由 UART、DMA、USB CDC 或类似字节链路驱动。
 
-上位机实现通常使用 `std`、操作系统，并且可能接入 tokio 等异步运行时。
+上位机实现通常使用 `std`、操作系统，并且可能接入 tokio 等异步执行器。
 
 这两类实现必须使用同一套协议标准。运行环境适配层应该依赖协议 crate，协议 crate 不应该依赖运行环境适配层。
 
@@ -43,7 +43,7 @@ srt-reliability
   ack、重传、超时、去重、滑动窗口的边界。
 
 srt-engine
-  协议 runtime 边界。
+  协议 engine 边界。
 
 srt-wire
   串口字节流上的 envelope、编码、解码和重同步边界。
@@ -74,7 +74,7 @@ SRT 的可靠性应该同时理解 packet 和 stream。
 - 不实现 UART driver。
 - 不实现 DMA driver。
 - 不实现 embedded-hal adapter。
-- 不实现 tokio runtime。
+- 不实现 tokio executor。
 - 不实现 CLI。
 - 不实现 simulator。
 - 不实现完整重传算法。

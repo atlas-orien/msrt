@@ -16,7 +16,7 @@ pub enum EngineEventKind {
     AckRequired,
     /// A packet should be retransmitted.
     Retransmit,
-    /// The runtime wants to be ticked later.
+    /// The engine wants to be ticked later.
     WakeAt,
     /// A reliability event occurred.
     Reliability,
@@ -44,7 +44,7 @@ pub enum EngineEvent {
         /// Packet number selected for retransmission.
         packet_number: PacketNumber,
     },
-    /// The runtime needs to be ticked again at a later instant.
+    /// The engine needs to be ticked again at a later instant.
     WakeAt(Instant),
     /// A packet-level reliability event occurred.
     Reliability(PacketReliabilityEvent),

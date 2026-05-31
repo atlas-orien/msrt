@@ -1,4 +1,4 @@
-//! Send-side runtime boundaries.
+//! Send-side engine boundaries.
 
 use srt_core::{MessageId, PacketNumber, Result, StreamId};
 use srt_reliability::StreamReliability;

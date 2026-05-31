@@ -32,7 +32,7 @@ Serial Envelope / Wire Boundary
 
 `srt-reliability` 依赖 `srt-core`，但不依赖 `srt-engine`。
 
-这样 runtime 可以自由选择不同可靠性策略：
+这样 engine 可以自由选择不同可靠性策略：
 
 ```text
 控制消息
@@ -48,11 +48,11 @@ Serial Envelope / Wire Boundary
   可以使用低优先级窗口。
 ```
 
-## 与 runtime 的关系
+## 与 engine 的关系
 
 `srt-engine` 是协议如何通信的中心：什么时候发 packet，收到 packet 后如何响应，如何把完整 message 交付给上层。
 
-`srt-reliability` 不是 runtime。它是 runtime 使用的可靠性策略工具箱。
+`srt-reliability` 不是 engine。它是 engine 使用的可靠性策略工具箱。
 
 可以这样理解：
 
@@ -67,7 +67,7 @@ srt-reliability
 也就是说：
 
 ```text
-runtime 决定做什么。
+engine 决定做什么。
 reliability 判断是否应该做。
 ```
 
@@ -144,9 +144,9 @@ fragment_offset + data.len()
 [0, message_len)
 ```
 
-runtime 才能把完整 message bytes 交付给上层。
+engine 才能把完整 message bytes 交付给上层。
 
-当前阶段不实现 reassembly buffer，因为这会牵涉内存模型、heapless 容量、丢弃策略和 runtime 调度。
+当前阶段不实现 reassembly buffer，因为这会牵涉内存模型、heapless 容量、丢弃策略和 engine 调度。
 
 ## ACK
 
@@ -204,9 +204,9 @@ Deadline
 - tokio timer
 - MCU timer
 - RTOS tick
-- async runtime
+- async executor
 
-时间来源应该由 runtime 或运行环境适配层提供。
+时间来源应该由 engine 或运行环境适配层提供。
 
 ## 去重
 
@@ -250,7 +250,7 @@ message reassembly budget
 - magic / length / crc
 - 串口 resync
 - UART / DMA / embedded-hal
-- tokio / std runtime
+- tokio / std executor
 - mailbox / scheduler / dispatcher
 - 完整 message buffer 分配策略
 
@@ -287,8 +287,8 @@ srt-reliability/src/
 
 1. 明确 packet 级可靠性边界。
 2. 明确 message fragment 重组会依赖可靠性策略，但暂不实现。
-3. 为 runtime 留出可插拔策略接口。
+3. 为 engine 留出可插拔策略接口。
 
-它不是 runtime，也不是 serial wire codec。
+它不是 engine，也不是 serial wire codec。
 
 它是 SRT 在 `no_std` 环境下实现可靠通信的策略层。

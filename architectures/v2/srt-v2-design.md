@@ -14,7 +14,7 @@ wire
 reliability
   定义 ACK / 重传 / 去重 / 窗口策略。
 
-runtime
+engine
   驱动发送、接收、tick、event。
 ```
 
@@ -46,7 +46,7 @@ Serial Byte Stream
   -> Wire Envelope Decoder
   -> Packet
   -> Protocol Frames
-  -> Runtime / Reliability
+  -> Engine / Reliability
   -> Application Message
 ```
 
@@ -83,7 +83,7 @@ v2 应该覆盖：
 
 v2 不应该直接实现：
 
-- runtime 完整状态机
+- engine 完整状态机
 - retransmit 完整算法
 - heapless reassembly buffer
 - MCU UART driver
@@ -111,4 +111,4 @@ v2 结束时应该有：
 6. 再实现 decoder。
 7. 最后升级 smoke simulation。
 
-这个顺序可以避免 runtime 提前牵引底层格式。
+这个顺序可以避免 engine 提前牵引底层格式。

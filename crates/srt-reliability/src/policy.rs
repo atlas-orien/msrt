@@ -11,7 +11,7 @@ pub enum ReliabilityMode {
     BestEffort,
     /// Prefer the newest message and allow older messages to be dropped.
     LatestOnly,
-    /// Retransmit only while the runtime-defined deadline remains valid.
+    /// Retransmit only while the engine-defined deadline remains valid.
     Deadline,
 }
 
@@ -24,7 +24,7 @@ pub struct StreamReliability {
     pub mode: ReliabilityMode,
     /// Maximum retransmission attempts allowed by this policy.
     pub max_retransmits: u8,
-    /// Runtime-defined deadline in ticks.
+    /// Engine-defined deadline in ticks.
     pub deadline_ticks: Option<u64>,
 }
 

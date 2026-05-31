@@ -7,7 +7,7 @@ use crate::time::Instant;
 pub enum Schedule {
     /// No scheduled wakeup is required.
     Idle,
-    /// Runtime should be ticked again at the given instant.
+    /// Engine should be ticked again at the given instant.
     WakeAt(Instant),
 }
 
@@ -19,11 +19,11 @@ impl Schedule {
     }
 }
 
-/// Schedules future runtime progress.
+/// Schedules future engine progress.
 pub trait Scheduler {
-    /// Requests a future runtime wakeup.
+    /// Requests a future engine wakeup.
     fn schedule(&mut self, schedule: Schedule);
 
-    /// Returns the next scheduled runtime wakeup.
+    /// Returns the next scheduled engine wakeup.
     fn next_wake(&self) -> Schedule;
 }

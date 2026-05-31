@@ -2,12 +2,12 @@
 
 use srt_core::PacketNumber;
 
-/// Timeout event produced by a runtime-provided clock.
+/// Timeout event produced by a engine-provided clock.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TimeoutEvent {
     /// Packet that timed out.
     pub packet_number: PacketNumber,
-    /// Runtime-defined elapsed ticks since the packet was sent.
+    /// Engine-defined elapsed ticks since the packet was sent.
     pub elapsed_ticks: u64,
     /// Number of previous retransmission attempts.
     pub attempts: u8,
