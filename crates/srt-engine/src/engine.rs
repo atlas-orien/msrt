@@ -335,6 +335,44 @@ mod tests {
     }
 
     #[test]
+    fn engine_ack_range_gap_retransmits_only_missing_packet() {
+        let mut engine = Engine::new(EngineConfig {
+            fragment_bytes: 2,
+            ..EngineConfig::default()
+        });
+
+        engine.send(b"abcdefgh").unwrap();
+
+        for expected in 0..4 {
+            assert_eq!(next_write(&mut engine).packet_number.get(), expected);
+        }
+
+        let ack = ack_packet_for_ranges(
+            &[
+                (
+                    srt_core::PacketNumber::new(0),
+                    srt_core::PacketNumber::new(0),
+                ),
+                (
+                    srt_core::PacketNumber::new(2),
+                    srt_core::PacketNumber::new(3),
+                ),
+            ],
+            srt_core::PacketNumber::new(100),
+        );
+
+        assert!(matches!(
+            engine.receive(ack.as_bytes()),
+            ReceiveReport::Ack { .. }
+        ));
+
+        engine.tick(1);
+
+        assert_eq!(next_write(&mut engine).packet_number.get(), 1);
+        assert!(engine.poll_event().is_none());
+    }
+
+    #[test]
     fn engine_receives_half_packet() {
         let mut a = Engine::new(EngineConfig::default());
         let mut b = Engine::new(EngineConfig::default());
@@ -536,6 +574,44 @@ mod tests {
         };
 
         write
+    }
+
+    fn ack_packet_for_ranges(
+        ranges: &[(srt_core::PacketNumber, srt_core::PacketNumber)],
+        packet_number: srt_core::PacketNumber,
+    ) -> super::WriteEvent {
+        let mut bytes = [0; crate::MAX_WIRE_BYTES];
+        let packet_len = crate::layout::ACK_PACKET_LEN as u16;
+        let total_len = srt_wire::WIRE_HEADER_LEN + usize::from(packet_len) + 2;
+
+        bytes[..2].copy_from_slice(&srt_wire::EnvelopeMagic::SRT.bytes());
+        bytes[2] = 1;
+        bytes[3] = srt_wire::WIRE_HEADER_LEN as u8;
+        bytes[4..6].copy_from_slice(&packet_len.to_le_bytes());
+        bytes[6] = srt_wire::WireFlags::CHECKSUM_PRESENT.bits();
+        bytes[7] = 0;
+        bytes[8] = srt_core::PacketType::Ack.code();
+        bytes[9] = 0;
+        bytes[10..14].copy_from_slice(&packet_number.get().to_le_bytes());
+        bytes[14] = srt_core::FrameKind::Ack.code();
+        bytes[15..19].copy_from_slice(&ranges[ranges.len() - 1].1.get().to_le_bytes());
+        bytes[19] = ranges.len() as u8;
+
+        let mut offset = 20;
+        for (start, end) in ranges {
+            bytes[offset..offset + 4].copy_from_slice(&start.get().to_le_bytes());
+            bytes[offset + 4..offset + 8].copy_from_slice(&end.get().to_le_bytes());
+            offset += 8;
+        }
+
+        let checksum = srt_wire::Checksum::calculate(&srt_wire::Crc16, &bytes[..total_len - 2]);
+        bytes[total_len - 2..total_len].copy_from_slice(&checksum.to_le_bytes());
+
+        super::WriteEvent {
+            packet_number,
+            bytes,
+            len: total_len,
+        }
     }
 
     fn assert_message(engine: &mut Engine, expected: &[u8]) {

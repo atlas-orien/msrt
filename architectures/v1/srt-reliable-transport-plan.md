@@ -121,11 +121,11 @@ v1 可以先限制 ACK range 数量，保持 no_std 固定容量。
 - ACK frame 编码 / 解码。
 - 接收端累计 observed packet numbers 并生成 ACK range。
 - 发送端收到 ACK range 后清理多个 in-flight packet。
+- gap ACK range 测试：ACK `0` 和 `2..3` 后只重发缺失的 packet `1`。
 
 后续仍需要补齐：
 
 - ACK range 的正式 wire draft 文档更新。
-- gap 场景下只重发缺失 packet 的验收测试。
 - ACK range 压缩和过期策略。
 
 ## 下一步二：重试失败事件
