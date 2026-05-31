@@ -1,8 +1,8 @@
-# SRT v1 Stable Protocol Draft
+# SRT v1 Protocol Spec
 
 ## 状态
 
-本文档是 SRT v1 stable protocol 的第一版草案。
+本文档是 SRT v1 protocol spec。
 
 它的目的不是继续探索方向，而是把当前已经验证过的 foundation / hardening / reliable transport 行为整理成可以审核的协议标准边界。
 
@@ -15,11 +15,11 @@ v1 MVP
 v1 hardening
   当前范围已完成。
 
-v1 stable protocol
+v1 protocol spec
   wire / packet / frame layout 已对齐。
   reliable message transport 当前范围已完成。
   freeze 审核已完成。
-  当前是 v1 freeze candidate。
+  当前是 v1 frozen baseline。
 ```
 
 本文档中的字段和行为是 v1 可靠传输继续推进的基础。代码如果和本文档不一致，应该优先判断是文档需要修正，还是代码出现了协议漂移。
@@ -115,7 +115,7 @@ Packet
 
 Protocol Frame
   Packet payload 内的语义单元。
-  v1 stable draft 只定义 MESSAGE 和 ACK。
+  v1 spec 只定义 MESSAGE 和 ACK。
 ```
 
 结构关系：
@@ -131,7 +131,7 @@ Wire Envelope
 
 ## 字节序
 
-SRT v1 draft 统一使用 little-endian。
+SRT v1 spec 统一使用 little-endian。
 
 原因：
 
@@ -143,7 +143,7 @@ SRT v1 draft 统一使用 little-endian。
 
 ## 基础整数宽度
 
-v1 draft 暂定：
+SRT v1 spec 定义：
 
 ```text
 PacketNumber  u32
@@ -204,7 +204,7 @@ Wire Envelope 是 SRT 在串口 byte stream 上的外层边界。
 
 ### Wire Envelope Header
 
-v1 draft header：
+SRT v1 spec header：
 
 ```text
 offset  size  field
@@ -224,7 +224,7 @@ WIRE_HEADER_LEN = 8
 
 ### Magic
 
-v1 draft magic：
+SRT v1 spec magic：
 
 ```text
 "SR"
@@ -242,7 +242,7 @@ v1 draft magic：
 
 ### Version
 
-v1 draft：
+SRT v1 spec：
 
 ```text
 version = 1
@@ -252,7 +252,7 @@ version = 1
 
 ### Header Length
 
-v1 draft：
+SRT v1 spec：
 
 ```text
 header_len = 8
@@ -275,7 +275,7 @@ v1 实现可以只接受 `header_len == 8`。
 total_len = header_len + packet_len + checksum_len
 ```
 
-v1 draft：
+SRT v1 spec：
 
 ```text
 checksum_len = 2
@@ -283,7 +283,7 @@ checksum_len = 2
 
 ### Wire Flags
 
-v1 draft：
+SRT v1 spec：
 
 ```text
 bit 0: checksum_present
@@ -300,9 +300,9 @@ checksum_present = 1
 
 ### Checksum
 
-v1 draft 使用 `u16 checksum` 字段。
+SRT v1 spec 使用 `u16 checksum` 字段。
 
-v1 draft 冻结为：
+SRT v1 spec 冻结为：
 
 ```text
 CRC-16/XMODEM
@@ -340,7 +340,7 @@ Packet
 
 ### Packet Header
 
-v1 draft packet header：
+SRT v1 spec packet header：
 
 ```text
 offset  size  field
@@ -356,7 +356,7 @@ offset  size  field
 
 ### Packet Type
 
-v1 draft：
+SRT v1 spec：
 
 ```text
 0x00 DATA
@@ -371,7 +371,7 @@ v1 draft：
 
 ### Packet Flags
 
-v1 draft：
+SRT v1 spec：
 
 ```text
 bit 0: ack_eliciting
@@ -399,7 +399,7 @@ v1 当前不冻结复杂 wrap window 语义。实现必须使用 `PacketNumber(u
 
 ## Protocol Frames
 
-v1 stable draft 只定义两个 frame：
+v1 spec 只定义两个 frame：
 
 ```text
 MESSAGE
@@ -428,7 +428,7 @@ CLOSE_CHANNEL
 
 MESSAGE Frame 承载一条 application message 的一个 fragment。
 
-v1 draft MESSAGE frame：
+SRT v1 spec MESSAGE frame：
 
 ```text
 offset  size  field
@@ -443,7 +443,7 @@ offset  size  field
 
 ### Frame Type
 
-v1 draft：
+SRT v1 spec：
 
 ```text
 0x00 MESSAGE
@@ -473,7 +473,7 @@ mailbox route
 message class
 ```
 
-v1 draft 保留：
+SRT v1 spec 保留：
 
 ```text
 channel_id = 0
@@ -494,7 +494,7 @@ ChannelId::CONTROL = 0
 
 `MessageId(u32)` 在 channel 内标识一条 message。
 
-v1 draft：
+SRT v1 spec：
 
 ```text
 message key = channel_id + message_id
@@ -529,7 +529,7 @@ fragment_offset + fragment_len <= message_len
 
 ### Message Flags
 
-v1 draft：
+SRT v1 spec：
 
 ```text
 bit 0: first
@@ -549,7 +549,7 @@ bit 2..7: reserved
 
 ## ACK Frame
 
-v1 draft 当前定义 fixed-capacity ACK range。
+SRT v1 spec 定义 fixed-capacity ACK range。
 
 ```text
 offset  size  field
@@ -687,7 +687,7 @@ duplicate packet
 
 ## Retransmit
 
-v1 draft 保留 tick-driven retransmit：
+SRT v1 spec 定义 tick-driven retransmit：
 
 ```text
 engine.tick(now)
@@ -733,7 +733,7 @@ RetryLimitReached
 
 SRT 的长期目标不是所有 channel 都强可靠。
 
-v1 draft 保留这些 reliability mode：
+SRT v1 spec 保留这些 reliability mode：
 
 ```text
 Reliable
@@ -742,12 +742,12 @@ LatestOnly
 Deadline
 ```
 
-当前 stable draft 冻结的最小行为：
+当前 spec 冻结的最小行为：
 
 - Reliable：设置 `ACK_ELICITING`，进入 in-flight，需要 ACK，允许超时重传。
 - BestEffort：不设置 `ACK_ELICITING`，不进入 in-flight，不重传，不等待 ACK；如果接收端收到完整 message，仍然正常交付。
 
-当前 stable draft 只保留概念边界，尚未冻结完整算法：
+当前 spec 只保留概念边界，尚未冻结完整算法：
 
 - LatestOnly：旧 message 可以被新 message 替代。
 - Deadline：超过时间窗口后停止重传。
@@ -791,7 +791,7 @@ MAX_CHANNEL_POLICIES
 
 ## Error / Reject 行为
 
-v1 draft 暂定：
+SRT v1 spec 定义：
 
 ```text
 bad magic
@@ -823,7 +823,7 @@ duplicate DATA packet
 
 ## v1 不支持
 
-v1 stable draft 不支持：
+v1 spec 不支持：
 
 - QUIC stream。
 - HTTP/3。
@@ -888,9 +888,9 @@ v1 freeze 审核结论：
 
 ## 结论
 
-SRT v1 stable protocol 的核心不是“把 QUIC 搬到串口上”。
+SRT v1 protocol spec 的核心不是“把 QUIC 搬到串口上”。
 
-SRT v1 stable protocol 的核心目标是：
+SRT v1 protocol spec 的核心目标是：
 
 ```text
 Message-Oriented Transport over serial byte streams

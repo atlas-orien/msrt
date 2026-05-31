@@ -2,7 +2,7 @@
 
 ## 状态定义
 
-本文档记录的是 v1 hardening 阶段的设计和验收。当前项目状态已经越过 hardening，形成 v1 freeze candidate。
+本文档记录的是 v1 hardening 阶段的设计和验收。当前项目状态已经越过 hardening，形成 v1 frozen baseline。
 
 当前状态应该分成四层理解：
 
@@ -16,11 +16,11 @@ v1 hardening
 v1 reliable transport
   当前范围已完成。
 
-v1 stable protocol
-  freeze candidate。
+v1 protocol spec
+  frozen baseline。
 ```
 
-因此，本文档不再代表最新收关状态；最新结论以 [v1 stable protocol draft](srt-stable-protocol-draft.md) 和 [v1 reliable transport plan](srt-reliable-transport-plan.md) 为准。
+因此，本文档不再代表最新收关状态；最新结论以 [v1 protocol spec](srt-v1-spec.md) 和 [v1 reliable transport plan](srt-reliable-transport-plan.md) 为准。
 
 `hardening` 的意思是加固。它不是重新设计方向，也不是引入新的运行环境适配层，而是在 v1 MVP 已经跑通的基础上，把协议推进到更接近真实串口使用的状态。
 
@@ -290,7 +290,7 @@ v1 hardening 先完成最小可靠性工具，而不是完整可靠性算法。
 
 ### 第四批：协议冻结
 
-1. 冻结第一版 wire format draft。
+1. 冻结第一版 wire format spec。
 2. 清理 MVP 早期 packet layout。
 3. 把 Packet / Frame serialization 边界写清楚。
 4. 更新架构文档和 README。
@@ -316,7 +316,7 @@ v1 hardening 至少应该满足：
   - 丢包。
   - ACK。
   - tick-driven retransmit。
-- 文档明确 wire format draft。
+- 文档明确 wire format spec。
 - 用户 API 仍然保持 no_std 状态机模型。
 
 ## 结论

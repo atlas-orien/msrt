@@ -2,7 +2,7 @@
 
 ## 状态
 
-当前 v1 reliable transport 的代码和测试当前范围已经完成，stable protocol freeze 审核已完成。
+当前 v1 reliable transport 的代码和测试当前范围已经完成，v1 protocol spec 审核已完成。
 
 已经完成的是：
 
@@ -357,11 +357,11 @@ failed messages produce explicit failed events
 8. 让 retransmit 只重发缺失 packet。已落地。
 9. 实现 BestEffort 最小 channel policy。已落地。
 10. 补 smoke 和单元测试。持续推进。
-11. 最后再更新 stable protocol draft。
+11. 最后再更新 v1 protocol spec。
 
 ## 结论
 
-v1 reliable transport 当前范围已经完成，stable protocol 已形成 freeze candidate。
+v1 reliable transport 当前范围已经完成，v1 protocol spec 已形成 frozen baseline。
 
 当前应该说：
 
@@ -369,7 +369,7 @@ v1 reliable transport 当前范围已经完成，stable protocol 已形成 freez
 v1 foundation: 已完成
 v1 hardening: 当前范围已完成
 v1 reliable transport: 当前范围已完成
-v1 stable: freeze candidate
+v1 spec: frozen baseline
 ```
 
 v1 不追求更多运行环境功能，也不追求复杂生态包装。

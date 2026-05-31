@@ -118,7 +118,7 @@ Wire Envelope
 
 ## Wire Envelope v1 形态
 
-v1 当前草案的 wire envelope 使用这些字段：
+SRT v1 spec 的 wire envelope 使用这些字段：
 
 ```text
 magic
@@ -202,7 +202,7 @@ payload length
 
 wire 层需要 checksum。
 
-v1 当前草案使用 CRC-16/XMODEM。
+SRT v1 spec 使用 CRC-16/XMODEM。
 
 参数：
 

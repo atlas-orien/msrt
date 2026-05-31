@@ -67,7 +67,7 @@ SRT 的可靠性应该同时理解 packet 和 channel。
 
 协议未来应该支持 ack、重传、超时处理、重复包检测、滑动窗口。不是所有消息都需要同一种可靠性。某些实时 channel 可能更关心新鲜度，而不是保证每一个旧消息都送达。
 
-当前 v1 已经实现 ACK range、in-flight packet tracking、tick-driven retransmit、retry failure、多 message / 多 channel reassembly 和 BestEffort 最小策略。reliable transport 当前范围已经通过 smoke 和 deterministic long-run integration simulation，当前状态是 v1 freeze candidate。
+当前 v1 已经实现 ACK range、in-flight packet tracking、tick-driven retransmit、retry failure、多 message / 多 channel reassembly 和 BestEffort 最小策略。reliable transport 当前范围已经通过 smoke 和 deterministic long-run integration simulation，当前状态是 v1 frozen baseline。
 
 ## v1 用户 API
 
@@ -187,14 +187,14 @@ send(message)
 - 不实现完整重传算法。
 - 不实现 UART / OS runtime adapter。
 
-当前 v1 foundation 目标已经完成：冻结架构、crate 边界、第一版 wire format draft，并验证最小协议行为。
+当前 v1 foundation 目标已经完成：冻结架构、crate 边界、第一版 wire format spec，并验证最小协议行为。
 
 ## 后续推进顺序
 
 当前 v1 foundation 已经完成：
 
 1. streaming wire decode，支持半包、粘包、一次 receive 多包。
-2. 第一版 wire format draft。
+2. 第一版 wire format spec。
 3. Packet / Frame serialization 对齐。
 4. duplicate packet detection、ACK 和 tick retransmit 的最小闭环。
 5. smoke 覆盖噪声、CRC 错误、丢包、重发、ACK 和双向 message。

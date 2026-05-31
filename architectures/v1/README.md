@@ -8,7 +8,7 @@ v1 是 SRT 的 no_std protocol 阶段。
 v1 MVP: 已完成
 v1 hardening: 当前范围已完成
 v1 reliable transport: 当前范围已完成
-v1 stable protocol: freeze candidate
+v1 protocol spec: frozen baseline
 ```
 
 v1 MVP 已经完成：
@@ -27,7 +27,7 @@ v1 MVP 已经完成：
 - 架构文档
 - CI / git hook
 
-v1 MVP 证明了 no_std engine 模型可行。当前 v1 已经补齐 reliable transport 的当前范围，并形成 v1 freeze candidate。
+v1 MVP 证明了 no_std engine 模型可行。当前 v1 已经补齐 reliable transport 的当前范围，并形成 v1 frozen baseline。
 
 v1 hardening 仍然属于 v1 工作。当前范围已经把 MVP 从 demo 级别推进到更接近真实串口可用的状态。
 
@@ -41,6 +41,6 @@ v1 的完成标准不是“能跑通 demo”，而是“可靠传输语义明确
 - [srt-engine 设计](srt-engine-design.md)：`srt-engine` crate 的协议引擎边界。
 - [srt-wire 设计](srt-wire-design.md)：`srt-wire` crate 的串口字节流边界。
 - [v1 hardening](srt-hardening.md)：v1 加固阶段的目标、工作项和验收标准。
-- [v1 stable protocol draft](srt-stable-protocol-draft.md)：v1 稳定协议草案。
+- [v1 protocol spec](srt-v1-spec.md)：v1 稳定协议规范。
 - [v1 reliable transport plan](srt-reliable-transport-plan.md)：v1 可靠传输补齐计划。
 - [参考图](image.png)：用于理解 Packet / Frame 分层的参考图。
