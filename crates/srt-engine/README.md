@@ -4,7 +4,7 @@ Protocol engine boundaries for SRT.
 
 This engine is not an operating-system executor, not a tokio executor, and not an MCU HAL. It describes how the SRT protocol state machine is driven.
 
-Current status: basic types and a minimal MVP `Engine` implementation. The MVP engine validates the non-blocking user-facing boundary, but it is not a complete reliability implementation yet.
+Current status: basic types and a minimal MVP `Engine` implementation. The MVP engine validates the non-blocking user-facing boundary and includes minimal ACK, in-flight tracking, retransmission, and message reassembly. It is not the final reliability implementation yet.
 
 ## Responsibilities
 
@@ -17,6 +17,7 @@ Current status: basic types and a minimal MVP `Engine` implementation. The MVP e
 - retransmission driving boundary
 - message reassembly boundary
 - minimal message fragmentation and reassembly prototype
+- minimal ACK and in-flight retransmission prototype
 - one protocol driving model for MCU and OS environments
 
 ## Non-goals

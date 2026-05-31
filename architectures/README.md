@@ -8,6 +8,8 @@
 
 ## 当前阶段
 
-当前仍在 v1 整理阶段。
+当前 v1 MVP 已经收口。
 
-v1 需要先把 `srt-engine`、`srt-wire`、`srt-reliability`、`srt-core` 和 `srt` facade 的边界整理清楚，再进入 wire format draft。
+v1 MVP 已经验证 `srt-engine` 的 no_std 状态机模型：`send(message)`、`receive(bytes)`、`tick(now)`、`poll_event()`，并通过 smoke simulation 跑通噪声、CRC 错误、丢包、ACK、重发和双向 message 交付。
+
+下一阶段应该进入 v1 hardening：优先完善 streaming wire decode，处理半包、粘包和一次 receive 多包，再冻结正式 wire format draft。

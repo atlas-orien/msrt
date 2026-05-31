@@ -10,7 +10,7 @@
 当上层要发送一条 message，或者底层收到一段 bytes 时，SRT 协议应该如何推进？
 ```
 
-当前阶段只冻结设计边界，不实现完整协议状态机。
+当前 v1 MVP 已经实现一个最小 concrete `Engine` 状态机，用于验证 no_std 通信闭环。它不是最终完整协议状态机。
 
 ## 位置
 
@@ -145,7 +145,7 @@ raw bytes
   -> complete message event
 ```
 
-当前阶段 wire 层还没有定义，所以 `srt-engine` 只需要保留接收入口和事件出口。
+当前 v1 MVP 使用临时 wire envelope 编码来验证 engine 行为。最终 wire format 还没有冻结。
 
 后续当 wire 层出现时，engine 不应该自己处理：
 
@@ -391,7 +391,7 @@ tick(now)
 
 ## 重传
 
-重传由 engine 驱动，但由 reliability 策略判断。
+重传由 engine 驱动。
 
 流程大致是：
 
@@ -404,18 +404,21 @@ packet sent
   -> engine 产生 Retransmit 事件
 ```
 
-当前阶段不实现 in-flight buffer。
+当前 v1 MVP 已经实现最小固定容量 in-flight buffer：
 
-因为这会牵涉：
+- DATA packet 写出后进入 in-flight。
+- 收到 ACK 后清除对应 packet。
+- `tick(now)` 会重新排队所有仍在 in-flight 的 packet。
 
-- 是否允许 heap
-- heapless 容量如何配置
-- packet bytes 是否复制
-- message fragment 是否重新编码
-- 旧 message 是否可被新 message 替换
-- deadline 过期后如何丢弃
+这只是验证重发闭环，不是最终可靠性算法。后续还需要：
 
-这些需要在 engine 代码边界更清楚后再冻结。
+- timeout policy
+- max retransmit
+- send failed event
+- packet dedup
+- ACK range
+- retransmit backoff
+- deadline 过期处理
 
 ## Message Reassembly
 
@@ -445,7 +448,7 @@ data.len()
 
 engine 才可以交付完整 message bytes。
 
-v1 MVP 可以实现一个很小的固定容量 reassembly buffer，用来验证外部 API 是否正确。
+v1 MVP 已经实现一个很小的固定容量 reassembly buffer，用来验证外部 API 是否正确。
 
 这个 buffer 不是最终算法，只证明边界：
 
@@ -460,7 +463,7 @@ receive(packet fragment N)
   -> queue MessageReceived
 ```
 
-最终版本还需要处理乱序、重复、丢包、多个并发 message、多个 stream 和资源回收。
+当前 MVP 已经按 byte coverage 判断 `[0, message_len)` 是否完整，可以避免中间丢包时误交付。最终版本还需要处理重复 packet、多个并发 message、多个 stream 和资源回收。
 
 ## StreamId 与用户 API
 
@@ -535,8 +538,10 @@ PacketWriter
 ```text
 srt-engine/src/
 ├── lib.rs
+├── config.rs
 ├── engine.rs
 ├── event.rs
+├── layout.rs
 ├── link.rs
 ├── message.rs
 ├── scheduler.rs
@@ -547,12 +552,12 @@ srt-engine/src/
 
 ## 第一阶段结论
 
-第一阶段的 `srt-engine` 应该做到：
+第一阶段的 `srt-engine` 已经做到：
 
 1. 明确 engine 是协议状态机边界，不是 OS executor。
 2. 定义发送、接收、tick、poll event 的最小接口。
-3. 明确 engine 负责 ACK 响应、重传驱动、message reassembly 的组织。
-4. 不实现 serial wire codec。
+3. 实现最小 ACK 响应、in-flight tracking、tick 重发和 message reassembly。
+4. 使用临时 wire envelope 验证 smoke。
 5. 不绑定 std、tokio、embedded-hal 或具体 MCU。
 
-`srt-engine` 是 SRT 协议真正“活起来”的地方，但当前阶段只需要把骨架立稳。
+`srt-engine` 是 SRT 协议真正“活起来”的地方。当前 v1 MVP 已经跑通最小闭环，下一阶段应该继续 harden wire decode 和可靠性策略。

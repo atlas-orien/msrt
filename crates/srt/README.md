@@ -44,7 +44,7 @@ The engine API is non-blocking:
 - `tick(now)` is reserved for timeout and retransmission work.
 - `poll_event()` drains protocol outputs such as `Write` and complete `Message` events.
 
-The MVP engine can split one message into multiple packet write events and reassemble those packet fragments into one delivered message. ACK and retransmission behavior is still a boundary, not a complete implementation.
+The MVP engine can split one message into multiple packet write events, reassemble those packet fragments into one delivered message, generate minimal ACK packets, track in-flight packets, and retransmit them when `tick(now)` is called. This is still an MVP reliability loop, not the final reliability algorithm.
 
 ## Smoke Test
 
@@ -52,4 +52,4 @@ The MVP engine can split one message into multiple packet write events and reass
 cargo run -p srt --bin srt-smoke
 ```
 
-The smoke binary sends one complete message, lets the sender engine produce multiple write events, feeds those bytes to another engine, and prints the complete received message.
+The smoke binary simulates Mac-to-MCU communication with noise, CRC corruption, packet drop, ACK, retransmission, and bidirectional complete messages.

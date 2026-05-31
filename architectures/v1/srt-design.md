@@ -67,7 +67,7 @@ SRT 的可靠性应该同时理解 packet 和 stream。
 
 协议未来应该支持 ack、重传、超时处理、重复包检测、滑动窗口。不是所有消息都需要同一种可靠性。某些实时 stream 可能更关心新鲜度，而不是保证每一个旧消息都送达。
 
-当前代码只定义边界，不实现完整算法。
+当前 v1 MVP 已经实现最小 ACK、in-flight packet tracking 和 tick-driven retransmit，用于验证协议闭环。它还不是完整可靠性算法，也不是最终 wire 兼容标准。
 
 ## v1 MVP 用户 API
 
@@ -133,6 +133,25 @@ send(message)
 
 但是 v1 不需要马上实现完整 ACK range、拥塞控制或复杂 loss recovery。
 
+## v1 MVP 已验证内容
+
+当前 v1 MVP smoke simulation 已经验证：
+
+- Mac 与 MCU 两端都使用同一个 no_std `Engine`。
+- `send(message)` 一次提交完整 message。
+- engine 内部自动拆成多个 packet。
+- `poll_event()` 输出待写 wire bytes。
+- `receive(bytes)` 接收 packet 并推进状态。
+- 干扰数据会被识别为 noise。
+- CRC 错误会被检测。
+- 丢包后，未 ACK 的 packet 会由 `tick(now)` 触发重发。
+- 收到 DATA packet 后会生成最小 ACK。
+- 收到 ACK 后会清理 in-flight packet。
+- 收齐所有 fragment 后交付完整 message。
+- Mac -> MCU 和 MCU -> Mac 双向 message 都可以完成。
+
+这个 smoke 不是最终硬件测试。真实串口还需要下一阶段处理 half packet、sticky packet 和一次 receive 多 packet。
+
 ## 当前非目标
 
 - 不实现 UART driver。
@@ -144,14 +163,16 @@ send(message)
 - 不实现完整重传算法。
 - 不冻结最终 wire format。
 
-当前目标是先冻结架构和 crate 边界，再实现协议行为。
+当前 v1 MVP 目标已经完成：冻结架构和 crate 边界，并验证最小协议行为。
 
-## 当前推进顺序
+## 后续推进顺序
 
 当前项目应按以下顺序推进：
 
-1. 完成 `srt-core` 的 Packet / Protocol Frame 模型。
-2. 重新审视 `srt-reliability`。
-3. 推进 `srt-engine`。
-4. 设计 `srt-wire` 串口 Serial Envelope 层。
-5. 如果需要，再恢复独立 stream 状态管理 crate。
+1. 完善 streaming wire decode，支持半包、粘包、一次 receive 多包。
+2. 冻结第一版 wire format draft。
+3. 将 MVP packet 编码逐步对齐到正式 Packet / Frame serialization。
+4. 完善 duplicate packet detection、ACK 语义和 retry/failure event。
+5. 支持多 message、多 stream 的 reassembly。
+6. 设计 heapless/no-alloc buffer 策略。
+7. 如果需要，再恢复独立 stream 状态管理 crate。
