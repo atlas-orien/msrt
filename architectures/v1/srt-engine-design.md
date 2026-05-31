@@ -476,7 +476,7 @@ receive(packet fragment N)
   -> queue MessageReceived
 ```
 
-当前 MVP 已经按 byte coverage 判断 `[0, message_len)` 是否完整，可以避免中间丢包时误交付。最终版本还需要处理重复 packet、多个并发 message、多个 channel 和资源回收。
+当前 v1 已经按 byte coverage 判断 `[0, message_len)` 是否完整，可以避免中间丢包时误交付。engine 也已经支持 fixed-slot 多 message reassembly、按 `ChannelId + MessageId` 隔离不同 message、重复 packet 去重、reassembly timeout 和 budget 满时的明确错误边界。
 
 ## ChannelId 与用户 API
 
@@ -498,7 +498,32 @@ receive(packet fragment N)
 
 高层 API 可以由 engine 或上层封装映射到 `ChannelId`。
 
-第一阶段先不引入 `SendOptions` 或 send trait。v1 只保留 concrete `Engine::send(message)`，等真实 channel 路由需求出现后再扩展。
+v1 当前保留 concrete `Engine`，不引入 send trait。
+
+低层 API 已经包含：
+
+```text
+send(message)
+send_on(channel_id, message)
+```
+
+其中：
+
+```text
+send(message) == send_on(ChannelId::CONTROL, message)
+```
+
+channel 的 reliability policy 通过 `EngineConfig::channel_policies` 配置。未配置的 channel 默认是 `Reliable`。当前已落地的最小策略：
+
+```text
+Reliable
+  设置 ACK_ELICITING，进入 in-flight，超时后由 tick 重发。
+
+BestEffort
+  不设置 ACK_ELICITING，不进入 in-flight，不由 tick 重发。
+```
+
+`LatestOnly` / `Deadline` 仍然只保留概念边界，后续再冻结实际算法。
 
 ## RawLink 边界
 

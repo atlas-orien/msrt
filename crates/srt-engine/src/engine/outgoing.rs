@@ -4,6 +4,7 @@ use srt_core::{
     AckFrame, ChannelId, Error, ErrorKind, Flags, FrameKind, MAX_ACK_RANGES, MessageId,
     PacketNumber, PacketType, Result,
 };
+use srt_reliability::ReliabilityMode;
 use srt_wire::{Checksum, Crc16, EnvelopeHeader, EnvelopeMagic, WireFlags};
 
 use crate::{
@@ -27,7 +28,8 @@ impl Engine {
     pub fn send_on(&mut self, channel_id: ChannelId, message: &[u8]) -> Result<MessageId> {
         let fragment_bytes = self.fragment_bytes.clamp(1, max_fragment_bytes());
         let message_id = self.next_message_id;
-        self.send_message_fragments(channel_id, message_id, message, fragment_bytes)?;
+        let mode = self.reliability_mode(channel_id);
+        self.send_message_fragments(channel_id, message_id, message, fragment_bytes, mode)?;
         self.next_message_id = MessageId::new(self.next_message_id.get().wrapping_add(1));
 
         Ok(message_id)
@@ -56,6 +58,7 @@ impl Engine {
         message_id: MessageId,
         message: &[u8],
         fragment_bytes: usize,
+        mode: ReliabilityMode,
     ) -> Result<()> {
         if message.len() > MAX_MESSAGE_BYTES {
             return Err(Error::new(ErrorKind::Engine));
@@ -77,6 +80,7 @@ impl Engine {
                 fragment_offset: offset,
                 flags,
                 fragment,
+                ack_eliciting: matches!(mode, ReliabilityMode::Reliable),
             };
             let written = encode_message_fragment(encoded, &mut wire, &Crc16)?;
 
@@ -85,15 +89,17 @@ impl Engine {
                 bytes: wire,
                 len: written,
             }))?;
-            self.in_flight.track(InFlightPacket {
-                packet_number,
-                channel_id,
-                message_id,
-                bytes: wire,
-                len: written,
-                attempts: 0,
-                last_sent_ms: 0,
-            })?;
+            if matches!(mode, ReliabilityMode::Reliable) {
+                self.in_flight.track(InFlightPacket {
+                    packet_number,
+                    channel_id,
+                    message_id,
+                    bytes: wire,
+                    len: written,
+                    attempts: 0,
+                    last_sent_ms: 0,
+                })?;
+            }
             self.next_packet_number = self.next_packet_number.next();
 
             if message.is_empty() {
@@ -116,6 +122,7 @@ struct FragmentToEncode<'a> {
     fragment_offset: usize,
     flags: u8,
     fragment: &'a [u8],
+    ack_eliciting: bool,
 }
 
 fn encode_message_fragment(
@@ -145,7 +152,11 @@ fn encode_message_fragment(
     out[6] = envelope_header.flags.bits();
     out[7] = envelope_header.reserved;
     out[8] = PacketType::Data.code();
-    out[9] = Flags::ACK_ELICITING.bits();
+    out[9] = if fragment_to_encode.ack_eliciting {
+        Flags::ACK_ELICITING.bits()
+    } else {
+        Flags::EMPTY.bits()
+    };
     out[10..14].copy_from_slice(&fragment_to_encode.packet_number.get().to_le_bytes());
     out[14] = FrameKind::Message.code();
     out[15..17].copy_from_slice(&channel_id.to_le_bytes());

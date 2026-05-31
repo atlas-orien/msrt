@@ -69,7 +69,9 @@ impl Engine {
         match decode_packet_bytes(bytes) {
             PacketDecode::Data(fragment) => {
                 let packet_number = fragment.packet_number;
-                if self.queue_ack(packet_number).is_err() {
+                let ack_eliciting = fragment.ack_eliciting;
+
+                if ack_eliciting && self.queue_ack(packet_number).is_err() {
                     return ReceiveReport::Error(Error::new(ErrorKind::Engine));
                 }
 

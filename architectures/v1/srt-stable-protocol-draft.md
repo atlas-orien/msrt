@@ -468,26 +468,34 @@ bit 2..7: reserved
 
 ## ACK Frame
 
-v1 draft 先定义 single packet ACK。
+v1 draft 当前定义 fixed-capacity ACK range。
 
 ```text
 offset  size  field
 0       1     frame_type
 1       4     largest_acknowledged
+5       1     range_count
+6       8*N   ack_ranges
 ```
 
-`srt-engine` 当前已开始按这个 ACK Frame layout 编码和解码 single packet ACK。
-
-后续可以扩展 ACK range：
+当前 `N = MAX_ACK_RANGES`，每个 range 固定编码：
 
 ```text
-largest_acknowledged
-ack_delay
-ack_range_count
-ack_ranges
+offset  size  field
+0       4     start_packet_number
+4       4     end_packet_number
 ```
 
-但 v1 draft 第一阶段不强制实现 ACK range。
+`range_count` 表示前多少个 range 有效。未使用的 range slot 必须编码为零值。
+
+语义：
+
+```text
+start <= packet_number <= end
+  -> acknowledged
+```
+
+当前代码中的 ACK Frame 长度是固定长度，目的是保持 no_std 解码简单。后续可以继续优化压缩策略，但不能破坏 v1 已冻结的基本语义。
 
 ## Fragmentation
 
@@ -580,20 +588,21 @@ v1 draft 保留 tick-driven retransmit：
 engine.tick(now)
 ```
 
-当前 MVP 行为：
+当前 v1 行为：
 
 ```text
-tick
-  -> retransmit all in-flight packets
+tick(now)
+  -> 只重发达到 retransmit_timeout_ms 的 in-flight packet
+  -> 已被 ACK range 覆盖的 packet 不再重发
+  -> 达到 max_retransmit_attempts 后产生 SendFailed
 ```
 
-stable protocol 后续需要冻结：
+v1 当前已经有这些配置：
 
-- timeout ticks。
-- retry limit。
-- send failed event。
-- partial reliability policy。
-- latest-only behavior。
+```text
+retransmit_timeout_ms
+max_retransmit_attempts
+```
 
 这些不是 wire format 字段，但属于 v1 stable behavior。
 
@@ -610,10 +619,13 @@ LatestOnly
 Deadline
 ```
 
-当前 stable draft 不冻结完整算法，只冻结概念边界：
+当前 stable draft 冻结的最小行为：
 
-- Reliable：需要 ACK，允许重传。
-- BestEffort：不重传。
+- Reliable：设置 `ACK_ELICITING`，进入 in-flight，需要 ACK，允许超时重传。
+- BestEffort：不设置 `ACK_ELICITING`，不进入 in-flight，不重传，不等待 ACK；如果接收端收到完整 message，仍然正常交付。
+
+当前 stable draft 只保留概念边界，尚未冻结完整算法：
+
 - LatestOnly：旧 message 可以被新 message 替代。
 - Deadline：超过时间窗口后停止重传。
 
@@ -681,16 +693,16 @@ v1 stable draft 不支持：
 4. `srt-engine` 使用正式 Packet Header + MESSAGE / ACK Frame layout。
 5. Packet Header 明确编码 `packet_type`、`packet_flags`、`packet_number`。
 6. MESSAGE Frame 明确编码 `frame_type`、`channel_id`、`message_id`、`message_len`、`fragment_offset`、`message_flags`。
-7. ACK Frame 明确编码 `frame_type`、`largest_acknowledged`。
-8. smoke 覆盖 half packet、sticky packet、CRC error、drop、ACK、retransmit、duplicate packet、bidirectional message。
+7. ACK Frame 明确编码 `frame_type`、`largest_acknowledged`、`range_count`、fixed-capacity ACK ranges。
+8. smoke 覆盖 half packet、sticky packet、CRC error、drop、ACK、retransmit、duplicate packet、simultaneous duplex、multi-channel、bidirectional message。
 
 v1 仍必须完成的可靠传输部分：
 
-1. ACK range。
-2. retry limit 和 send failed event。
-3. 多 message / 多 channel reassembly。
-4. partial reliability / latest-only 的实际决策。
-5. heapless/no-alloc buffer 策略配置。
+1. ACK range 的压缩和过期策略。
+2. message 失败后的对端取消 / 本端清理语义。
+3. 更复杂持续收发场景下的窗口耗尽和恢复测试。
+4. LatestOnly / Deadline 的实际决策。
+5. heapless/no-alloc buffer 策略最终冻结。
 
 详见 [SRT v1 可靠传输补齐计划](srt-reliable-transport-plan.md)。
 

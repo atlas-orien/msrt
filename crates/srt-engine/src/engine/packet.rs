@@ -31,6 +31,7 @@ pub(crate) struct DecodedAck {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct DecodedFragment<'a> {
     pub(crate) packet_number: PacketNumber,
+    pub(crate) ack_eliciting: bool,
     pub(crate) channel_id: ChannelId,
     pub(crate) message_id: MessageId,
     pub(crate) message_len: usize,
@@ -163,10 +164,7 @@ fn fragment_from_packet_bytes(
     header: DecodedPacketHeader,
     bytes: &[u8],
 ) -> Option<DecodedFragment<'_>> {
-    if bytes.len() < MESSAGE_FRAME_HEADER_LEN
-        || *bytes.first()? != FrameKind::Message.code()
-        || header.packet_flags & Flags::ACK_ELICITING.bits() == 0
-    {
+    if bytes.len() < MESSAGE_FRAME_HEADER_LEN || *bytes.first()? != FrameKind::Message.code() {
         return None;
     }
 
@@ -185,6 +183,7 @@ fn fragment_from_packet_bytes(
 
     Some(DecodedFragment {
         packet_number: header.packet_number,
+        ack_eliciting: header.packet_flags & Flags::ACK_ELICITING.bits() != 0,
         channel_id,
         message_id,
         message_len,

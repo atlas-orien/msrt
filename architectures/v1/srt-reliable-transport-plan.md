@@ -20,6 +20,8 @@
 - ACK range 的最小 fixed-capacity 编码和批量 in-flight 清理。
 - retransmit timeout tick 的最小策略。
 - reassembly slot timeout 和 budget 满时的明确错误边界。
+- channel 级 reliability policy 的最小边界。
+- BestEffort channel 不 ACK、不进入 in-flight、不重传，但收到完整 message 仍然交付。
 
 但这些只能证明 foundation 是正确的，不能证明 v1 已经是可靠传输。
 
@@ -50,14 +52,12 @@ tick(now)
 poll_event()
 ```
 
-但是它还没有证明：
+但是它还没有完全证明：
 
-- 多条 message 同时 in-flight。
-- 多个 channel 同时 reassembly。
-- ACK range。
-- retry limit 到达后的失败事件。
-- partial reliability。
-- buffer budget 和窗口保护。
+- 更长时间运行下的窗口耗尽和恢复。
+- 复杂乱序 / 丢包组合下的多 message 持续收发。
+- message 失败后的对端取消 / 本端清理语义。
+- LatestOnly / Deadline 等更深的 partial reliability 策略。
 
 ## v1 完成标准
 
@@ -94,7 +94,7 @@ v1 也不做：
 
 ## 下一步一：ACK range
 
-当前状态：ACK range 已开始落地。
+当前状态：ACK range 最小版本已经落地。
 
 这可以跑通 demo，但效率和语义都不够完整。
 
@@ -132,11 +132,7 @@ v1 可以先限制 ACK range 数量，保持 no_std 固定容量。
 
 ## 下一步二：重试失败事件
 
-当前状态：事件边界和最小 retry limit 已开始落地。
-
-当前 tick 会重发所有 in-flight packet。
-
-这只是验证闭环，不是可靠传输完成版本。
+当前状态：事件边界、最小 retry limit 和 retransmit timeout 已经落地。
 
 v1 需要：
 
@@ -179,7 +175,7 @@ reason = RetryLimitReached
 
 ## 下一步三：多 message reassembly
 
-当前状态：fixed-slot 多 message reassembly 已开始落地。
+当前状态：fixed-slot 多 message reassembly 已经落地。
 
 真实场景中，同一端可能连续收到：
 
@@ -220,7 +216,7 @@ MAX_MESSAGE_BYTES
 
 ## 下一步四：多 channel
 
-当前状态：`send_on(channel_id, message)` 已开始落地。
+当前状态：`send_on(channel_id, message)` 和最小 channel policy 已经落地。
 
 v1 需要证明：
 
@@ -246,14 +242,19 @@ send(message) == send_on(ChannelId::CONTROL, message)
 
 - `Engine::send_on(channel_id, message)`。
 - facade 导出 `srt::ChannelId`。
+- facade 导出 `srt::ChannelReliability` / `srt::ReliabilityMode`。
 - outgoing MESSAGE frame 编码传入的 `channel_id`。
 - `MessageEvent` 携带 `channel_id`。
 - `SendFailedEvent` 携带 `channel_id`。
 - 多 channel smoke，验证不同 channel 的 fragment 交错到达时不会串台。
+- `EngineConfig::channel_policies`。
+- 未配置 channel 默认使用 `Reliable`。
+- `BestEffort` channel 发送 DATA packet 时不设置 `ACK_ELICITING`。
+- `BestEffort` channel 不进入 in-flight，因此不会由 `tick` 重发，也不会产生 retry-limit failure。
+- 接收端收到非 ACK-eliciting DATA packet 时不回 ACK，但仍会正常 reassembly 并交付完整 message。
 
 后续仍需要补齐：
 
-- channel 级 reliability policy。
 - 不同 channel 的独立 message id 策略是否需要调整。
 
 ## 下一步五：partial reliability
@@ -278,8 +279,8 @@ Deadline
 
 实现顺序建议：
 
-1. Reliable。
-2. BestEffort。
+1. Reliable。已落地最小版本。
+2. BestEffort。已落地最小版本。
 3. LatestOnly / Deadline 先文档冻结，再实现。
 
 ## 下一步六：窗口和 buffer budget
@@ -337,16 +338,17 @@ failed messages produce explicit failed events
 
 建议顺序：
 
-1. 定义 `SendFailed` / `RetryLimitReached` 事件。已开始落地。
-2. 给 in-flight packet 增加 attempts metadata。已开始落地。
-3. 实现最小 retry limit。已开始落地。
-4. 实现 message 级失败聚合。已开始落地。
-5. 把 reassembly 从 single buffer 改成 fixed slot table。已开始落地。
-6. 增加 `send_on(channel_id, message)`。已开始落地。
-7. 实现 ACK range 数据结构和编码。已开始落地。
-8. 让 retransmit 只重发缺失 packet。已开始落地。
-9. 补 smoke 和单元测试。已开始落地。
-10. 最后再更新 stable protocol draft。
+1. 定义 `SendFailed` / `RetryLimitReached` 事件。已落地。
+2. 给 in-flight packet 增加 attempts metadata。已落地。
+3. 实现最小 retry limit。已落地。
+4. 实现 message 级失败聚合。已落地。
+5. 把 reassembly 从 single buffer 改成 fixed slot table。已落地。
+6. 增加 `send_on(channel_id, message)`。已落地。
+7. 实现 ACK range 数据结构和编码。已落地最小版本。
+8. 让 retransmit 只重发缺失 packet。已落地。
+9. 实现 BestEffort 最小 channel policy。已落地。
+10. 补 smoke 和单元测试。持续推进。
+11. 最后再更新 stable protocol draft。
 
 ## 结论
 

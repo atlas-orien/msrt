@@ -1,6 +1,7 @@
 //! Engine configuration.
 
 use srt_core::{MessageId, PacketNumber};
+use srt_reliability::ChannelReliability;
 
 /// Maximum encoded wire bytes held by one MVP engine event.
 pub const MAX_WIRE_BYTES: usize = 128;
@@ -16,6 +17,8 @@ pub const MAX_IN_FLIGHT_PACKETS: usize = 16;
 pub const MAX_ACK_TRACKED_PACKETS: usize = 16;
 /// Maximum incomplete messages tracked by the reassembly table.
 pub const MAX_REASSEMBLY_MESSAGES: usize = 4;
+/// Maximum channel reliability policies configured in the engine.
+pub const MAX_CHANNEL_POLICIES: usize = 4;
 /// Default maximum message fragment bytes per packet.
 pub const DEFAULT_FRAGMENT_BYTES: usize = 32;
 /// Default maximum retransmission attempts before a send fails.
@@ -40,6 +43,8 @@ pub struct EngineConfig {
     pub retransmit_timeout_ms: u64,
     /// Ticks after which incomplete reassembly slots are released.
     pub reassembly_timeout_ms: u64,
+    /// Optional per-channel reliability policies.
+    pub channel_policies: [Option<ChannelReliability>; MAX_CHANNEL_POLICIES],
 }
 
 impl Default for EngineConfig {
@@ -51,6 +56,7 @@ impl Default for EngineConfig {
             max_retransmit_attempts: DEFAULT_MAX_RETRANSMIT_ATTEMPTS,
             retransmit_timeout_ms: DEFAULT_RETRANSMIT_TIMEOUT_MS,
             reassembly_timeout_ms: DEFAULT_REASSEMBLY_TIMEOUT_MS,
+            channel_policies: [None; MAX_CHANNEL_POLICIES],
         }
     }
 }

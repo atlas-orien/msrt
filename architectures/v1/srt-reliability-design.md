@@ -208,6 +208,24 @@ attempts >= max_attempts
   -> drop
 ```
 
+engine 层已经落地 `Reliable` 和 `BestEffort` 的最小 channel policy：
+
+```text
+Reliable
+  packet 设置 ACK_ELICITING
+  packet 进入 in-flight
+  tick 超时后重传
+  retry limit 后产生 SendFailed
+
+BestEffort
+  packet 不设置 ACK_ELICITING
+  packet 不进入 in-flight
+  tick 不重传
+  接收端不回 ACK，但仍可交付完整 message
+```
+
+`LatestOnly` 和 `Deadline` 仍然只保留设计边界，后续需要单独冻结。
+
 它不绑定具体时钟，也不决定 packet bytes 如何重新写出。
 
 ## 超时

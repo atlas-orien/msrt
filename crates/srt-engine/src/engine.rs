@@ -10,11 +10,12 @@ pub(crate) mod reassembly;
 pub(crate) mod retransmit;
 
 use srt_core::{ChannelId, Error, MessageId, PacketNumber};
-use srt_reliability::PacketDedup;
+use srt_reliability::{ChannelReliability, PacketDedup, ReliabilityMode};
 use srt_wire::StreamingDecoder;
 
 use crate::{
-    EngineConfig, MAX_IN_FLIGHT_PACKETS, MAX_INGRESS_BYTES, MAX_MESSAGE_BYTES, MAX_WIRE_BYTES,
+    EngineConfig, MAX_CHANNEL_POLICIES, MAX_IN_FLIGHT_PACKETS, MAX_INGRESS_BYTES,
+    MAX_MESSAGE_BYTES, MAX_WIRE_BYTES,
     engine::{
         ack::AckRanges, inflight::InFlightPackets, queue::EventQueue, reassembly::ReassemblyBuffer,
     },
@@ -33,6 +34,7 @@ pub struct Engine {
     pub(crate) max_retransmit_attempts: u8,
     pub(crate) retransmit_timeout_ms: u64,
     pub(crate) reassembly_timeout_ms: u64,
+    pub(crate) channel_policies: [Option<ChannelReliability>; MAX_CHANNEL_POLICIES],
     pub(crate) now_ms: u64,
     pub(crate) events: EventQueue,
     pub(crate) in_flight: InFlightPackets,
@@ -53,6 +55,7 @@ impl Engine {
             max_retransmit_attempts: config.max_retransmit_attempts,
             retransmit_timeout_ms: config.retransmit_timeout_ms,
             reassembly_timeout_ms: config.reassembly_timeout_ms,
+            channel_policies: config.channel_policies,
             now_ms: 0,
             events: EventQueue::new(),
             in_flight: InFlightPackets::new(),
@@ -72,6 +75,21 @@ impl Engine {
     #[must_use]
     pub const fn next_packet_number(&self) -> PacketNumber {
         self.next_packet_number
+    }
+
+    pub(crate) fn reliability_mode(&self, channel_id: ChannelId) -> ReliabilityMode {
+        let mut index = 0;
+
+        while index < MAX_CHANNEL_POLICIES {
+            if let Some(policy) = self.channel_policies[index]
+                && policy.channel_id.get() == channel_id.get()
+            {
+                return policy.mode;
+            }
+            index += 1;
+        }
+
+        ReliabilityMode::Reliable
     }
 }
 
@@ -181,6 +199,7 @@ pub enum ReceiveReport {
 #[cfg(test)]
 mod tests {
     use super::{Engine, EngineConfig, EngineOutput, ReceiveReport};
+    use srt_reliability::ChannelReliability;
 
     #[test]
     fn engine_sends_one_message_as_multiple_write_events() {
@@ -584,6 +603,89 @@ mod tests {
             bytes[25],
             srt_core::MessageFlags::FIRST.bits() | srt_core::MessageFlags::LAST.bits()
         );
+    }
+
+    #[test]
+    fn engine_best_effort_channel_does_not_track_in_flight() {
+        let channel_id = srt_core::ChannelId::new(9);
+        let mut engine = Engine::new(EngineConfig {
+            channel_policies: [
+                Some(ChannelReliability::best_effort(channel_id)),
+                None,
+                None,
+                None,
+            ],
+            ..EngineConfig::default()
+        });
+
+        engine.send_on(channel_id, b"hello best effort").unwrap();
+
+        while let Some(event) = engine.poll_event() {
+            let EngineOutput::Write(_) = event else {
+                panic!("best-effort send should only produce writes before tick");
+            };
+        }
+
+        assert_eq!(engine.in_flight.packets().count(), 0);
+
+        engine.tick(1);
+
+        assert!(engine.poll_event().is_none());
+    }
+
+    #[test]
+    fn engine_best_effort_packet_is_not_ack_eliciting() {
+        let channel_id = srt_core::ChannelId::new(9);
+        let mut engine = Engine::new(EngineConfig {
+            channel_policies: [
+                Some(ChannelReliability::best_effort(channel_id)),
+                None,
+                None,
+                None,
+            ],
+            ..EngineConfig::default()
+        });
+
+        engine.send_on(channel_id, b"hello").unwrap();
+
+        let write = next_write(&mut engine);
+
+        assert_eq!(write.as_bytes()[9], srt_core::Flags::EMPTY.bits());
+    }
+
+    #[test]
+    fn engine_receives_best_effort_without_ack() {
+        let channel_id = srt_core::ChannelId::new(9);
+        let mut sender = Engine::new(EngineConfig {
+            channel_policies: [
+                Some(ChannelReliability::best_effort(channel_id)),
+                None,
+                None,
+                None,
+            ],
+            ..EngineConfig::default()
+        });
+        let mut receiver = Engine::new(EngineConfig::default());
+
+        sender.send_on(channel_id, b"hello best effort").unwrap();
+
+        let write = next_write(&mut sender);
+
+        assert!(matches!(
+            receiver.receive(write.as_bytes()),
+            ReceiveReport::Packet { .. }
+        ));
+
+        let Some(event) = receiver.poll_event() else {
+            panic!("receiver should emit the complete best-effort message");
+        };
+        let EngineOutput::Message(message) = event else {
+            panic!("best-effort packet should not emit ACK before message");
+        };
+
+        assert_eq!(message.channel_id, channel_id);
+        assert_eq!(message.as_bytes(), b"hello best effort");
+        assert!(receiver.poll_event().is_none());
     }
 
     #[test]
