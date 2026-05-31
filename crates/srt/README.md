@@ -2,10 +2,16 @@
 
 No-std facade crate for the SRT protocol standard.
 
-This crate re-exports the protocol crates and the current MVP engine API from `srt-engine`. Protocol state lives in `srt-engine`, not in this facade crate.
+This crate exposes the current MVP SRT API and hides most workspace internals behind a small no-std facade. Protocol state lives in `srt-engine`, but normal users should start from the top-level `srt` types.
 
 ## Re-exports
 
+- `srt::Engine`
+- `srt::Config`
+- `srt::Event`
+- `srt::Message`
+- `srt::Write`
+- `srt::Receive`
 - `srt::core`
 - `srt::error`
 - `srt::reliability`
@@ -26,12 +32,12 @@ This crate is currently a facade and integration-test target.
 ## Minimal API
 
 ```rust
-let mut engine = srt::Engine::new(srt::EngineConfig::default());
+let mut engine = srt::Engine::new(srt::Config::default());
 
 engine.send(b"hello srt testing")?;
 
 while let Some(event) = engine.poll_event() {
-    if let srt::EngineOutput::Write(write) = event {
+    if let srt::Event::Write(write) = event {
         serial.write(write.as_bytes());
     }
 }

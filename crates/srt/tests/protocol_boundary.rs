@@ -1,11 +1,11 @@
 //! Integration tests for the no_std SRT protocol facade.
 
 use srt::{
+    Config, Engine, Event,
     core::{
         Flags, MessageId, Packet, PacketHeader, PacketNumber, PacketType, StreamFlags, StreamFrame,
         StreamId,
     },
-    engine::{Engine, EngineConfig, EngineOutput},
     reliability::{FragmentRange, MessageFragment, MessageKey, ReliabilityMode, StreamReliability},
     wire::{EnvelopeHeader, EnvelopeMagic, WireEnvelope, WireFlags},
 };
@@ -53,12 +53,12 @@ fn facade_exposes_reliability_fragment_view() {
 
 #[test]
 fn facade_exposes_concrete_engine_api() {
-    let mut engine = Engine::new(EngineConfig::default());
+    let mut engine = Engine::new(Config::default());
     let message_id = engine.send(b"hello").unwrap();
 
     assert_eq!(message_id, MessageId::ZERO);
 
-    let Some(EngineOutput::Write(write)) = engine.poll_event() else {
+    let Some(Event::Write(write)) = engine.poll_event() else {
         panic!("engine should produce a write event");
     };
 

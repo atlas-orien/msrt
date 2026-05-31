@@ -1,12 +1,10 @@
 //! Mac-to-MCU smoke test simulation for the SRT facade crate.
 
-use srt::{
-    Engine, EngineConfig, EngineOutput, MAX_WIRE_BYTES, MessageEvent, ReceiveReport, WriteEvent,
-};
+use srt::{Config, Engine, Event, MAX_WIRE_BYTES, Message, Receive, Write};
 
 fn main() {
-    let mut mac = Engine::new(EngineConfig::default());
-    let mut mcu = Engine::new(EngineConfig::default());
+    let mut mac = Engine::new(Config::default());
+    let mut mcu = Engine::new(Config::default());
 
     inject_noise("mcu", &mut mcu);
 
@@ -38,7 +36,7 @@ fn main() {
 
 fn inject_noise(name: &str, engine: &mut Engine) {
     match engine.receive(&[0xde, 0xad, 0xbe, 0xef]) {
-        ReceiveReport::Noise { skipped } => {
+        Receive::Noise { skipped } => {
             println!("{name}: noise skipped={skipped}");
         }
         other => panic!("{name}: unexpected noise report: {other:?}"),
@@ -53,7 +51,7 @@ fn drain_with_faults(
     link: &mut DemoLink,
 ) {
     while let Some(event) = src.poll_event() {
-        let EngineOutput::Write(write) = event else {
+        let Event::Write(write) = event else {
             continue;
         };
 
@@ -63,7 +61,7 @@ fn drain_with_faults(
 
 fn drain_clean(src_name: &str, src: &mut Engine, dst_name: &str, dst: &mut Engine) {
     while let Some(event) = src.poll_event() {
-        let EngineOutput::Write(write) = event else {
+        let Event::Write(write) = event else {
             continue;
         };
 
@@ -81,10 +79,10 @@ fn drain_until_message(
     src: &mut Engine,
     dst_name: &str,
     dst: &mut Engine,
-) -> MessageEvent {
+) -> Message {
     loop {
         match src.poll_event() {
-            Some(EngineOutput::Write(write)) => {
+            Some(Event::Write(write)) => {
                 println!(
                     "{src_name} -> {dst_name}: packet_number={}, wire_bytes={}",
                     write.packet_number.get(),
@@ -92,7 +90,7 @@ fn drain_until_message(
                 );
                 log_receive(dst_name, dst.receive(write.as_bytes()));
             }
-            Some(EngineOutput::Message(message)) => {
+            Some(Event::Message(message)) => {
                 print_message(src_name, message);
                 return message;
             }
@@ -101,30 +99,30 @@ fn drain_until_message(
     }
 }
 
-fn log_receive(name: &str, report: ReceiveReport) {
+fn log_receive(name: &str, report: Receive) {
     match report {
-        ReceiveReport::Packet { packet_number } => {
+        Receive::Packet { packet_number } => {
             println!("{name}: accepted packet_number={}", packet_number.get());
         }
-        ReceiveReport::Ack { packet_number } => {
+        Receive::Ack { packet_number } => {
             println!("{name}: acked packet_number={}", packet_number.get());
         }
-        ReceiveReport::Noise { skipped } => {
+        Receive::Noise { skipped } => {
             println!("{name}: noise skipped={skipped}");
         }
-        ReceiveReport::Corrupted => {
+        Receive::Corrupted => {
             println!("{name}: crc error detected");
         }
-        ReceiveReport::Incomplete { needed } => {
+        Receive::Incomplete { needed } => {
             println!("{name}: incomplete packet needed={needed:?}");
         }
-        ReceiveReport::Error(error) => {
+        Receive::Error(error) => {
             panic!("{name}: receive error: {error:?}");
         }
     }
 }
 
-fn print_message(name: &str, message: MessageEvent) {
+fn print_message(name: &str, message: Message) {
     let text = core::str::from_utf8(message.as_bytes()).expect("utf-8 message");
 
     println!(
@@ -144,7 +142,7 @@ impl DemoLink {
         Self::default()
     }
 
-    fn deliver(&mut self, src_name: &str, dst_name: &str, dst: &mut Engine, write: WriteEvent) {
+    fn deliver(&mut self, src_name: &str, dst_name: &str, dst: &mut Engine, write: Write) {
         let packet_number = write.packet_number.get();
 
         if packet_number == 1 && !self.dropped_packet_one {

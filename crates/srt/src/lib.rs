@@ -16,3 +16,14 @@ pub use srt_engine::{
     DEFAULT_FRAGMENT_BYTES, Engine, EngineConfig, EngineOutput, MAX_EVENTS, MAX_MESSAGE_BYTES,
     MAX_WIRE_BYTES, MessageEvent, ReceiveReport, WriteEvent,
 };
+
+/// User-facing engine configuration.
+pub type Config = EngineConfig;
+/// User-facing engine output event.
+pub type Event = EngineOutput;
+/// User-facing delivered message event.
+pub type Message = MessageEvent;
+/// User-facing wire write event.
+pub type Write = WriteEvent;
+/// User-facing receive report.
+pub type Receive = ReceiveReport;
