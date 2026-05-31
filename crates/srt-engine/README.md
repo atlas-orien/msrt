@@ -4,7 +4,7 @@ Protocol engine boundaries for SRT.
 
 This engine is not an operating-system executor, not a tokio executor, and not an MCU HAL. It describes how the SRT protocol state machine is driven.
 
-Current status: basic types and a hardened MVP `Engine` implementation. The engine validates the non-blocking user-facing boundary and includes streaming wire ingress, minimal ACK, duplicate detection, in-flight tracking, retransmission, and message reassembly. It is not the final reliability implementation yet.
+Current status: basic types and a hardened MVP `Engine` implementation. The engine validates the non-blocking user-facing boundary and includes streaming wire ingress, fixed-capacity ACK ranges, duplicate detection, in-flight tracking, retransmission, channel reliability policy, and message reassembly. It is not the final reliability implementation yet.
 
 ## Responsibilities
 
@@ -15,10 +15,12 @@ Current status: basic types and a hardened MVP `Engine` implementation. The engi
 - engine tick boundary
 - engine events
 - ACK response boundary
+- fixed-capacity ACK range generation
 - retransmission driving boundary
 - message reassembly boundary
 - minimal message fragmentation and reassembly prototype
-- minimal ACK and in-flight retransmission prototype
+- minimal ACK range and in-flight retransmission prototype
+- minimal reliable and best-effort channel policy
 - duplicate packet acknowledgement without duplicate message delivery
 - one protocol driving model for MCU and OS environments
 

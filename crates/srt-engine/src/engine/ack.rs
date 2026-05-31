@@ -29,6 +29,15 @@ impl AckRanges {
 
         if let Some(slot) = self.packets.iter_mut().find(|slot| slot.is_none()) {
             *slot = Some(packet_number);
+            return;
+        }
+
+        if let Some(index) = self.oldest_packet_index()
+            && self.packets[index]
+                .map(|oldest| packet_number.get() > oldest.get())
+                .unwrap_or(false)
+        {
+            self.packets[index] = Some(packet_number);
         }
     }
 
@@ -43,6 +52,24 @@ impl AckRanges {
 
         sort_packet_numbers(&mut numbers, len);
         ranges_from_sorted_numbers(numbers, len)
+    }
+
+    fn oldest_packet_index(&self) -> Option<usize> {
+        let mut oldest_index = None;
+        let mut oldest = PacketNumber::new(u32::MAX);
+
+        for (index, packet_number) in self.packets.iter().enumerate() {
+            let Some(packet_number) = packet_number else {
+                continue;
+            };
+
+            if packet_number.get() < oldest.get() {
+                oldest = *packet_number;
+                oldest_index = Some(index);
+            }
+        }
+
+        oldest_index
     }
 }
 
@@ -80,26 +107,26 @@ fn ranges_from_sorted_numbers(
     let empty = AckRange::new(PacketNumber::ZERO, PacketNumber::ZERO);
     let mut ranges = [empty; MAX_ACK_RANGES];
     let mut range_count = 0;
-    let mut index = 0;
+    let mut index = len;
 
-    while index < len && range_count < MAX_ACK_RANGES {
-        let Some(start) = numbers[index] else {
+    while index > 0 && range_count < MAX_ACK_RANGES {
+        index -= 1;
+        let Some(end) = numbers[index] else {
             break;
         };
-        let mut end = start;
-        index += 1;
+        let mut start = end;
 
-        while index < len {
-            let Some(next) = numbers[index] else {
+        while index > 0 {
+            let Some(previous) = numbers[index - 1] else {
                 break;
             };
 
-            if next.get() != end.get().wrapping_add(1) {
+            if previous.get().wrapping_add(1) != start.get() {
                 break;
             }
 
-            end = next;
-            index += 1;
+            start = previous;
+            index -= 1;
         }
 
         ranges[range_count] = AckRange::new(start, end);
@@ -107,4 +134,46 @@ fn ranges_from_sorted_numbers(
     }
 
     AckFrame::from_ranges(ranges, range_count as u8)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AckRanges;
+    use crate::MAX_ACK_TRACKED_PACKETS;
+    use srt_core::PacketNumber;
+
+    #[test]
+    fn ack_ranges_evict_oldest_packet_when_full() {
+        let mut ranges = AckRanges::new();
+
+        for packet_number in 0..MAX_ACK_TRACKED_PACKETS as u32 {
+            ranges.observe(PacketNumber::new(packet_number));
+        }
+
+        ranges.observe(PacketNumber::new(MAX_ACK_TRACKED_PACKETS as u32));
+
+        let frame = ranges.frame();
+
+        assert!(!frame.acknowledges(PacketNumber::new(0)));
+        assert!(frame.acknowledges(PacketNumber::new(1)));
+        assert!(frame.acknowledges(PacketNumber::new(MAX_ACK_TRACKED_PACKETS as u32)));
+    }
+
+    #[test]
+    fn ack_ranges_prefer_newest_ranges_when_range_capacity_is_full() {
+        let mut ranges = AckRanges::new();
+
+        for packet_number in [0, 2, 4, 6, 8] {
+            ranges.observe(PacketNumber::new(packet_number));
+        }
+
+        let frame = ranges.frame();
+
+        assert_eq!(frame.range_count as usize, srt_core::MAX_ACK_RANGES);
+        assert!(frame.acknowledges(PacketNumber::new(8)));
+        assert!(frame.acknowledges(PacketNumber::new(6)));
+        assert!(frame.acknowledges(PacketNumber::new(4)));
+        assert!(frame.acknowledges(PacketNumber::new(2)));
+        assert!(!frame.acknowledges(PacketNumber::new(0)));
+    }
 }

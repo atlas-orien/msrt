@@ -495,7 +495,19 @@ start <= packet_number <= end
   -> acknowledged
 ```
 
-当前代码中的 ACK Frame 长度是固定长度，目的是保持 no_std 解码简单。后续可以继续优化压缩策略，但不能破坏 v1 已冻结的基本语义。
+当前代码中的 ACK Frame 长度是固定长度，目的是保持 no_std 解码简单。ACK range 生成使用固定容量滑动窗口：
+
+```text
+observed packet set full
+  -> newer packet number replaces oldest packet number
+
+range count > MAX_ACK_RANGES
+  -> encode newest ranges first
+```
+
+这样长期运行时 ACK 记忆会向新的 packet number 推进，不会卡在早期 packet 上。
+
+后续可以继续优化更紧凑的 ACK range wire encoding，或增加按时间 / packet distance 的过期策略，但不能破坏 v1 已冻结的基本 ACK range 语义。
 
 ## Fragmentation
 
@@ -698,7 +710,7 @@ v1 stable draft 不支持：
 
 v1 仍必须完成的可靠传输部分：
 
-1. ACK range 的压缩和过期策略。
+1. ACK range 的更紧凑 wire encoding 和时间 / distance 过期策略是否需要冻结。
 2. message 失败后的对端取消 / 本端清理语义。
 3. 更复杂持续收发场景下的窗口耗尽和恢复测试。
 4. LatestOnly / Deadline 的实际决策。

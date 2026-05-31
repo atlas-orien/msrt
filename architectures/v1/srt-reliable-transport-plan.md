@@ -122,13 +122,15 @@ v1 可以先限制 ACK range 数量，保持 no_std 固定容量。
 - fixed-capacity `AckFrame`。
 - ACK frame 编码 / 解码。
 - 接收端累计 observed packet numbers 并生成 ACK range。
+- observed packet set 使用固定容量滑动策略；容量满时保留更新的 packet number，淘汰最旧 packet number。
+- ACK range 数量超过 `MAX_ACK_RANGES` 时优先编码最新 ranges，避免长期运行时 ACK 卡在旧 packet 上。
 - 发送端收到 ACK range 后清理多个 in-flight packet。
 - gap ACK range 测试：ACK `0` 和 `2..3` 后只重发缺失的 packet `1`。
 
 后续仍需要补齐：
 
-- ACK range 的正式 wire draft 文档更新。
-- ACK range 压缩和过期策略。
+- ACK range 的更紧凑 wire encoding 是否需要在 v1 freeze 前调整。
+- ACK 记忆窗口是否需要从“按容量淘汰”升级为“按时间 / packet distance 过期”。
 
 ## 下一步二：重试失败事件
 
@@ -344,7 +346,7 @@ failed messages produce explicit failed events
 4. 实现 message 级失败聚合。已落地。
 5. 把 reassembly 从 single buffer 改成 fixed slot table。已落地。
 6. 增加 `send_on(channel_id, message)`。已落地。
-7. 实现 ACK range 数据结构和编码。已落地最小版本。
+7. 实现 ACK range 数据结构和编码。已落地最小版本，并补齐固定容量滑动淘汰。
 8. 让 retransmit 只重发缺失 packet。已落地。
 9. 实现 BestEffort 最小 channel policy。已落地。
 10. 补 smoke 和单元测试。持续推进。
