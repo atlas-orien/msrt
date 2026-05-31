@@ -2,9 +2,9 @@
 
 SRT, Serial Realtime Transport, is a protocol standard for message-oriented realtime serial links.
 
-This document is intentionally high level. The current goal is to freeze protocol ownership and crate boundaries before defining wire-level details.
+This document is intentionally high level. The current goal is to freeze protocol ownership, crate boundaries, and the first stable protocol draft before claiming wire compatibility.
 
-The current version is a protocol scaffold, not a finalized interoperable transport implementation.
+The current version is a hardened protocol scaffold with a stable protocol draft in progress. It is not yet a finalized interoperable transport implementation.
 
 ## Scope
 
@@ -49,3 +49,5 @@ Both implementation environments must implement the same protocol. Environment-s
 - `srt-wire`: byte-stream wire envelope boundaries.
 
 All current crates are protocol-standard crates. They are kept `no_std` so the standard remains portable to MCU environments.
+
+See [SRT v1 Stable Protocol Draft](architectures/v1/srt-stable-protocol-draft.md) for the current draft wire and packet model.

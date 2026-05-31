@@ -1,9 +1,19 @@
-//! Internal MVP packet layout constants.
+//! Internal v1 draft packet layout constants.
 
 /// Encoded checksum length in bytes.
 pub(crate) const CHECKSUM_LEN: usize = core::mem::size_of::<u16>();
+/// Encoded packet type length in bytes.
+pub(crate) const PACKET_TYPE_LEN: usize = core::mem::size_of::<u8>();
+/// Encoded packet flags length in bytes.
+pub(crate) const PACKET_FLAGS_LEN: usize = core::mem::size_of::<u8>();
 /// Encoded packet number length in bytes.
 pub(crate) const PACKET_NUMBER_LEN: usize = core::mem::size_of::<u32>();
+/// Encoded packet header length in bytes.
+pub(crate) const PACKET_HEADER_LEN: usize = PACKET_TYPE_LEN + PACKET_FLAGS_LEN + PACKET_NUMBER_LEN;
+/// Encoded frame type length in bytes.
+pub(crate) const FRAME_TYPE_LEN: usize = core::mem::size_of::<u8>();
+/// Encoded channel identifier length in bytes.
+pub(crate) const CHANNEL_ID_LEN: usize = core::mem::size_of::<u16>();
 /// Encoded message identifier length in bytes.
 pub(crate) const MESSAGE_ID_LEN: usize = core::mem::size_of::<u32>();
 /// Encoded complete message length field size in bytes.
@@ -12,15 +22,30 @@ pub(crate) const MESSAGE_LEN_LEN: usize = core::mem::size_of::<u16>();
 pub(crate) const FRAGMENT_OFFSET_LEN: usize = core::mem::size_of::<u16>();
 /// Encoded fragment flags field size in bytes.
 pub(crate) const FRAGMENT_FLAGS_LEN: usize = core::mem::size_of::<u8>();
-/// Encoded fragment metadata length in bytes.
-pub(crate) const FRAGMENT_HEADER_LEN: usize =
-    MESSAGE_ID_LEN + MESSAGE_LEN_LEN + FRAGMENT_OFFSET_LEN + FRAGMENT_FLAGS_LEN;
-/// Encoded packet metadata length before fragment bytes.
-pub(crate) const PACKET_META_LEN: usize = PACKET_NUMBER_LEN + FRAGMENT_HEADER_LEN;
-/// Encoded ACK packet payload length.
-pub(crate) const ACK_PACKET_LEN: usize = PACKET_NUMBER_LEN + PACKET_NUMBER_LEN;
+/// Encoded MESSAGE frame header length in bytes.
+pub(crate) const MESSAGE_FRAME_HEADER_LEN: usize = FRAME_TYPE_LEN
+    + CHANNEL_ID_LEN
+    + MESSAGE_ID_LEN
+    + MESSAGE_LEN_LEN
+    + FRAGMENT_OFFSET_LEN
+    + FRAGMENT_FLAGS_LEN;
+/// Encoded ACK frame length in bytes.
+pub(crate) const ACK_FRAME_LEN: usize = FRAME_TYPE_LEN + PACKET_NUMBER_LEN;
+/// Encoded ACK packet length.
+pub(crate) const ACK_PACKET_LEN: usize = PACKET_HEADER_LEN + ACK_FRAME_LEN;
 
 /// Fragment is the first fragment of a message.
 pub(crate) const FRAGMENT_FIRST: u8 = 1 << 0;
 /// Fragment is the last fragment of a message.
 pub(crate) const FRAGMENT_LAST: u8 = 1 << 1;
+
+/// DATA packet type code.
+pub(crate) const PACKET_TYPE_DATA: u8 = 0x00;
+/// ACK packet type code.
+pub(crate) const PACKET_TYPE_ACK: u8 = 0x01;
+/// ACK-eliciting packet flag.
+pub(crate) const PACKET_FLAG_ACK_ELICITING: u8 = 1 << 0;
+/// MESSAGE frame type code.
+pub(crate) const FRAME_TYPE_MESSAGE: u8 = 0x00;
+/// ACK frame type code.
+pub(crate) const FRAME_TYPE_ACK: u8 = 0x01;

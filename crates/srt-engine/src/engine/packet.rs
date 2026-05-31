@@ -1,10 +1,14 @@
-//! MVP packet byte layout glue.
+//! v1 draft packet byte layout glue.
 
-use srt_core::{Error, MessageId, PacketNumber, Result};
+use srt_core::{ChannelId, Error, MessageId, PacketNumber, Result};
 
 use crate::{
     MAX_WIRE_BYTES,
-    layout::{ACK_PACKET_LEN, FRAGMENT_FIRST, FRAGMENT_LAST, PACKET_META_LEN, PACKET_NUMBER_LEN},
+    layout::{
+        ACK_FRAME_LEN, FRAGMENT_FIRST, FRAGMENT_LAST, FRAME_TYPE_ACK, FRAME_TYPE_MESSAGE,
+        MESSAGE_FRAME_HEADER_LEN, PACKET_FLAG_ACK_ELICITING, PACKET_HEADER_LEN, PACKET_TYPE_ACK,
+        PACKET_TYPE_DATA,
+    },
 };
 
 /// Decoded MVP packet.
@@ -28,6 +32,7 @@ pub(crate) struct DecodedAck {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct DecodedFragment<'a> {
     pub(crate) packet_number: PacketNumber,
+    pub(crate) channel_id: ChannelId,
     pub(crate) message_id: MessageId,
     pub(crate) message_len: usize,
     pub(crate) fragment_offset: usize,
@@ -63,15 +68,21 @@ impl PacketBytes {
 }
 
 pub(crate) fn decode_packet_bytes(bytes: &[u8]) -> PacketDecode<'_> {
-    if bytes.len() == ACK_PACKET_LEN {
-        return ack_from_packet_bytes(bytes)
-            .map(PacketDecode::Ack)
-            .unwrap_or(PacketDecode::Malformed);
-    }
+    let Some(header) = packet_header_from_bytes(bytes) else {
+        return PacketDecode::Malformed;
+    };
 
-    fragment_from_packet_bytes(bytes)
-        .map(PacketDecode::Data)
-        .unwrap_or(PacketDecode::Malformed)
+    let frame_bytes = &bytes[PACKET_HEADER_LEN..];
+
+    match header.packet_type {
+        PACKET_TYPE_DATA => fragment_from_packet_bytes(header, frame_bytes)
+            .map(PacketDecode::Data)
+            .unwrap_or(PacketDecode::Malformed),
+        PACKET_TYPE_ACK => ack_from_packet_bytes(frame_bytes)
+            .map(PacketDecode::Ack)
+            .unwrap_or(PacketDecode::Malformed),
+        _ => PacketDecode::Malformed,
+    }
 }
 
 pub(crate) const fn fragment_flags(offset: usize, end: usize, message_len: usize) -> u8 {
@@ -88,10 +99,31 @@ pub(crate) const fn fragment_flags(offset: usize, end: usize, message_len: usize
     flags
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct DecodedPacketHeader {
+    packet_type: u8,
+    packet_flags: u8,
+    packet_number: PacketNumber,
+}
+
+fn packet_header_from_bytes(bytes: &[u8]) -> Option<DecodedPacketHeader> {
+    if bytes.len() < PACKET_HEADER_LEN {
+        return None;
+    }
+
+    Some(DecodedPacketHeader {
+        packet_type: *bytes.first()?,
+        packet_flags: *bytes.get(1)?,
+        packet_number: PacketNumber::new(u32::from_le_bytes(bytes.get(2..6)?.try_into().ok()?)),
+    })
+}
+
 fn ack_from_packet_bytes(bytes: &[u8]) -> Option<DecodedAck> {
-    let start = PACKET_NUMBER_LEN;
-    let end = start + PACKET_NUMBER_LEN;
-    let raw = bytes.get(start..end)?;
+    if bytes.len() != ACK_FRAME_LEN || *bytes.first()? != FRAME_TYPE_ACK {
+        return None;
+    }
+
+    let raw = bytes.get(1..5)?;
     let raw = u32::from_le_bytes(raw.try_into().ok()?);
 
     Some(DecodedAck {
@@ -99,17 +131,23 @@ fn ack_from_packet_bytes(bytes: &[u8]) -> Option<DecodedAck> {
     })
 }
 
-fn fragment_from_packet_bytes(bytes: &[u8]) -> Option<DecodedFragment<'_>> {
-    if bytes.len() < PACKET_META_LEN {
+fn fragment_from_packet_bytes(
+    header: DecodedPacketHeader,
+    bytes: &[u8],
+) -> Option<DecodedFragment<'_>> {
+    if bytes.len() < MESSAGE_FRAME_HEADER_LEN
+        || *bytes.first()? != FRAME_TYPE_MESSAGE
+        || header.packet_flags & PACKET_FLAG_ACK_ELICITING == 0
+    {
         return None;
     }
 
-    let packet_number = packet_number_from_packet_bytes(bytes)?;
-    let message_id = MessageId::new(u32::from_le_bytes(bytes.get(4..8)?.try_into().ok()?));
-    let message_len = u16::from_le_bytes(bytes.get(8..10)?.try_into().ok()?) as usize;
-    let fragment_offset = u16::from_le_bytes(bytes.get(10..12)?.try_into().ok()?) as usize;
-    let flags = *bytes.get(12)?;
-    let fragment = bytes.get(PACKET_META_LEN..)?;
+    let channel_id = ChannelId::new(u16::from_le_bytes(bytes.get(1..3)?.try_into().ok()?));
+    let message_id = MessageId::new(u32::from_le_bytes(bytes.get(3..7)?.try_into().ok()?));
+    let message_len = u16::from_le_bytes(bytes.get(7..9)?.try_into().ok()?) as usize;
+    let fragment_offset = u16::from_le_bytes(bytes.get(9..11)?.try_into().ok()?) as usize;
+    let flags = *bytes.get(11)?;
+    let fragment = bytes.get(MESSAGE_FRAME_HEADER_LEN..)?;
 
     let end = fragment_offset.checked_add(fragment.len())?;
 
@@ -118,18 +156,12 @@ fn fragment_from_packet_bytes(bytes: &[u8]) -> Option<DecodedFragment<'_>> {
     }
 
     Some(DecodedFragment {
-        packet_number,
+        packet_number: header.packet_number,
+        channel_id,
         message_id,
         message_len,
         fragment_offset,
         flags,
         bytes: fragment,
     })
-}
-
-fn packet_number_from_packet_bytes(bytes: &[u8]) -> Option<PacketNumber> {
-    let raw = bytes.get(..PACKET_NUMBER_LEN)?;
-    let raw = u32::from_le_bytes(raw.try_into().ok()?);
-
-    Some(PacketNumber::new(raw))
 }

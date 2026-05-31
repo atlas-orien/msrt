@@ -300,10 +300,37 @@ mod tests {
         assert_eq!(&fragment_lengths[..fragment_count], &[10, 1]);
     }
 
+    #[test]
+    fn engine_encodes_v1_draft_packet_and_frame_headers() {
+        let mut engine = Engine::new(EngineConfig::default());
+
+        engine.send(b"hello").unwrap();
+
+        let write = next_write(&mut engine);
+        let bytes = write.as_bytes();
+
+        assert_eq!(&bytes[..2], &srt_wire::EnvelopeMagic::SRT.bytes());
+        assert_eq!(bytes[8], crate::layout::PACKET_TYPE_DATA);
+        assert_eq!(bytes[9], crate::layout::PACKET_FLAG_ACK_ELICITING);
+        assert_eq!(
+            u32::from_le_bytes(bytes[10..14].try_into().unwrap()),
+            write.packet_number.get()
+        );
+        assert_eq!(bytes[14], crate::layout::FRAME_TYPE_MESSAGE);
+        assert_eq!(
+            u16::from_le_bytes(bytes[15..17].try_into().unwrap()),
+            srt_core::ChannelId::CONTROL.get()
+        );
+        assert_eq!(
+            bytes[25],
+            crate::layout::FRAGMENT_FIRST | crate::layout::FRAGMENT_LAST
+        );
+    }
+
     fn fragment_len_from_wire(bytes: &[u8]) -> usize {
         let packet_len = u16::from_le_bytes([bytes[4], bytes[5]]) as usize;
 
-        packet_len - crate::layout::PACKET_META_LEN
+        packet_len - crate::layout::PACKET_HEADER_LEN - crate::layout::MESSAGE_FRAME_HEADER_LEN
     }
 
     fn next_write(engine: &mut Engine) -> super::WriteEvent {

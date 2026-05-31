@@ -1,14 +1,15 @@
 //! Outgoing message fragmentation and ACK encoding.
 
-use srt_core::{
-    Error, ErrorKind, Flags, MessageId, Packet, PacketHeader, PacketNumber, PacketType, Result,
-};
+use srt_core::{ChannelId, Error, ErrorKind, MessageId, PacketNumber, Result};
 use srt_wire::{Checksum, Crc16, EnvelopeHeader, EnvelopeMagic, WireFlags};
 
 use crate::{
     Engine, EngineOutput, MAX_MESSAGE_BYTES, MAX_WIRE_BYTES, WriteEvent,
     engine::{inflight::InFlightPacket, packet::fragment_flags},
-    layout::{ACK_PACKET_LEN, CHECKSUM_LEN, PACKET_META_LEN},
+    layout::{
+        ACK_PACKET_LEN, CHECKSUM_LEN, FRAME_TYPE_ACK, FRAME_TYPE_MESSAGE, MESSAGE_FRAME_HEADER_LEN,
+        PACKET_FLAG_ACK_ELICITING, PACKET_HEADER_LEN, PACKET_TYPE_ACK, PACKET_TYPE_DATA,
+    },
 };
 
 impl Engine {
@@ -60,6 +61,7 @@ impl Engine {
             let flags = fragment_flags(offset, end, message.len());
             let encoded = FragmentToEncode {
                 packet_number,
+                channel_id: ChannelId::CONTROL,
                 message_id,
                 message_len: message.len(),
                 fragment_offset: offset,
@@ -94,6 +96,7 @@ impl Engine {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct FragmentToEncode<'a> {
     packet_number: PacketNumber,
+    channel_id: ChannelId,
     message_id: MessageId,
     message_len: usize,
     fragment_offset: usize,
@@ -106,14 +109,10 @@ fn encode_message_fragment(
     out: &mut [u8],
     checksum: &impl Checksum,
 ) -> Result<usize> {
-    let header = PacketHeader::new(
-        PacketType::Data,
-        fragment_to_encode.packet_number,
-        Flags::ACK_ELICITING,
-    );
-    let packet = Packet::new(header, fragment_to_encode.fragment);
-    let packet_len = PACKET_META_LEN + packet.payload_len();
+    let packet_len =
+        PACKET_HEADER_LEN + MESSAGE_FRAME_HEADER_LEN + fragment_to_encode.fragment.len();
     let packet_len = u16::try_from(packet_len).map_err(|_| Error::new(ErrorKind::Engine))?;
+    let channel_id = fragment_to_encode.channel_id.get();
     let message_len =
         u16::try_from(fragment_to_encode.message_len).map_err(|_| Error::new(ErrorKind::Engine))?;
     let fragment_offset = u16::try_from(fragment_to_encode.fragment_offset)
@@ -131,12 +130,16 @@ fn encode_message_fragment(
     out[4..6].copy_from_slice(&envelope_header.packet_len.to_le_bytes());
     out[6] = envelope_header.flags.bits();
     out[7] = envelope_header.reserved;
-    out[8..12].copy_from_slice(&packet.header.packet_number.get().to_le_bytes());
-    out[12..16].copy_from_slice(&fragment_to_encode.message_id.get().to_le_bytes());
-    out[16..18].copy_from_slice(&message_len.to_le_bytes());
-    out[18..20].copy_from_slice(&fragment_offset.to_le_bytes());
-    out[20] = fragment_to_encode.flags;
-    out[21..21 + packet.payload_len()].copy_from_slice(packet.payload.as_bytes());
+    out[8] = PACKET_TYPE_DATA;
+    out[9] = PACKET_FLAG_ACK_ELICITING;
+    out[10..14].copy_from_slice(&fragment_to_encode.packet_number.get().to_le_bytes());
+    out[14] = FRAME_TYPE_MESSAGE;
+    out[15..17].copy_from_slice(&channel_id.to_le_bytes());
+    out[17..21].copy_from_slice(&fragment_to_encode.message_id.get().to_le_bytes());
+    out[21..23].copy_from_slice(&message_len.to_le_bytes());
+    out[23..25].copy_from_slice(&fragment_offset.to_le_bytes());
+    out[25] = fragment_to_encode.flags;
+    out[26..26 + fragment_to_encode.fragment.len()].copy_from_slice(fragment_to_encode.fragment);
 
     let checksum_value = checksum.calculate(&out[..total_len - CHECKSUM_LEN]);
     out[total_len - CHECKSUM_LEN..total_len].copy_from_slice(&checksum_value.to_le_bytes());
@@ -164,8 +167,11 @@ fn encode_ack_packet(
     out[4..6].copy_from_slice(&envelope_header.packet_len.to_le_bytes());
     out[6] = envelope_header.flags.bits();
     out[7] = envelope_header.reserved;
-    out[8..12].copy_from_slice(&packet_number.get().to_le_bytes());
-    out[12..16].copy_from_slice(&acknowledged.get().to_le_bytes());
+    out[8] = PACKET_TYPE_ACK;
+    out[9] = 0;
+    out[10..14].copy_from_slice(&packet_number.get().to_le_bytes());
+    out[14] = FRAME_TYPE_ACK;
+    out[15..19].copy_from_slice(&acknowledged.get().to_le_bytes());
 
     let checksum_value = checksum.calculate(&out[..total_len - CHECKSUM_LEN]);
     out[total_len - CHECKSUM_LEN..total_len].copy_from_slice(&checksum_value.to_le_bytes());
@@ -174,5 +180,9 @@ fn encode_ack_packet(
 }
 
 const fn max_fragment_bytes() -> usize {
-    MAX_WIRE_BYTES - srt_wire::WIRE_HEADER_LEN - PACKET_META_LEN - CHECKSUM_LEN
+    MAX_WIRE_BYTES
+        - srt_wire::WIRE_HEADER_LEN
+        - PACKET_HEADER_LEN
+        - MESSAGE_FRAME_HEADER_LEN
+        - CHECKSUM_LEN
 }
