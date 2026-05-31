@@ -310,20 +310,20 @@ mod tests {
         let bytes = write.as_bytes();
 
         assert_eq!(&bytes[..2], &srt_wire::EnvelopeMagic::SRT.bytes());
-        assert_eq!(bytes[8], crate::layout::PACKET_TYPE_DATA);
-        assert_eq!(bytes[9], crate::layout::PACKET_FLAG_ACK_ELICITING);
+        assert_eq!(bytes[8], srt_core::PacketType::Data.code());
+        assert_eq!(bytes[9], srt_core::Flags::ACK_ELICITING.bits());
         assert_eq!(
             u32::from_le_bytes(bytes[10..14].try_into().unwrap()),
             write.packet_number.get()
         );
-        assert_eq!(bytes[14], crate::layout::FRAME_TYPE_MESSAGE);
+        assert_eq!(bytes[14], srt_core::FrameKind::Message.code());
         assert_eq!(
             u16::from_le_bytes(bytes[15..17].try_into().unwrap()),
             srt_core::ChannelId::CONTROL.get()
         );
         assert_eq!(
             bytes[25],
-            crate::layout::FRAGMENT_FIRST | crate::layout::FRAGMENT_LAST
+            srt_core::MessageFlags::FIRST.bits() | srt_core::MessageFlags::LAST.bits()
         );
     }
 

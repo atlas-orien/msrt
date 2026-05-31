@@ -1,15 +1,14 @@
 //! Outgoing message fragmentation and ACK encoding.
 
-use srt_core::{ChannelId, Error, ErrorKind, MessageId, PacketNumber, Result};
+use srt_core::{
+    ChannelId, Error, ErrorKind, Flags, FrameKind, MessageId, PacketNumber, PacketType, Result,
+};
 use srt_wire::{Checksum, Crc16, EnvelopeHeader, EnvelopeMagic, WireFlags};
 
 use crate::{
     Engine, EngineOutput, MAX_MESSAGE_BYTES, MAX_WIRE_BYTES, WriteEvent,
     engine::{inflight::InFlightPacket, packet::fragment_flags},
-    layout::{
-        ACK_PACKET_LEN, CHECKSUM_LEN, FRAME_TYPE_ACK, FRAME_TYPE_MESSAGE, MESSAGE_FRAME_HEADER_LEN,
-        PACKET_FLAG_ACK_ELICITING, PACKET_HEADER_LEN, PACKET_TYPE_ACK, PACKET_TYPE_DATA,
-    },
+    layout::{ACK_PACKET_LEN, CHECKSUM_LEN, MESSAGE_FRAME_HEADER_LEN, PACKET_HEADER_LEN},
 };
 
 impl Engine {
@@ -130,10 +129,10 @@ fn encode_message_fragment(
     out[4..6].copy_from_slice(&envelope_header.packet_len.to_le_bytes());
     out[6] = envelope_header.flags.bits();
     out[7] = envelope_header.reserved;
-    out[8] = PACKET_TYPE_DATA;
-    out[9] = PACKET_FLAG_ACK_ELICITING;
+    out[8] = PacketType::Data.code();
+    out[9] = Flags::ACK_ELICITING.bits();
     out[10..14].copy_from_slice(&fragment_to_encode.packet_number.get().to_le_bytes());
-    out[14] = FRAME_TYPE_MESSAGE;
+    out[14] = FrameKind::Message.code();
     out[15..17].copy_from_slice(&channel_id.to_le_bytes());
     out[17..21].copy_from_slice(&fragment_to_encode.message_id.get().to_le_bytes());
     out[21..23].copy_from_slice(&message_len.to_le_bytes());
@@ -167,10 +166,10 @@ fn encode_ack_packet(
     out[4..6].copy_from_slice(&envelope_header.packet_len.to_le_bytes());
     out[6] = envelope_header.flags.bits();
     out[7] = envelope_header.reserved;
-    out[8] = PACKET_TYPE_ACK;
+    out[8] = PacketType::Ack.code();
     out[9] = 0;
     out[10..14].copy_from_slice(&packet_number.get().to_le_bytes());
-    out[14] = FRAME_TYPE_ACK;
+    out[14] = FrameKind::Ack.code();
     out[15..19].copy_from_slice(&acknowledged.get().to_le_bytes());
 
     let checksum_value = checksum.calculate(&out[..total_len - CHECKSUM_LEN]);

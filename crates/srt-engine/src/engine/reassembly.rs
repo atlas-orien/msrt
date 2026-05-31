@@ -1,12 +1,8 @@
 //! Message reassembly buffer.
 
-use srt_core::{Error, ErrorKind, MessageId, Result};
+use srt_core::{Error, ErrorKind, MessageFlags, MessageId, Result};
 
-use crate::{
-    MAX_MESSAGE_BYTES, MessageEvent,
-    engine::packet::DecodedFragment,
-    layout::{FRAGMENT_FIRST, FRAGMENT_LAST},
-};
+use crate::{MAX_MESSAGE_BYTES, MessageEvent, engine::packet::DecodedFragment};
 
 /// Fixed-capacity MVP message reassembly buffer.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -40,7 +36,7 @@ impl ReassemblyBuffer {
         }
 
         if !self.active {
-            if fragment.flags & FRAGMENT_FIRST == 0 {
+            if !MessageFlags::from_bits(fragment.flags).contains(MessageFlags::FIRST) {
                 return Ok(None);
             }
 
@@ -50,7 +46,9 @@ impl ReassemblyBuffer {
             self.last_seen = false;
             self.received = [false; MAX_MESSAGE_BYTES];
             self.bytes = [0; MAX_MESSAGE_BYTES];
-        } else if self.message_id != fragment.message_id && fragment.flags & FRAGMENT_FIRST != 0 {
+        } else if self.message_id != fragment.message_id
+            && MessageFlags::from_bits(fragment.flags).contains(MessageFlags::FIRST)
+        {
             self.active = true;
             self.message_id = fragment.message_id;
             self.expected_len = fragment.message_len;
@@ -75,7 +73,7 @@ impl ReassemblyBuffer {
             *received = true;
         }
 
-        if fragment.flags & FRAGMENT_LAST != 0 {
+        if MessageFlags::from_bits(fragment.flags).contains(MessageFlags::LAST) {
             self.last_seen = true;
         }
 

@@ -8,14 +8,11 @@ impl Flags {
     /// Empty flag set.
     pub const EMPTY: Self = Self(0);
 
-    /// Packet uses a long header form.
-    pub const LONG_HEADER: Self = Self(1 << 0);
-
     /// Packet is ack-eliciting.
-    pub const ACK_ELICITING: Self = Self(1 << 1);
+    pub const ACK_ELICITING: Self = Self(1 << 0);
 
     /// Packet contains realtime-sensitive frames.
-    pub const REALTIME: Self = Self(1 << 2);
+    pub const REALTIME: Self = Self(1 << 1);
 
     /// Creates flags from raw bits.
     #[must_use]
@@ -52,6 +49,6 @@ mod tests {
 
         assert!(flags.contains(Flags::ACK_ELICITING));
         assert!(flags.contains(Flags::REALTIME));
-        assert!(!flags.contains(Flags::LONG_HEADER));
+        assert!(!flags.contains(Flags::from_bits(1 << 7)));
     }
 }

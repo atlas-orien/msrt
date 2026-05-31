@@ -33,19 +33,3 @@ pub(crate) const MESSAGE_FRAME_HEADER_LEN: usize = FRAME_TYPE_LEN
 pub(crate) const ACK_FRAME_LEN: usize = FRAME_TYPE_LEN + PACKET_NUMBER_LEN;
 /// Encoded ACK packet length.
 pub(crate) const ACK_PACKET_LEN: usize = PACKET_HEADER_LEN + ACK_FRAME_LEN;
-
-/// Fragment is the first fragment of a message.
-pub(crate) const FRAGMENT_FIRST: u8 = 1 << 0;
-/// Fragment is the last fragment of a message.
-pub(crate) const FRAGMENT_LAST: u8 = 1 << 1;
-
-/// DATA packet type code.
-pub(crate) const PACKET_TYPE_DATA: u8 = 0x00;
-/// ACK packet type code.
-pub(crate) const PACKET_TYPE_ACK: u8 = 0x01;
-/// ACK-eliciting packet flag.
-pub(crate) const PACKET_FLAG_ACK_ELICITING: u8 = 1 << 0;
-/// MESSAGE frame type code.
-pub(crate) const FRAME_TYPE_MESSAGE: u8 = 0x00;
-/// ACK frame type code.
-pub(crate) const FRAME_TYPE_ACK: u8 = 0x01;

@@ -1,14 +1,12 @@
 //! v1 draft packet byte layout glue.
 
-use srt_core::{ChannelId, Error, MessageId, PacketNumber, Result};
+use srt_core::{
+    ChannelId, Error, Flags, FrameKind, MessageFlags, MessageId, PacketNumber, PacketType, Result,
+};
 
 use crate::{
     MAX_WIRE_BYTES,
-    layout::{
-        ACK_FRAME_LEN, FRAGMENT_FIRST, FRAGMENT_LAST, FRAME_TYPE_ACK, FRAME_TYPE_MESSAGE,
-        MESSAGE_FRAME_HEADER_LEN, PACKET_FLAG_ACK_ELICITING, PACKET_HEADER_LEN, PACKET_TYPE_ACK,
-        PACKET_TYPE_DATA,
-    },
+    layout::{ACK_FRAME_LEN, MESSAGE_FRAME_HEADER_LEN, PACKET_HEADER_LEN},
 };
 
 /// Decoded MVP packet.
@@ -74,14 +72,14 @@ pub(crate) fn decode_packet_bytes(bytes: &[u8]) -> PacketDecode<'_> {
 
     let frame_bytes = &bytes[PACKET_HEADER_LEN..];
 
-    match header.packet_type {
-        PACKET_TYPE_DATA => fragment_from_packet_bytes(header, frame_bytes)
+    match PacketType::from_code(header.packet_type) {
+        Some(PacketType::Data) => fragment_from_packet_bytes(header, frame_bytes)
             .map(PacketDecode::Data)
             .unwrap_or(PacketDecode::Malformed),
-        PACKET_TYPE_ACK => ack_from_packet_bytes(frame_bytes)
+        Some(PacketType::Ack) => ack_from_packet_bytes(frame_bytes)
             .map(PacketDecode::Ack)
             .unwrap_or(PacketDecode::Malformed),
-        _ => PacketDecode::Malformed,
+        None => PacketDecode::Malformed,
     }
 }
 
@@ -89,11 +87,11 @@ pub(crate) const fn fragment_flags(offset: usize, end: usize, message_len: usize
     let mut flags = 0;
 
     if offset == 0 {
-        flags |= FRAGMENT_FIRST;
+        flags |= MessageFlags::FIRST.bits();
     }
 
     if end == message_len {
-        flags |= FRAGMENT_LAST;
+        flags |= MessageFlags::LAST.bits();
     }
 
     flags
@@ -119,7 +117,7 @@ fn packet_header_from_bytes(bytes: &[u8]) -> Option<DecodedPacketHeader> {
 }
 
 fn ack_from_packet_bytes(bytes: &[u8]) -> Option<DecodedAck> {
-    if bytes.len() != ACK_FRAME_LEN || *bytes.first()? != FRAME_TYPE_ACK {
+    if bytes.len() != ACK_FRAME_LEN || *bytes.first()? != FrameKind::Ack.code() {
         return None;
     }
 
@@ -136,8 +134,8 @@ fn fragment_from_packet_bytes(
     bytes: &[u8],
 ) -> Option<DecodedFragment<'_>> {
     if bytes.len() < MESSAGE_FRAME_HEADER_LEN
-        || *bytes.first()? != FRAME_TYPE_MESSAGE
-        || header.packet_flags & PACKET_FLAG_ACK_ELICITING == 0
+        || *bytes.first()? != FrameKind::Message.code()
+        || header.packet_flags & Flags::ACK_ELICITING.bits() == 0
     {
         return None;
     }
