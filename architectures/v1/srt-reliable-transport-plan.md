@@ -215,6 +215,7 @@ MAX_MESSAGE_BYTES
 - `MAX_REASSEMBLY_MESSAGES`。
 - 按 `ChannelId + MessageId` 查找 reassembly slot。
 - A/B 两条 message fragment 交错到达时可以分别完成。
+- first fragment 不要求最先到达；如果中间 fragment 先到，接收端也可以创建 reassembly slot，等待缺失 fragment 通过重传补齐。
 - `reassembly_timeout_ms` 配置。
 - incomplete reassembly slot timeout 后释放。
 - reassembly budget 满时返回明确 engine error。
@@ -315,18 +316,18 @@ MAX_EVENTS
 
 v1 可靠传输完成前，至少需要这些测试：
 
-1. 单向多 message 同时 in-flight。
-2. 双向多 message 同时 in-flight。
-3. 多 channel 同时收发。
-4. fragment 乱序到达。
-5. ACK range 覆盖多个 packet。
-6. ACK range 带 gap 后只重发缺失 packet。
-7. retry limit reached 后产生 failed event。
-8. duplicate retransmit 不重复交付 message。
-9. reassembly buffer 满后的行为明确。
-10. BestEffort 丢包后不重传。
+1. 单向多 message 同时 in-flight。已覆盖。
+2. 双向多 message 同时 in-flight。已覆盖。
+3. 多 channel 同时收发。已覆盖。
+4. fragment 乱序到达。已覆盖。
+5. ACK range 覆盖多个 packet。已覆盖。
+6. ACK range 带 gap 后只重发缺失 packet。已覆盖。
+7. retry limit reached 后产生 failed event。已覆盖。
+8. duplicate retransmit 不重复交付 message。已覆盖。
+9. reassembly buffer 满后的行为明确。已覆盖。
+10. BestEffort 丢包后不重传。已覆盖。
 
-smoke 需要增加一个持续收发场景：
+已经增加 deterministic long-run integration simulation：
 
 ```text
 mac sends A0, A1, A2
@@ -336,6 +337,8 @@ both sides continue receive/tick/poll
 reliable messages eventually arrive
 failed messages produce explicit failed events
 ```
+
+当前 simulation 是 deterministic fault model，不使用随机数，便于在 CI 中稳定复现。
 
 ## 推荐实现顺序
 

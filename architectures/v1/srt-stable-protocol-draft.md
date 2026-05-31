@@ -466,6 +466,8 @@ bit 2..7: reserved
 
 接收端不能只依赖 `last` 判断完整 message。必须检查所有 byte range 是否完整覆盖。
 
+接收端也不能要求 `first` fragment 必须最先到达。串口链路上的重传、乱序测试和 sticky decode 都可能让中间 fragment 先被处理。只要 fragment 携带的 `channel_id + message_id + message_len` 一致，接收端可以先创建 reassembly slot，等待缺失 byte range 通过后续 packet 或 retransmit 补齐。
+
 ## ACK Frame
 
 v1 draft 当前定义 fixed-capacity ACK range。
@@ -714,7 +716,7 @@ v1 仍必须完成的可靠传输部分：
 
 1. ACK range 的更紧凑 wire encoding 和时间 / distance 过期策略是否需要冻结。
 2. message 失败后的对端取消语义。
-3. 更复杂持续收发场景下的窗口耗尽和恢复测试。
+3. 窗口耗尽和恢复测试是否需要更接近真实设备负载。
 4. LatestOnly / Deadline 的实际决策。
 5. heapless/no-alloc buffer 策略最终冻结。
 

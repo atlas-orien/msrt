@@ -60,10 +60,6 @@ impl ReassemblyBuffer {
         fragment: DecodedFragment<'_>,
         now_ms: u64,
     ) -> Result<usize> {
-        if !MessageFlags::from_bits(fragment.flags).contains(MessageFlags::FIRST) {
-            return Err(Error::new(ErrorKind::Engine));
-        }
-
         let Some(index) = self.slots.iter().position(|slot| !slot.active) else {
             return Err(Error::new(ErrorKind::Engine));
         };
