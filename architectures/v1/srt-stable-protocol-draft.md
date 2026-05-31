@@ -2,7 +2,7 @@
 
 ## 状态
 
-本文档是 SRT v1 stable protocol 的第一版草案。
+本文档是 SRT v1 stable protocol 的第一版 draft-locked 草案。
 
 它的目的不是继续探索方向，而是把当前已经验证过的 MVP / hardening 行为整理成可以审核的协议标准边界。
 
@@ -16,10 +16,10 @@ v1 hardening
   当前范围已完成。
 
 v1 stable protocol
-  本文档开始冻结草案，代码后续需要逐步对齐。
+  draft-locked，当前代码已经按本文档的基础 wire / packet / frame layout 对齐。
 ```
 
-本文档中的字段和行为应作为后续代码修改的依据。代码如果和本文档不一致，应该优先判断是文档需要修正，还是代码仍然停留在 MVP 临时实现。
+本文档中的字段和行为是 v1 基础协议收关边界。代码如果和本文档不一致，应该优先判断是文档需要修正，还是代码出现了协议漂移。
 
 ## 协议定位
 
@@ -231,24 +231,31 @@ checksum_present = 1
 
 ### Checksum
 
-v1 draft 保留 `u16 checksum` 字段。
+v1 draft 使用 `u16 checksum` 字段。
 
-当前 MVP 中 checksum 仍是临时 additive checksum。stable protocol 需要在代码对齐阶段冻结为真正 CRC16。
-
-候选：
+v1 draft 冻结为：
 
 ```text
-CRC-16/CCITT-FALSE
 CRC-16/XMODEM
 ```
 
-冻结前要求：
+参数：
+
+```text
+width   = 16
+poly    = 0x1021
+init    = 0x0000
+xorout  = 0x0000
+refin   = false
+refout  = false
+check   = 0x31c3  // "123456789"
+```
+
+选择原因：
 
 - MCU 实现简单。
 - no_std 实现不依赖查表也可接受。
-- 文档必须给出 polynomial、init、xorout、refin、refout。
-
-在 checksum 最终冻结之前，v1 不能宣称 wire-compatible stable。
+- 当前 `srt-wire::Crc16` 已按该参数实现。
 
 ## Packet
 
@@ -666,17 +673,24 @@ v1 stable draft 不支持：
 
 ## 代码对齐清单
 
-后续代码应按本文档检查：
+当前代码已按本文档检查：
 
-1. `srt-core` 是否只暴露 MESSAGE / ACK frame。
-2. `srt-core` 是否使用 `MessageFrame` / `ChannelId` 命名。
-3. `srt-wire` 是否完整实现 envelope header、magic、version、length、checksum、resync。
-4. `srt-engine` 是否继续保持正式 Packet Header + MESSAGE / ACK Frame layout。
-5. Packet Header 是否明确编码 `packet_type`、`packet_flags`、`packet_number`。
-6. MESSAGE Frame 是否明确编码 `frame_type`、`channel_id`、`message_id`、`message_len`、`fragment_offset`、`message_flags`。
-7. ACK Frame 是否明确编码 `frame_type`、`largest_acknowledged`。
-8. checksum 是否从临时 additive checksum 冻结为正式 CRC16。
-9. smoke 是否继续覆盖 half packet、sticky packet、CRC error、drop、ACK、retransmit、duplicate packet、bidirectional message。
+1. `srt-core` 只暴露 MESSAGE / ACK frame。
+2. `srt-core` 使用 `MessageFrame` / `ChannelId` 命名。
+3. `srt-wire` 实现 envelope header、magic、version、length、CRC-16/XMODEM、resync。
+4. `srt-engine` 使用正式 Packet Header + MESSAGE / ACK Frame layout。
+5. Packet Header 明确编码 `packet_type`、`packet_flags`、`packet_number`。
+6. MESSAGE Frame 明确编码 `frame_type`、`channel_id`、`message_id`、`message_len`、`fragment_offset`、`message_flags`。
+7. ACK Frame 明确编码 `frame_type`、`largest_acknowledged`。
+8. smoke 覆盖 half packet、sticky packet、CRC error、drop、ACK、retransmit、duplicate packet、bidirectional message。
+
+后续仍未冻结完整算法的部分：
+
+1. ACK range。
+2. retry limit 和 send failed event。
+3. 多 message / 多 channel reassembly。
+4. partial reliability / latest-only 的实际决策。
+5. heapless/no-alloc buffer 策略配置。
 
 ## 结论
 

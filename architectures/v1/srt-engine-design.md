@@ -10,7 +10,7 @@
 当上层要发送一条 message，或者底层收到一段 bytes 时，SRT 协议应该如何推进？
 ```
 
-当前 v1 MVP 已经实现一个最小 concrete `Engine` 状态机，用于验证 no_std 通信闭环。它不是最终完整协议状态机。
+当前 v1 已经实现一个最小 concrete `Engine` 状态机，用于验证 no_std 通信闭环、streaming wire ingress 和第一版 stable draft-lock。它不是最终完整可靠性算法状态机。
 
 ## 位置
 
@@ -26,8 +26,8 @@ srt-reliability
 srt-engine
   组织发送、接收、响应、tick、事件交付。
 
-Serial Envelope / Wire Boundary
-  后续负责 Packet 与串口字节流之间的边界、校验和重同步。
+srt-wire
+  负责 Packet 与串口字节流之间的边界、校验和重同步。
 ```
 
 `srt-engine` 依赖 `srt-core` 和 `srt-reliability` 的概念，但不应该依赖具体硬件、OS、async executor 或堆分配模型。
@@ -140,15 +140,15 @@ for fragment in message.chunks(...) {
 
 拆分 message、生成多个 packet、维护 packet number、等待 ACK、未来触发重传，都是 engine 内部职责。
 
-注意：当前 `srt-core` 中 `PacketPayload` 暂时还是 borrowed bytes，表示 encoded protocol frames。真正的 frame 编码格式还没有冻结。
+注意：当前 `srt-core` 中 `PacketPayload` 仍然是 borrowed bytes，表示 encoded protocol frames。v1 draft-lock 已经冻结 MESSAGE / ACK 的基础编码格式，完整多 frame serialization 能力留到后续阶段。
 
-因此第一阶段 engine 只需要定义发送意图和边界，不应该提前实现最终 packet/frame 编码。
+因此第一阶段 engine 已经实现最小 packet/frame 编码，用于验证 v1 基础协议闭环；后续不应该把完整可靠性算法提前塞进 wire parser。
 
 ## 接收路径
 
 接收路径从底层收到的数据开始。
 
-未来完整路径应该是：
+当前完整路径是：
 
 ```text
 raw bytes
@@ -160,7 +160,7 @@ raw bytes
   -> complete message event
 ```
 
-当前 v1 MVP 使用临时 wire envelope 编码来验证 engine 行为。最终 wire format 还没有冻结。
+当前 v1 使用 `srt-wire` 的 Wire Envelope 和 StreamingDecoder 推进接收路径。第一版 wire format 已经 draft-locked。
 
 后续当 wire 层出现时，engine 不应该自己处理：
 
@@ -514,16 +514,16 @@ TCP mock
 test buffer
 ```
 
-但 `RawLink` 本身不属于最终协议 wire format。
+但 `RawLink` 本身不属于协议 wire format。
 
-未来如果设计独立 wire crate，engine 可能不会直接面对 raw bytes，而是面对：
+当前已经有独立 `srt-wire` crate。`RawLink` 仍然只是外部链路抽象草案，engine 的核心 API 仍然是：
 
 ```text
-PacketReader
-PacketWriter
+receive(bytes)
+poll_event()
 ```
 
-因此当前 `RawLink` 只是临时且保守的边界。
+因此当前 `RawLink` 只是保守的链路边界说明，不是 v1 必须实现的公共 API。
 
 ## 不属于本 crate 的内容
 
@@ -539,10 +539,10 @@ PacketWriter
 - tokio adapter
 - CLI
 - 完整可靠性算法
-- 完整 wire format 编解码
+- 硬件或 OS 链路 IO
 - 具体 heapless buffer 容量
 
-这些内容应该由 `srt-core`、`srt-reliability`、后续 wire 层和环境适配层分别处理。
+这些内容应该由 `srt-core`、`srt-reliability`、`srt-wire` 和环境适配层分别处理。
 
 ## 当前目录结构
 
@@ -553,6 +553,14 @@ srt-engine/src/
 ├── lib.rs
 ├── config.rs
 ├── engine.rs
+├── engine/
+│   ├── inflight.rs
+│   ├── ingress.rs
+│   ├── outgoing.rs
+│   ├── packet.rs
+│   ├── queue.rs
+│   ├── reassembly.rs
+│   └── retransmit.rs
 ├── event.rs
 ├── layout.rs
 ├── link.rs
@@ -570,7 +578,7 @@ srt-engine/src/
 1. 明确 engine 是协议状态机边界，不是 OS executor。
 2. 定义发送、接收、tick、poll event 的最小接口。
 3. 实现最小 ACK 响应、in-flight tracking、tick 重发和 message reassembly。
-4. 使用临时 wire envelope 验证 smoke。
+4. 使用 `srt-wire` Wire Envelope 和 StreamingDecoder 验证 smoke。
 5. 不绑定 std、tokio、embedded-hal 或具体 MCU。
 
-`srt-engine` 是 SRT 协议真正“活起来”的地方。当前 v1 MVP 已经跑通最小闭环，下一阶段应该继续 harden wire decode 和可靠性策略。
+`srt-engine` 是 SRT 协议真正“活起来”的地方。当前 v1 基础阶段已经跑通最小闭环、wire hardening 和 draft-lock，下一阶段应该继续加深可靠性策略。

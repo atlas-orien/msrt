@@ -4,7 +4,7 @@ This roadmap describes the current scaffold milestone and the next implementatio
 
 ## v1
 
-Status: MVP complete, hardening complete for current scope, stable protocol draft next.
+Status: MVP complete, hardening complete for current scope, stable protocol draft locked.
 
 The current workspace freezes the no-std protocol crate boundaries and contains a minimal working protocol engine:
 
@@ -47,15 +47,22 @@ Completed in the current hardening scope:
 
 ## v1 Stable Protocol Draft
 
-The next phase freezes the protocol draft before changing more code:
+The current v1 protocol draft is locked for the first no-std implementation:
 
-1. Freeze the first wire format draft.
-2. Move MVP packet encoding toward the final Packet / Frame serialization model.
-3. Freeze MESSAGE / ACK frame serialization.
-4. Freeze CRC16 parameters.
-5. Define ACK semantics, retry limits, and failure events.
-6. Define multi-message and multi-channel reassembly behavior.
-7. Add heapless/no-alloc buffer strategy configuration.
+1. Wire Envelope uses magic, version, header length, packet length, wire flags, reserved byte, and CRC-16/XMODEM.
+2. Packet Header encodes packet type, packet flags, and packet number.
+3. v1 protocol frames are MESSAGE and ACK only.
+4. MESSAGE frame serialization encodes channel id, message id, message length, fragment offset, message flags, and fragment bytes.
+5. ACK frame serialization encodes a single acknowledged packet number.
+6. The engine uses greedy fragmentation and event-based message delivery.
+
+Remaining work after v1 is reliability depth, not protocol scaffolding:
+
+1. ACK ranges.
+2. Retry limits and send-failed events.
+3. Multi-message and multi-channel reassembly behavior.
+4. Partial reliability policy implementation.
+5. Heapless/no-alloc buffer strategy configuration.
 
 Runtime adapters remain out of this repository.
 

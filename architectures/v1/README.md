@@ -7,7 +7,7 @@ v1 是 SRT 的 no_std protocol 阶段。
 ```text
 v1 MVP: 已完成
 v1 hardening: 当前范围已完成
-v1 stable protocol: 草案编写中
+v1 stable protocol: draft-locked
 ```
 
 v1 MVP 已经完成：
@@ -22,11 +22,11 @@ v1 MVP 已经完成：
 - 架构文档
 - CI / git hook
 
-v1 MVP 不是完整可互通协议标准。它证明了 no_std engine 模型可行，但还没有冻结最终 wire format，也没有实现完整可靠性算法。
+v1 MVP 不是完整可互通协议标准。它证明了 no_std engine 模型可行。当前 v1 stable protocol draft 已冻结第一版 wire format，但还没有实现完整可靠性算法。
 
 v1 hardening 仍然属于 v1 工作。当前范围已经把 MVP 从 demo 级别推进到更接近真实串口可用的状态。
 
-下一步是 stable protocol draft，用来冻结 wire format、packet layout、MESSAGE / ACK serialization 和可靠性行为边界。
+v1 stable protocol draft 已经冻结 wire format、packet layout、MESSAGE / ACK serialization 和基础可靠性行为边界。后续工作应进入可靠性算法、buffer 策略和多 channel 行为的加深阶段。
 
 ## 文档列表
 

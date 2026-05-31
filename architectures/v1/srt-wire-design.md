@@ -116,11 +116,9 @@ Wire Envelope
 
 注意：不是 Packet 在 Frame 里面，也不是 Wire Envelope 是 Protocol Frame。
 
-## Wire Envelope 初步形态
+## Wire Envelope v1 形态
 
-第一阶段不冻结最终 wire format。
-
-但 wire envelope 未来大概率需要这些字段：
+v1 draft-lock 已冻结 wire envelope 使用这些字段：
 
 ```text
 magic
@@ -158,7 +156,7 @@ Wire Envelope
 └── checksum
 ```
 
-这个结构只是设计方向，不是最终定稿。
+这个结构是 v1 基础协议阶段的 wire envelope 边界。
 
 ## Magic
 
@@ -204,9 +202,19 @@ payload length
 
 wire 层需要 checksum。
 
-当前可以先选择 CRC16 作为目标方向，因为 MCU 实现简单、成本低。
+v1 draft-lock 使用 CRC-16/XMODEM。
 
-但文档阶段不强行冻结 CRC16 多项式。
+参数：
+
+```text
+width   = 16
+poly    = 0x1021
+init    = 0x0000
+xorout  = 0x0000
+refin   = false
+refout  = false
+check   = 0x31c3
+```
 
 checksum 只验证 wire bytes 是否损坏。
 

@@ -9,13 +9,13 @@ v1 MVP
   已完成。
 
 v1 hardening
-  当前下一阶段。
+  当前范围已完成。
 
 v1 stable protocol
-  尚未完成。
+  draft-locked。
 ```
 
-因此，v1 这个大阶段还没有完成。已经完成的是 v1 MVP。
+因此，v1 这个基础阶段已经可以收关。它不是最终完整可靠性算法版本，但已经完成 no_std 协议骨架、wire hardening 和第一版 stable draft-lock。
 
 `hardening` 的意思是加固。它不是重新设计方向，也不是引入新的运行环境适配层，而是在 v1 MVP 已经跑通的基础上，把协议推进到更接近真实串口使用的状态。
 
@@ -31,9 +31,9 @@ v1 MVP 已经验证：
 - 最小 ACK、in-flight tracking、CRC 检测、noise 检测、message reassembly 已经跑通。
 - smoke simulation 可以覆盖噪声、CRC 错误、丢包、重发、ACK 和双向通信。
 
-但是 v1 MVP 仍然假设 `receive(bytes)` 看到的是一个完整 wire packet。
+v1 MVP 曾经假设 `receive(bytes)` 看到的是一个完整 wire packet。
 
-真实串口不是这样。
+真实串口不是这样，因此 hardening 已经补齐 streaming wire decode。
 
 真实串口输入可能是：
 
@@ -228,18 +228,18 @@ v1 hardening 不应该引入：
 
 ## Hardening 工作项
 
-建议按以下顺序推进：
+当前完成状态：
 
 ### 第一批：srt-wire
 
-1. 在 `srt-wire` 中实现 channeling decoder 状态机。
+1. 在 `srt-wire` 中实现 streaming decoder 状态机。
 2. 让 decoder 支持 half packet。
 3. 让 decoder 支持 sticky packet。
 4. 让 decoder 支持 multiple packets per receive。
 5. 让 decoder 在 noise / CRC error 后能 resync。
 6. 为 decoder 增加 focused unit tests。
 
-第一批完成后，`srt-wire` 应该可以把任意输入 bytes 转换成：
+第一批完成后，`srt-wire` 已经可以把任意输入 bytes 转换成：
 
 ```text
 Decoded complete packet bytes
@@ -253,7 +253,7 @@ CRC error
 1. 将 `srt-engine::receive(bytes)` 改成使用 `srt-wire` channeling decoder。
 2. engine 内部循环处理 decoder 产出的多个 packet。
 3. 更新 smoke simulation，模拟半包、粘包、一次多包、噪声和 CRC 错误。
-4. 清理 engine 内部临时 wire parsing 代码。
+4. 清理 engine 内部旧 wire parsing 代码。
 5. 明确 engine 只处理 complete packet，不再自己扫描 magic。
 
 第二批完成后，外部用户仍然只调用：
@@ -281,15 +281,18 @@ v1 hardening 先完成最小可靠性工具，而不是完整可靠性算法。
 3. send failed event。
 4. partial reliability / latest-only policy 的实际决策。
 
-第三批完成后，当前 MVP 的简单 ACK / retransmit 逻辑开始迁移到明确的 reliability policy，但不会在 v1 hardening 阶段提前实现完整算法。
+第三批完成后，当前 MVP 的简单 ACK / retransmit 逻辑已经具备明确边界，但不会在 v1 hardening 阶段提前实现完整算法。
 
 ### 第四批：协议冻结
 
 1. 冻结第一版 wire format draft。
-2. 清理 MVP 临时 packet layout。
+2. 清理 MVP 早期 packet layout。
 3. 把 Packet / Frame serialization 边界写清楚。
-4. 增加多 message / 多 channel reassembly。
-5. 更新架构文档和 README。
+4. 更新架构文档和 README。
+
+已完成。
+
+多 message / 多 channel reassembly 属于后续可靠性和 channel 行为加深阶段，不再作为 v1 hardening 收关阻塞项。
 
 ## Hardening 验收标准
 
@@ -315,6 +318,6 @@ v1 hardening 至少应该满足：
 
 v1 MVP 证明了 SRT 的方向是可行的。
 
-v1 hardening 要证明 SRT 可以面对真实串口 byte stream。
+v1 hardening 已经证明 SRT 可以面对真实串口 byte stream。
 
-只有 hardening 完成以后，才适合说 v1 protocol 接近稳定。
+当前可以说 v1 基础协议阶段已经完成，后续应进入可靠性算法和多 channel 行为的 v2 设计。

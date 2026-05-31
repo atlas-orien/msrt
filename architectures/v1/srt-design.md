@@ -174,7 +174,7 @@ send(message)
 - 收齐所有 fragment 后交付完整 message。
 - Mac -> MCU 和 MCU -> Mac 双向 message 都可以完成。
 
-这个 smoke 不是最终硬件测试。真实串口还需要下一阶段处理 half packet、sticky packet 和一次 receive 多 packet。
+这个 smoke 不是最终硬件测试。当前 hardening 已经在软件模拟中覆盖 half packet、sticky packet 和一次 receive 多 packet。
 
 ## 当前非目标
 
@@ -185,18 +185,24 @@ send(message)
 - 不实现 CLI。
 - 不实现 simulator。
 - 不实现完整重传算法。
-- 不冻结最终 wire format。
+- 不实现完整可靠性算法。
 
-当前 v1 MVP 目标已经完成：冻结架构和 crate 边界，并验证最小协议行为。
+当前 v1 基础目标已经完成：冻结架构、crate 边界、第一版 wire format draft-lock，并验证最小协议行为。
 
 ## 后续推进顺序
 
-当前项目应按以下顺序推进：
+当前 v1 基础协议阶段已经完成：
 
-1. 完善 streaming wire decode，支持半包、粘包、一次 receive 多包。
-2. 冻结第一版 wire format draft。
-3. 将 MVP packet 编码逐步对齐到正式 Packet / Frame serialization。
-4. 完善 duplicate packet detection、ACK 语义和 retry/failure event。
-5. 支持多 message、多 channel 的 reassembly。
-6. 设计 heapless/no-alloc buffer 策略。
-7. 如果需要，再恢复独立 channel 状态管理 crate。
+1. streaming wire decode，支持半包、粘包、一次 receive 多包。
+2. 第一版 wire format draft-lock。
+3. Packet / Frame serialization 对齐。
+4. duplicate packet detection、ACK 和 tick retransmit 的最小闭环。
+5. smoke 覆盖噪声、CRC 错误、丢包、重发、ACK 和双向 message。
+
+后续推进顺序：
+
+1. 完善 retry/failure event。
+2. 支持多 message、多 channel 的 reassembly。
+3. 实现 partial reliability / latest-only 策略。
+4. 设计 heapless/no-alloc buffer 策略。
+5. 如确实需要，再恢复独立 channel 状态管理 crate。
