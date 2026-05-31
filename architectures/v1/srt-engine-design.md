@@ -102,12 +102,29 @@ engine 内部需要逐步变成：
 message bytes
   -> stream routing
   -> message_id allocation
-  -> STREAM Frame fragments
+  -> STREAM Frame fragments using greedy fragmentation
   -> Packet payload
   -> Packet
   -> wire bytes
   -> queue Write events
 ```
+
+v1 MVP 默认每个 DATA packet 最多携带 32 bytes message fragment。这个值故意比 QUIC 的互联网 MTU 思路小得多，因为 SRT 面向串口、MCU、小 buffer 和实时消息。
+
+fragmentation 策略是 greedy：
+
+```text
+fragment_len = min(max_fragment_bytes, remaining_message_bytes)
+```
+
+所以如果 `max_fragment_bytes = 10`，而 message 有 11 bytes：
+
+```text
+packet 0: 10 bytes
+packet 1: 1 byte
+```
+
+SRT 不做平均分片，因为平均分片会增加复杂度，并且不会减少 packet 数。
 
 也就是说，外部用户只调用一次：
 

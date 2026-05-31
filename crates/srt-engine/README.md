@@ -20,6 +20,12 @@ Current status: basic types and a minimal MVP `Engine` implementation. The MVP e
 - minimal ACK and in-flight retransmission prototype
 - one protocol driving model for MCU and OS environments
 
+## Fragmentation
+
+The MVP engine uses greedy fragmentation. Each packet carries up to `fragment_bytes`, and only the last packet may be shorter. For example, with `fragment_bytes = 10`, an 11-byte message is split into `10 + 1`, not `6 + 5`.
+
+The default `fragment_bytes` is `32`.
+
 ## Non-goals
 
 - does not define Packet / Frame structures

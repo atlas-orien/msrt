@@ -84,10 +84,34 @@ engine.send(message)
 ```text
 message
   -> 分配 message_id
-  -> 按 fragment size 拆成多个 fragment
+  -> 按 fragment size 贪心拆成多个 fragment
   -> 每个 fragment 封装成 packet
   -> 每个 packet 编码成 wire bytes
   -> 通过 Write 事件交给外部链路写出
+```
+
+v1 MVP 默认 `fragment_bytes` 是 32。这个值不是 QUIC 的 1200 bytes 默认思路；SRT 面向串口和 MCU，小包更利于低延迟、低内存占用和调试。后续正式 wire format 可以根据 UART buffer、DMA buffer 和目标 MCU 重新评估默认值。
+
+SRT 使用 greedy fragmentation：
+
+```text
+每个 packet 尽量携带 max_fragment_bytes。
+最后一个 packet 可以更短。
+不会为了平均长度而重新分配 fragment。
+```
+
+例如 `max_fragment_bytes = 10`，message 长度是 11：
+
+```text
+packet 0: 10 bytes
+packet 1: 1 byte
+```
+
+不会分成：
+
+```text
+packet 0: 6 bytes
+packet 1: 5 bytes
 ```
 
 外部链路收到 bytes 后，用户只需要把当前已经收到的 bytes 喂回 engine：

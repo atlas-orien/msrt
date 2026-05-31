@@ -733,4 +733,33 @@ mod tests {
 
         panic!("receiver should emit a complete message");
     }
+
+    #[test]
+    fn engine_uses_greedy_fragmentation() {
+        let mut engine = Engine::new(EngineConfig {
+            fragment_bytes: 10,
+            ..EngineConfig::default()
+        });
+        let mut fragment_lengths = [0; 2];
+        let mut fragment_count = 0;
+
+        engine.send(b"hello world").unwrap();
+
+        while let Some(event) = engine.poll_event() {
+            let EngineOutput::Write(write) = event else {
+                continue;
+            };
+
+            fragment_lengths[fragment_count] = fragment_len_from_wire(write.as_bytes());
+            fragment_count += 1;
+        }
+
+        assert_eq!(&fragment_lengths[..fragment_count], &[10, 1]);
+    }
+
+    fn fragment_len_from_wire(bytes: &[u8]) -> usize {
+        let packet_len = u16::from_le_bytes([bytes[4], bytes[5]]) as usize;
+
+        packet_len - crate::layout::PACKET_META_LEN
+    }
 }

@@ -11,7 +11,7 @@ pub const MAX_EVENTS: usize = 16;
 /// Maximum in-flight packets tracked by the MVP engine.
 pub const MAX_IN_FLIGHT_PACKETS: usize = 16;
 /// Default maximum message fragment bytes per packet.
-pub const DEFAULT_FRAGMENT_BYTES: usize = 12;
+pub const DEFAULT_FRAGMENT_BYTES: usize = 32;
 
 /// Minimal protocol engine configuration.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
