@@ -17,5 +17,12 @@ srt-reliability = { workspace = true }
 srt-engine = { workspace = true }
 srt-wire = { workspace = true }
 
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "protocol"
+harness = false
+
 [lints]
 workspace = true
