@@ -5,6 +5,9 @@ use super::{EnvelopeMagic, WireFlags};
 /// Fixed first-stage wire header length.
 pub const WIRE_HEADER_LEN: usize = 8;
 
+/// Fixed first-stage wire checksum length.
+pub const CHECKSUM_LEN: usize = core::mem::size_of::<u16>();
+
 /// Wire envelope header.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EnvelopeHeader {
@@ -54,7 +57,7 @@ impl EnvelopeHeader {
     /// Returns the complete envelope length including checksum bytes.
     #[must_use]
     pub const fn total_len(self) -> usize {
-        WIRE_HEADER_LEN + self.packet_len as usize + core::mem::size_of::<u16>()
+        WIRE_HEADER_LEN + self.packet_len as usize + CHECKSUM_LEN
     }
 }
 

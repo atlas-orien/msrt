@@ -5,7 +5,7 @@ pub mod header;
 pub mod magic;
 
 pub use flags::WireFlags;
-pub use header::{EnvelopeHeader, WIRE_HEADER_LEN};
+pub use header::{CHECKSUM_LEN, EnvelopeHeader, WIRE_HEADER_LEN};
 pub use magic::EnvelopeMagic;
 
 /// Borrowed wire envelope.
@@ -33,7 +33,7 @@ impl<'a> WireEnvelope<'a> {
     /// Returns total envelope length using the fixed first-stage header size.
     #[must_use]
     pub const fn total_len(self) -> usize {
-        WIRE_HEADER_LEN + self.packet_bytes.len() + core::mem::size_of::<u16>()
+        WIRE_HEADER_LEN + self.packet_bytes.len() + CHECKSUM_LEN
     }
 
     /// Returns whether the packet bytes length matches the header.

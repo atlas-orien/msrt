@@ -4,7 +4,7 @@ Wire envelope boundaries for SRT.
 
 This crate defines the `SRT Packet <-> Wire Envelope bytes` boundary, including encoding, decoding, checksum, and resynchronization contracts.
 
-Current status: traits, states, and basic types only. No complete wire format is implemented yet.
+Current status: fixed envelope primitives and a no-alloc streaming decoder MVP.
 
 ## Responsibilities
 
@@ -15,6 +15,7 @@ Current status: traits, states, and basic types only. No complete wire format is
 - checksum boundary
 - encoder boundary
 - decoder boundary
+- streaming decode for half packets, sticky packets, noise, and CRC failures
 - resync state
 
 ## Non-goals
@@ -29,4 +30,4 @@ Current status: traits, states, and basic types only. No complete wire format is
 
 ## Design
 
-See [srt-wire design](../../architectures/srt-wire-design.md).
+See [srt-wire design](../../architectures/v1/srt-wire-design.md).
