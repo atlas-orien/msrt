@@ -112,14 +112,14 @@ message bytes
 也就是说，外部用户只调用一次：
 
 ```text
-endpoint.send(message)
+engine.send(message)
 ```
 
 而不是：
 
 ```text
 for fragment in message.chunks(...) {
-  endpoint.send(fragment)
+  engine.send(fragment)
 }
 ```
 
@@ -468,7 +468,7 @@ receive(packet fragment N)
 
 但用户 API 不一定必须直接传 `stream_id`。
 
-engine 可以支持两种层次：
+未来 engine 可以支持两种层次：
 
 ```text
 低层 API
@@ -482,7 +482,7 @@ engine 可以支持两种层次：
 
 高层 API 可以由 engine 或上层封装映射到 `StreamId`。
 
-第一阶段 crate 先保留低层 `SendOptions { stream_id }`，避免提前设计 topic/actor 系统。
+第一阶段先不引入 `SendOptions` 或 send trait。v1 只保留 concrete `Engine::send(message)`，等真实 stream 路由需求出现后再扩展。
 
 ## RawLink 边界
 
@@ -535,13 +535,11 @@ PacketWriter
 ```text
 srt-engine/src/
 ├── lib.rs
+├── engine.rs
 ├── event.rs
 ├── link.rs
 ├── message.rs
-├── receive.rs
-├── engine.rs
 ├── scheduler.rs
-├── send.rs
 └── time.rs
 ```
 

@@ -5,7 +5,7 @@ use srt::{
         Flags, MessageId, Packet, PacketHeader, PacketNumber, PacketType, StreamFlags, StreamFrame,
         StreamId,
     },
-    engine::{SendIntent, SendOptions},
+    engine::{Engine, EngineConfig, EngineOutput},
     reliability::{FragmentRange, MessageFragment, MessageKey, ReliabilityMode, StreamReliability},
     wire::{EnvelopeHeader, EnvelopeMagic, WireEnvelope, WireFlags},
 };
@@ -52,18 +52,25 @@ fn facade_exposes_reliability_fragment_view() {
 }
 
 #[test]
-fn facade_exposes_engine_send_intent_with_reliability_policy() {
-    let message = [0xaa, 0xbb];
+fn facade_exposes_concrete_engine_api() {
+    let mut engine = Engine::new(EngineConfig::default());
+    let message_id = engine.send(b"hello").unwrap();
+
+    assert_eq!(message_id, MessageId::ZERO);
+
+    let Some(EngineOutput::Write(write)) = engine.poll_event() else {
+        panic!("engine should produce a write event");
+    };
+
+    assert_eq!(write.packet_number, PacketNumber::ZERO);
+    assert!(!write.as_bytes().is_empty());
+}
+
+#[test]
+fn facade_exposes_reliability_policy_types() {
     let stream_id = StreamId::new(3);
     let policy = StreamReliability::new(stream_id, ReliabilityMode::LatestOnly, 1, Some(100));
-    let options = SendOptions {
-        stream_id,
-        message_id: Some(MessageId::new(11)),
-        reliability: policy,
-    };
-    let intent = SendIntent::new(&message, options);
 
-    assert_eq!(intent.message_len(), 2);
-    assert_eq!(intent.options.stream_id, stream_id);
-    assert_eq!(intent.options.reliability.mode, ReliabilityMode::LatestOnly);
+    assert_eq!(policy.stream_id, stream_id);
+    assert_eq!(policy.mode, ReliabilityMode::LatestOnly);
 }

@@ -1,10 +1,10 @@
 //! Minimal smoke test binary for the SRT facade crate.
 
-use srt::{Endpoint, EndpointConfig, EndpointEvent, ReceiveReport};
+use srt::{Engine, EngineConfig, EngineOutput, ReceiveReport};
 
 fn main() {
-    let mut sender = Endpoint::new(EndpointConfig::default());
-    let mut receiver = Endpoint::new(EndpointConfig::default());
+    let mut sender = Engine::new(EngineConfig::default());
+    let mut receiver = Engine::new(EngineConfig::default());
 
     let message = b"hello world from srt; send once, receive many packets";
     let message_id = sender.send(message).expect("queue message");
@@ -12,7 +12,7 @@ fn main() {
     println!("queued message_id={}", message_id.get());
 
     while let Some(event) = sender.poll_event() {
-        let EndpointEvent::Write(write) = event else {
+        let EngineOutput::Write(write) = event else {
             continue;
         };
 
@@ -30,7 +30,7 @@ fn main() {
         }
     }
 
-    let Some(EndpointEvent::Message(message)) = receiver.poll_event() else {
+    let Some(EngineOutput::Message(message)) = receiver.poll_event() else {
         panic!("receiver did not emit a complete message");
     };
 

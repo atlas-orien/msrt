@@ -13,6 +13,7 @@ default = []
 [dependencies]
 srt-core = { workspace = true }
 srt-reliability = { workspace = true }
+srt-wire = { workspace = true }
 
 [lints]
 workspace = true
