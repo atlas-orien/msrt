@@ -7,7 +7,8 @@ v1 是 SRT 的 no_std protocol 阶段。
 ```text
 v1 MVP: 已完成
 v1 hardening: 当前范围已完成
-v1 reliable transport: 未完成
+v1 reliable transport: 当前范围已完成
+v1 stable protocol: freeze candidate
 ```
 
 v1 MVP 已经完成：
@@ -26,11 +27,11 @@ v1 MVP 已经完成：
 - 架构文档
 - CI / git hook
 
-v1 MVP 不是完整可互通协议标准。它证明了 no_std engine 模型可行。当前 v1 还没有实现完整可靠传输。
+v1 MVP 证明了 no_std engine 模型可行。当前 v1 已经补齐 reliable transport 的当前范围，并形成 v1 freeze candidate。
 
 v1 hardening 仍然属于 v1 工作。当前范围已经把 MVP 从 demo 级别推进到更接近真实串口可用的状态。
 
-v1 的完成标准不是“能跑通 demo”，而是“可靠传输语义明确并通过测试”。后续工作应优先补齐 ACK range 压缩和过期策略、message 失败清理语义、LatestOnly / Deadline、buffer 策略最终冻结和更长时间持续收发验收测试。
+v1 的完成标准不是“能跑通 demo”，而是“可靠传输语义明确并通过测试”。当前已经通过 smoke 和 deterministic long-run integration simulation。freeze 审核已经接受 fixed-length ACK Frame、无对端 cancel frame、LatestOnly / Deadline 后移、当前默认参数和 buffer budget。
 
 ## 文档列表
 

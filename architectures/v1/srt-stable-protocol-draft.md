@@ -4,7 +4,7 @@
 
 本文档是 SRT v1 stable protocol 的第一版草案。
 
-它的目的不是继续探索方向，而是把当前已经验证过的 MVP / hardening 行为整理成可以审核的协议标准边界。
+它的目的不是继续探索方向，而是把当前已经验证过的 foundation / hardening / reliable transport 行为整理成可以审核的协议标准边界。
 
 当前状态：
 
@@ -16,10 +16,49 @@ v1 hardening
   当前范围已完成。
 
 v1 stable protocol
-  wire / packet / frame layout 已对齐，可靠传输语义尚未完成。
+  wire / packet / frame layout 已对齐。
+  reliable message transport 当前范围已完成。
+  freeze 审核已完成。
+  当前是 v1 freeze candidate。
 ```
 
 本文档中的字段和行为是 v1 可靠传输继续推进的基础。代码如果和本文档不一致，应该优先判断是文档需要修正，还是代码出现了协议漂移。
+
+## v1 Freeze 范围
+
+v1 freeze 的目标是冻结一套最小但完整的 no_std message transport：
+
+- 串口 byte stream 上的 envelope 边界。
+- Packet Header。
+- MESSAGE Frame。
+- ACK Frame。
+- reliable message send / receive / retransmit / dedup / reassembly。
+- BestEffort 的最小 channel policy。
+- 非阻塞 engine API。
+- 固定容量 buffer 策略。
+
+v1 freeze 不追求所有长期能力一次到位。只要后续能力能通过新增 frame、policy 或 adapter 扩展，而不破坏 v1 wire format 和 API 边界，就应该留到 v1.1 / v2。
+
+## Freeze 审核结论
+
+v1 freeze 前的关键取舍已经按“最小可靠 no_std message transport”原则审核：
+
+1. 接受 fixed-length ACK Frame。
+   原因：no_std 解码简单、固定容量、实现可预测。更紧凑的 ACK encoding 可以留到后续版本，但 v1 先冻结当前 fixed-capacity range 语义。
+
+2. 接受 v1 不引入对端 cancel frame。
+   原因：`CANCEL_MESSAGE` 会引入新的 frame 类型和双端状态语义。v1 中本端失败后清理 in-flight，对端 incomplete reassembly 依靠 `reassembly_timeout_ms` 释放。
+
+3. 接受 `LatestOnly` / `Deadline` 留到 v1.1 / v2。
+   原因：它们属于 partial reliability 的策略扩展，不是 v1 reliable transport 的必要条件。v1 只冻结 `Reliable` 和 `BestEffort` 的实际行为。
+
+4. 接受当前默认参数作为 reference engine defaults。
+   尤其是 `DEFAULT_FRAGMENT_BYTES = 32`。这个默认值保守、适合 MCU/串口调试，并且仍允许用户通过 `EngineConfig` 调整。
+
+5. 接受当前 deterministic long-run integration simulation 作为 v1 freeze 前的软件验收。
+   更接近真实设备负载的窗口耗尽、长时间 soak、硬件 UART/DMA 测试放到 v1.1 或 hardware validation，不阻塞 v1 protocol freeze。
+
+因此，本文档后续只应做措辞和一致性修正；除非发现 wire format 或可靠性语义缺陷，否则不再扩展 v1 范围。
 
 ## 协议定位
 
@@ -126,6 +165,36 @@ Checksum      u16
 - `Flags(u8)` 当前足够，后续不够再扩展。
 
 v1 不使用可变长度整数。
+
+## Public Engine API
+
+v1 标准协议层暴露 concrete no_std engine，不暴露 async runtime，也不拥有线程。
+
+核心驱动 API：
+
+```text
+send(message)
+send_on(channel_id, message)
+receive(bytes)
+tick(now)
+poll_event()
+```
+
+语义：
+
+- `send(message)` 等价于 `send_on(ChannelId::CONTROL, message)`。
+- `send_on(channel_id, message)` 接收完整 application message，由 engine 内部分片成多个 packet。
+- `receive(bytes)` 只处理当前已经到达的 bytes，不阻塞等待未来 bytes。
+- `tick(now)` 推进超时、重传、reassembly timeout 等时间驱动状态。
+- `poll_event()` 输出 `Write`、`Message`、`SendFailed`。
+
+v1 不提供：
+
+- async task。
+- tokio adapter。
+- Embassy / RTIC adapter。
+- UART read/write driver。
+- blocking `send_and_wait()`。
 
 ## Wire Envelope
 
@@ -326,6 +395,8 @@ ACK-only packet 可以不是 ack-eliciting，避免 ACK 风暴。
 
 Packet number 在 endpoint 内单调递增，允许 `u32` wrap，但 v1 stable 是否定义 wrap 后窗口行为需要后续单独冻结。
 
+v1 当前不冻结复杂 wrap window 语义。实现必须使用 `PacketNumber(u32)`，但长时间运行到 wrap-around 后的 ACK range / dedup 精确定义留到后续版本。
+
 ## Protocol Frames
 
 v1 stable draft 只定义两个 frame：
@@ -410,6 +481,14 @@ channel_id = 0
 ```
 
 其它静态和动态分配规则后续冻结。
+
+v1 当前冻结：
+
+```text
+ChannelId::CONTROL = 0
+```
+
+应用可以显式使用其它 `ChannelId(u16)`，但动态 channel negotiation 不属于 v1。
 
 ### MessageId
 
@@ -509,7 +588,7 @@ range count > MAX_ACK_RANGES
 
 这样长期运行时 ACK 记忆会向新的 packet number 推进，不会卡在早期 packet 上。
 
-后续可以继续优化更紧凑的 ACK range wire encoding，或增加按时间 / packet distance 的过期策略，但不能破坏 v1 已冻结的基本 ACK range 语义。
+后续可以继续优化更紧凑的 ACK range wire encoding，或增加按时间 / packet distance 的过期策略，但不能破坏 v1 已冻结的基本 ACK range 语义。v1 freeze 接受当前 fixed-length ACK Frame。
 
 ## Fragmentation
 
@@ -550,7 +629,7 @@ DEFAULT_FRAGMENT_BYTES = 32
 
 这个值是 MCU / 串口友好的默认值，不来自 QUIC MTU。
 
-正式默认值可在 wire format freeze 前再审核一次。
+该默认值已经在 freeze 审核中接受为 reference engine default。用户仍然可以通过 `EngineConfig::fragment_bytes` 调整。
 
 ## Receive State Machine
 
@@ -581,6 +660,16 @@ engine.poll_event()
 
 产生 Message event。
 
+`receive(bytes)` 一次可以处理：
+
+- 0 个完整 packet。
+- 1 个完整 packet。
+- 多个 sticky packet。
+- noise 后的 packet。
+- corrupted packet 后继续 resync。
+
+当一次 `receive(bytes)` 中包含多个 packet 时，函数返回最后一次推进得到的 `ReceiveReport`。完整 message 通过 `poll_event()` 交付，不依赖 `receive` 的返回值。
+
 ## Duplicate Packet
 
 当接收端观察到 duplicate DATA packet：
@@ -593,6 +682,8 @@ duplicate packet
 ```
 
 原因是对端可能没有收到之前的 ACK。
+
+当前实现对 ack-eliciting duplicate DATA 会再次 ACK，但不会重复写入 reassembly，也不会重复产生 Message event。
 
 ## Retransmit
 
@@ -618,9 +709,25 @@ v1 当前已经有这些配置：
 ```text
 retransmit_timeout_ms
 max_retransmit_attempts
+reassembly_timeout_ms
 ```
 
 这些不是 wire format 字段，但属于 v1 stable behavior。
+
+当前 v1 的 send failure 只冻结一种原因：
+
+```text
+RetryLimitReached
+```
+
+当 message 失败时：
+
+- 本端移除同 `channel_id + message_id` 的所有 in-flight packet。
+- 同一个 tick 内不再重发这条 message 的其它 packet。
+- 通过 `EngineOutput::SendFailed` 通知应用。
+- 不发送对端 cancel frame。
+
+对端正在 reassembly 的 incomplete message 依靠 `reassembly_timeout_ms` 释放。
 
 ## Partial Reliability
 
@@ -646,6 +753,41 @@ Deadline
 - Deadline：超过时间窗口后停止重传。
 
 正式算法应在 reliability policy 文档中单独冻结。
+
+因此 v1 freeze 中：
+
+- `Reliable` 属于 v1 正式行为。
+- `BestEffort` 属于 v1 正式最小行为。
+- `LatestOnly` / `Deadline` 只保留类型和设计方向，不承诺 wire / engine 行为。
+
+## Buffer Budget
+
+v1 必须保持 no_std 固定容量。
+
+当前冻结的主要容量边界：
+
+```text
+MAX_WIRE_BYTES
+MAX_INGRESS_BYTES
+MAX_MESSAGE_BYTES
+MAX_EVENTS
+MAX_IN_FLIGHT_PACKETS
+MAX_ACK_TRACKED_PACKETS
+MAX_ACK_RANGES
+MAX_REASSEMBLY_MESSAGES
+MAX_CHANNEL_POLICIES
+```
+
+容量不足时不能 silently overwrite。
+
+当前行为：
+
+- in-flight 满：send path 返回 engine error。
+- event queue 满：对应操作返回或报告 engine error。
+- reassembly slot 满：incoming fragment 返回 engine error。
+- message 超过 `MAX_MESSAGE_BYTES`：返回 engine error。
+- ACK observed packet set 满：淘汰最旧 packet number，保留更新 packet number。
+- ACK range 超过 `MAX_ACK_RANGES`：优先编码最新 ranges。
 
 ## Error / Reject 行为
 
@@ -688,16 +830,37 @@ v1 stable draft 不支持：
 - TCP-compatible byte-stream API。
 - PING / PONG Frame。
 - RESET_STREAM。
+- CANCEL_MESSAGE Frame。
+- CLOSE_CHANNEL Frame。
+- dynamic channel negotiation。
 - connection migration。
 - congestion control。
 - TLS。
 - crypto handshake。
 - dynamic MTU discovery。
+- packet number wrap-around window semantics。
+- ACK delay。
 - OS runtime adapter。
 - MCU HAL adapter。
 - multi-language SDK。
+- async runtime integration。
 
 这些不是当前协议核心目标。
+
+## 后续版本候选
+
+v1.1 / v2 可以考虑：
+
+- `CANCEL_MESSAGE`：发送方失败后通知对端释放 incomplete reassembly。
+- `HEARTBEAT`：显式心跳。
+- `CLOSE_CHANNEL`：关闭某个 channel。
+- `LatestOnly`：同 channel 只保留最新 message。
+- `Deadline`：超过 deadline 后停止重传。
+- 更紧凑的 ACK range encoding。
+- ACK delay。
+- packet number wrap-around window 语义。
+- 更细的 QoS / priority 调度。
+- OS / MCU runtime adapter crate。
 
 ## 代码对齐清单
 
@@ -711,14 +874,15 @@ v1 stable draft 不支持：
 6. MESSAGE Frame 明确编码 `frame_type`、`channel_id`、`message_id`、`message_len`、`fragment_offset`、`message_flags`。
 7. ACK Frame 明确编码 `frame_type`、`largest_acknowledged`、`range_count`、fixed-capacity ACK ranges。
 8. smoke 覆盖 half packet、sticky packet、CRC error、drop、ACK、retransmit、duplicate packet、simultaneous duplex、multi-channel、bidirectional message。
+9. integration simulation 覆盖双向多 message、多 channel、drop、corrupt、reorder、tick retransmit 和最终可靠交付。
 
-v1 仍必须完成的可靠传输部分：
+v1 freeze 审核结论：
 
-1. ACK range 的更紧凑 wire encoding 和时间 / distance 过期策略是否需要冻结。
-2. message 失败后的对端取消语义。
-3. 窗口耗尽和恢复测试是否需要更接近真实设备负载。
-4. LatestOnly / Deadline 的实际决策。
-5. heapless/no-alloc buffer 策略最终冻结。
+1. fixed-length ACK Frame：已接受为 v1 行为。
+2. 无对端 cancel frame，依靠 reassembly timeout 清理：已接受为 v1 行为。
+3. `LatestOnly` / `Deadline` 后移到 v1.1 / v2：已接受。
+4. 当前默认参数，尤其是 `DEFAULT_FRAGMENT_BYTES = 32`：已接受为 reference engine defaults。
+5. 更接近真实设备负载的窗口耗尽测试：后移到 v1.1 / hardware validation，不阻塞 v1 freeze。
 
 详见 [SRT v1 可靠传输补齐计划](srt-reliable-transport-plan.md)。
 

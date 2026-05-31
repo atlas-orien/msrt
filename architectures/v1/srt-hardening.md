@@ -2,7 +2,9 @@
 
 ## 状态定义
 
-当前状态应该分成三层理解：
+本文档记录的是 v1 hardening 阶段的设计和验收。当前项目状态已经越过 hardening，形成 v1 freeze candidate。
+
+当前状态应该分成四层理解：
 
 ```text
 v1 MVP
@@ -11,11 +13,14 @@ v1 MVP
 v1 hardening
   当前范围已完成。
 
+v1 reliable transport
+  当前范围已完成。
+
 v1 stable protocol
-  reliable transport 尚未完成。
+  freeze candidate。
 ```
 
-因此，v1 还不能收关。当前已经完成 no_std 协议骨架和 wire hardening，但 v1 的目标是可靠传输，还需要补齐可靠性语义和测试。
+因此，本文档不再代表最新收关状态；最新结论以 [v1 stable protocol draft](srt-stable-protocol-draft.md) 和 [v1 reliable transport plan](srt-reliable-transport-plan.md) 为准。
 
 `hardening` 的意思是加固。它不是重新设计方向，也不是引入新的运行环境适配层，而是在 v1 MVP 已经跑通的基础上，把协议推进到更接近真实串口使用的状态。
 

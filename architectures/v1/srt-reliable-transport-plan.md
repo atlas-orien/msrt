@@ -2,7 +2,7 @@
 
 ## 状态
 
-当前 v1 还没有完成。
+当前 v1 reliable transport 的代码和测试当前范围已经完成，stable protocol freeze 审核已完成。
 
 已经完成的是：
 
@@ -23,7 +23,7 @@
 - channel 级 reliability policy 的最小边界。
 - BestEffort channel 不 ACK、不进入 in-flight、不重传，但收到完整 message 仍然交付。
 
-但这些只能证明 foundation 是正确的，不能证明 v1 已经是可靠传输。
+这些已经证明 v1 reliable transport 的当前范围可以成立。
 
 v1 的目标必须是：
 
@@ -52,12 +52,13 @@ tick(now)
 poll_event()
 ```
 
-但是它还没有完全证明：
+freeze 审核已经接受：
 
-- 更长时间运行下的窗口耗尽和恢复。
-- 复杂乱序 / 丢包组合下的多 message 持续收发。
-- message 失败后的对端取消 / 本端清理语义。
-- LatestOnly / Deadline 等更深的 partial reliability 策略。
+- fixed-length ACK Frame。
+- 无对端取消 frame，依靠 reassembly timeout 清理 incomplete message。
+- LatestOnly / Deadline 留到 v1.1 / v2。
+- 当前 reference engine defaults。
+- 当前 deterministic long-run integration simulation 作为 v1 软件验收。
 
 ## v1 完成标准
 
@@ -92,7 +93,7 @@ v1 也不做：
 - QUIC stream。
 - HTTP/3。
 
-## 下一步一：ACK range
+## 已完成一：ACK range
 
 当前状态：ACK range 最小版本已经落地。
 
@@ -132,7 +133,7 @@ v1 可以先限制 ACK range 数量，保持 no_std 固定容量。
 - ACK range 的更紧凑 wire encoding 是否需要在 v1 freeze 前调整。
 - ACK 记忆窗口是否需要从“按容量淘汰”升级为“按时间 / packet distance 过期”。
 
-## 下一步二：重试失败事件
+## 已完成二：重试失败事件
 
 当前状态：事件边界、最小 retry limit 和 retransmit timeout 已经落地。
 
@@ -178,7 +179,7 @@ reason = RetryLimitReached
 - message 失败后的对端取消语义。
 - 是否需要对接收端 incomplete reassembly 增加显式 cancel frame。
 
-## 下一步三：多 message reassembly
+## 已完成三：多 message reassembly
 
 当前状态：fixed-slot 多 message reassembly 已经落地。
 
@@ -220,7 +221,7 @@ MAX_MESSAGE_BYTES
 - incomplete reassembly slot timeout 后释放。
 - reassembly budget 满时返回明确 engine error。
 
-## 下一步四：多 channel
+## 已完成四：多 channel
 
 当前状态：`send_on(channel_id, message)` 和最小 channel policy 已经落地。
 
@@ -263,7 +264,7 @@ send(message) == send_on(ChannelId::CONTROL, message)
 
 - 不同 channel 的独立 message id 策略是否需要调整。
 
-## 下一步五：partial reliability
+## 已完成五：partial reliability 最小边界
 
 v1 的核心目标是可靠传输，但 SRT 长期目标包含 partial reliability。
 
@@ -289,7 +290,7 @@ Deadline
 2. BestEffort。已落地最小版本。
 3. LatestOnly / Deadline 先文档冻结，再实现。
 
-## 下一步六：窗口和 buffer budget
+## 已完成六：窗口和 buffer budget
 
 可靠传输必须保护 MCU 内存。
 
@@ -312,7 +313,7 @@ MAX_EVENTS
 
 不能 silently overwrite。
 
-## 下一步七：验收测试
+## 已完成七：验收测试
 
 v1 可靠传输完成前，至少需要这些测试：
 
@@ -360,15 +361,15 @@ failed messages produce explicit failed events
 
 ## 结论
 
-现在不能冻结 v1。
+v1 reliable transport 当前范围已经完成，stable protocol 已形成 freeze candidate。
 
 当前应该说：
 
 ```text
 v1 foundation: 已完成
 v1 hardening: 当前范围已完成
-v1 reliable transport: 下一步
-v1 stable: 未完成
+v1 reliable transport: 当前范围已完成
+v1 stable: freeze candidate
 ```
 
 v1 不追求更多运行环境功能，也不追求复杂生态包装。

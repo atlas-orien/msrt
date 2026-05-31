@@ -67,11 +67,11 @@ SRT 的可靠性应该同时理解 packet 和 channel。
 
 协议未来应该支持 ack、重传、超时处理、重复包检测、滑动窗口。不是所有消息都需要同一种可靠性。某些实时 channel 可能更关心新鲜度，而不是保证每一个旧消息都送达。
 
-当前 v1 MVP 已经实现最小 ACK、in-flight packet tracking 和 tick-driven retransmit，用于验证协议闭环。它还不是可靠传输完成版本，也不是最终 wire 兼容标准。
+当前 v1 已经实现 ACK range、in-flight packet tracking、tick-driven retransmit、retry failure、多 message / 多 channel reassembly 和 BestEffort 最小策略。reliable transport 当前范围已经通过 smoke 和 deterministic long-run integration simulation，当前状态是 v1 freeze candidate。
 
-## v1 MVP 用户 API
+## v1 用户 API
 
-v1 的最终目标是可靠传输。当前阶段先冻结外部用户应该看到的最小 API，下一步必须补齐可靠性语义。
+v1 的目标是可靠 no_std message transport。当前已经冻结外部用户应该看到的最小 API，复杂可靠性细节由 engine 内部处理。
 
 外部用户不应该自己拆 packet，也不应该自己判断一条 message 需要发几次。用户提交的是完整 message：
 

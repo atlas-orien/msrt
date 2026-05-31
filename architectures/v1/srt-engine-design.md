@@ -10,7 +10,7 @@
 当上层要发送一条 message，或者底层收到一段 bytes 时，SRT 协议应该如何推进？
 ```
 
-当前 v1 已经实现一个最小 concrete `Engine` 状态机，用于验证 no_std 通信闭环、streaming wire ingress 和第一版 foundation draft。它不是最终完整可靠传输状态机。
+当前 v1 已经实现一个 concrete `Engine` 状态机，用于驱动 no_std message transport。它已经覆盖 streaming wire ingress、ACK range、in-flight、tick retransmit、retry failure、多 message / 多 channel reassembly 和 BestEffort 最小策略。
 
 ## 位置
 
@@ -160,7 +160,7 @@ raw bytes
   -> complete message event
 ```
 
-当前 v1 使用 `srt-wire` 的 Wire Envelope 和 StreamingDecoder 推进接收路径。第一版 wire format 已经形成草案，但 v1 仍未完成可靠传输。
+当前 v1 使用 `srt-wire` 的 Wire Envelope 和 StreamingDecoder 推进接收路径。第一版 wire format 已经形成 stable draft，reliable transport 当前范围已经完成，当前状态是 v1 freeze candidate。
 
 后续当 wire 层出现时，engine 不应该自己处理：
 
