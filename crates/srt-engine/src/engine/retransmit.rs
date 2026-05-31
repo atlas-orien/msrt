@@ -55,6 +55,15 @@ impl Engine {
         }
 
         for packet in retransmits[..retransmit_len].iter().flatten() {
+            let message_failed = failed_messages[..failed_message_len]
+                .iter()
+                .flatten()
+                .any(|key| *key == (packet.channel_id, packet.message_id));
+
+            if message_failed {
+                continue;
+            }
+
             self.in_flight.note_retransmit(packet.packet_number, now_ms);
             let _ = self.events.push(EngineOutput::Write(WriteEvent {
                 packet_number: packet.packet_number,

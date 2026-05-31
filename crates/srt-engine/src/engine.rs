@@ -747,6 +747,55 @@ mod tests {
         assert_eq!(failed.message_id, message_id);
         assert_eq!(failed.channel_id, srt_core::ChannelId::CONTROL);
         assert_eq!(failed.reason, super::SendFailureReason::RetryLimitReached);
+        assert_eq!(engine.in_flight.packets().count(), 0);
+        assert!(engine.poll_event().is_none());
+    }
+
+    #[test]
+    fn engine_send_failed_suppresses_same_tick_message_retransmits() {
+        let mut engine = Engine::new(EngineConfig {
+            fragment_bytes: 2,
+            max_retransmit_attempts: 1,
+            ..EngineConfig::default()
+        });
+
+        let message_id = engine.send(b"hello").unwrap();
+        let first = next_write(&mut engine);
+        let second = next_write(&mut engine);
+        let third = next_write(&mut engine);
+
+        assert_eq!(first.packet_number.get(), 0);
+        assert_eq!(second.packet_number.get(), 1);
+        assert_eq!(third.packet_number.get(), 2);
+
+        engine.tick(1);
+        assert_eq!(next_write(&mut engine).packet_number, first.packet_number);
+        assert_eq!(next_write(&mut engine).packet_number, second.packet_number);
+        assert_eq!(next_write(&mut engine).packet_number, third.packet_number);
+
+        let ack = ack_packet_for_ranges(
+            &[(
+                srt_core::PacketNumber::new(0),
+                srt_core::PacketNumber::new(0),
+            )],
+            srt_core::PacketNumber::new(100),
+        );
+
+        assert!(matches!(
+            engine.receive(ack.as_bytes()),
+            ReceiveReport::Ack { .. }
+        ));
+
+        engine.tick(2);
+
+        let Some(EngineOutput::SendFailed(failed)) = engine.poll_event() else {
+            panic!("engine should report message failure");
+        };
+
+        assert_eq!(failed.message_id, message_id);
+        assert_eq!(failed.channel_id, srt_core::ChannelId::CONTROL);
+        assert_eq!(failed.reason, super::SendFailureReason::RetryLimitReached);
+        assert_eq!(engine.in_flight.packets().count(), 0);
         assert!(engine.poll_event().is_none());
     }
 

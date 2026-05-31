@@ -607,6 +607,8 @@ tick(now)
   -> 只重发达到 retransmit_timeout_ms 的 in-flight packet
   -> 已被 ACK range 覆盖的 packet 不再重发
   -> 达到 max_retransmit_attempts 后产生 SendFailed
+  -> message 失败后移除本端同 message 的全部 in-flight packet
+  -> 同一个 tick 内不会再重发已经失败的 message
 ```
 
 v1 当前已经有这些配置：
@@ -711,7 +713,7 @@ v1 stable draft 不支持：
 v1 仍必须完成的可靠传输部分：
 
 1. ACK range 的更紧凑 wire encoding 和时间 / distance 过期策略是否需要冻结。
-2. message 失败后的对端取消 / 本端清理语义。
+2. message 失败后的对端取消语义。
 3. 更复杂持续收发场景下的窗口耗尽和恢复测试。
 4. LatestOnly / Deadline 的实际决策。
 5. heapless/no-alloc buffer 策略最终冻结。

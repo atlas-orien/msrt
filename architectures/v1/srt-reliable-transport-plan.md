@@ -163,6 +163,8 @@ reason = RetryLimitReached
 - 一个 packet 达到 retry limit 后，按 message 产生 `SendFailed`。
 - 同一条 message 的其它 in-flight packet 会被移除。
 - 同一条 message 只产生一次 failed event。
+- 同一个 tick 内，如果一条 message 已经判定失败，则不会再重发这条 message 的其它 packet。
+- 失败后本端 in-flight 状态会清理干净，不留下同 message 的待 ACK packet。
 
 当前已经补齐：
 
@@ -173,7 +175,8 @@ reason = RetryLimitReached
 
 后续仍需要继续补齐：
 
-- message 失败后的对端取消 / 本端清理语义。
+- message 失败后的对端取消语义。
+- 是否需要对接收端 incomplete reassembly 增加显式 cancel frame。
 
 ## 下一步三：多 message reassembly
 
