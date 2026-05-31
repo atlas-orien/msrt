@@ -2,7 +2,7 @@
 
 ## 状态
 
-本文档是 SRT v1 stable protocol 的第一版 draft-locked 草案。
+本文档是 SRT v1 stable protocol 的第一版草案。
 
 它的目的不是继续探索方向，而是把当前已经验证过的 MVP / hardening 行为整理成可以审核的协议标准边界。
 
@@ -16,10 +16,10 @@ v1 hardening
   当前范围已完成。
 
 v1 stable protocol
-  draft-locked，当前代码已经按本文档的基础 wire / packet / frame layout 对齐。
+  wire / packet / frame layout 已对齐，可靠传输语义尚未完成。
 ```
 
-本文档中的字段和行为是 v1 基础协议收关边界。代码如果和本文档不一致，应该优先判断是文档需要修正，还是代码出现了协议漂移。
+本文档中的字段和行为是 v1 可靠传输继续推进的基础。代码如果和本文档不一致，应该优先判断是文档需要修正，还是代码出现了协议漂移。
 
 ## 协议定位
 
@@ -684,7 +684,7 @@ v1 stable draft 不支持：
 7. ACK Frame 明确编码 `frame_type`、`largest_acknowledged`。
 8. smoke 覆盖 half packet、sticky packet、CRC error、drop、ACK、retransmit、duplicate packet、bidirectional message。
 
-后续仍未冻结完整算法的部分：
+v1 仍必须完成的可靠传输部分：
 
 1. ACK range。
 2. retry limit 和 send failed event。
@@ -692,11 +692,13 @@ v1 stable draft 不支持：
 4. partial reliability / latest-only 的实际决策。
 5. heapless/no-alloc buffer 策略配置。
 
+详见 [SRT v1 可靠传输补齐计划](srt-reliable-transport-plan.md)。
+
 ## 结论
 
 SRT v1 stable protocol 的核心不是“把 QUIC 搬到串口上”。
 
-SRT v1 stable protocol 的核心是：
+SRT v1 stable protocol 的核心目标是：
 
 ```text
 Message-Oriented Transport over serial byte streams

@@ -10,7 +10,7 @@
 当上层要发送一条 message，或者底层收到一段 bytes 时，SRT 协议应该如何推进？
 ```
 
-当前 v1 已经实现一个最小 concrete `Engine` 状态机，用于验证 no_std 通信闭环、streaming wire ingress 和第一版 stable draft-lock。它不是最终完整可靠性算法状态机。
+当前 v1 已经实现一个最小 concrete `Engine` 状态机，用于验证 no_std 通信闭环、streaming wire ingress 和第一版 foundation draft。它不是最终完整可靠传输状态机。
 
 ## 位置
 
@@ -140,7 +140,7 @@ for fragment in message.chunks(...) {
 
 拆分 message、生成多个 packet、维护 packet number、等待 ACK、未来触发重传，都是 engine 内部职责。
 
-注意：当前 `srt-core` 中 `PacketPayload` 仍然是 borrowed bytes，表示 encoded protocol frames。v1 draft-lock 已经冻结 MESSAGE / ACK 的基础编码格式，完整多 frame serialization 能力留到后续阶段。
+注意：当前 `srt-core` 中 `PacketPayload` 仍然是 borrowed bytes，表示 encoded protocol frames。v1 foundation draft 已经明确 MESSAGE / ACK 的基础编码格式，完整可靠传输语义留到后续阶段。
 
 因此第一阶段 engine 已经实现最小 packet/frame 编码，用于验证 v1 基础协议闭环；后续不应该把完整可靠性算法提前塞进 wire parser。
 
@@ -160,7 +160,7 @@ raw bytes
   -> complete message event
 ```
 
-当前 v1 使用 `srt-wire` 的 Wire Envelope 和 StreamingDecoder 推进接收路径。第一版 wire format 已经 draft-locked。
+当前 v1 使用 `srt-wire` 的 Wire Envelope 和 StreamingDecoder 推进接收路径。第一版 wire format 已经形成草案，但 v1 仍未完成可靠传输。
 
 后续当 wire 层出现时，engine 不应该自己处理：
 
@@ -581,4 +581,4 @@ srt-engine/src/
 4. 使用 `srt-wire` Wire Envelope 和 StreamingDecoder 验证 smoke。
 5. 不绑定 std、tokio、embedded-hal 或具体 MCU。
 
-`srt-engine` 是 SRT 协议真正“活起来”的地方。当前 v1 基础阶段已经跑通最小闭环、wire hardening 和 draft-lock，下一阶段应该继续加深可靠性策略。
+`srt-engine` 是 SRT 协议真正“活起来”的地方。当前 v1 foundation 已经跑通最小闭环和 wire hardening，下一阶段必须继续补齐可靠传输策略。

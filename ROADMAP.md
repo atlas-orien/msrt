@@ -4,7 +4,7 @@ This roadmap describes the current scaffold milestone and the next implementatio
 
 ## v1
 
-Status: MVP complete, hardening complete for current scope, stable protocol draft locked.
+Status: foundation complete, hardening complete for current scope, v1 reliable transport not complete.
 
 The current workspace freezes the no-std protocol crate boundaries and contains a minimal working protocol engine:
 
@@ -15,7 +15,7 @@ The current workspace freezes the no-std protocol crate boundaries and contains 
 - `srt-engine`
 - `srt-wire`
 
-This milestone is not the final interoperable SRT protocol standard. It is the first working no-std engine MVP. It defines the protocol ownership model, public boundaries, basic tests, smoke simulation, CI, git hooks, and architecture documents.
+This milestone is not the final interoperable SRT protocol standard. It is the first working no-std engine foundation. It defines the protocol ownership model, public boundaries, basic tests, smoke simulation, CI, git hooks, and architecture documents.
 
 The v1 MVP engine demonstrates:
 
@@ -47,7 +47,7 @@ Completed in the current hardening scope:
 
 ## v1 Stable Protocol Draft
 
-The current v1 protocol draft is locked for the first no-std implementation:
+The current v1 protocol draft has a foundation layout:
 
 1. Wire Envelope uses magic, version, header length, packet length, wire flags, reserved byte, and CRC-16/XMODEM.
 2. Packet Header encodes packet type, packet flags, and packet number.
@@ -56,13 +56,15 @@ The current v1 protocol draft is locked for the first no-std implementation:
 5. ACK frame serialization encodes a single acknowledged packet number.
 6. The engine uses greedy fragmentation and event-based message delivery.
 
-Remaining work after v1 is reliability depth, not protocol scaffolding:
+Remaining work before v1 can be called complete:
 
 1. ACK ranges.
 2. Retry limits and send-failed events.
 3. Multi-message and multi-channel reassembly behavior.
 4. Partial reliability policy implementation.
 5. Heapless/no-alloc buffer strategy configuration.
+
+See [SRT v1 Reliable Transport Plan](architectures/v1/srt-reliable-transport-plan.md).
 
 Runtime adapters remain out of this repository.
 
@@ -73,5 +75,4 @@ Runtime adapters remain out of this repository.
 - no embedded-hal adapter
 - no tokio adapter
 - no CLI
-- no full reliability algorithm
 - no finalized wire compatibility guarantee

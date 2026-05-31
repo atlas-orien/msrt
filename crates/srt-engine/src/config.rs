@@ -14,6 +14,8 @@ pub const MAX_EVENTS: usize = 16;
 pub const MAX_IN_FLIGHT_PACKETS: usize = 16;
 /// Default maximum message fragment bytes per packet.
 pub const DEFAULT_FRAGMENT_BYTES: usize = 32;
+/// Default maximum retransmission attempts before a send fails.
+pub const DEFAULT_MAX_RETRANSMIT_ATTEMPTS: u8 = 3;
 
 /// Minimal protocol engine configuration.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -24,6 +26,8 @@ pub struct EngineConfig {
     pub initial_message_id: MessageId,
     /// Maximum message fragment bytes written into one packet.
     pub fragment_bytes: usize,
+    /// Maximum retransmission attempts before a packet is considered failed.
+    pub max_retransmit_attempts: u8,
 }
 
 impl Default for EngineConfig {
@@ -32,6 +36,7 @@ impl Default for EngineConfig {
             initial_packet_number: PacketNumber::ZERO,
             initial_message_id: MessageId::ZERO,
             fragment_bytes: DEFAULT_FRAGMENT_BYTES,
+            max_retransmit_attempts: DEFAULT_MAX_RETRANSMIT_ATTEMPTS,
         }
     }
 }

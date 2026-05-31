@@ -27,6 +27,7 @@ pub struct Engine {
     pub(crate) next_packet_number: PacketNumber,
     pub(crate) next_message_id: MessageId,
     pub(crate) fragment_bytes: usize,
+    pub(crate) max_retransmit_attempts: u8,
     pub(crate) events: EventQueue,
     pub(crate) in_flight: InFlightPackets,
     pub(crate) ingress: StreamingDecoder<MAX_INGRESS_BYTES>,
@@ -42,6 +43,7 @@ impl Engine {
             next_packet_number: config.initial_packet_number,
             next_message_id: config.initial_message_id,
             fragment_bytes: config.fragment_bytes,
+            max_retransmit_attempts: config.max_retransmit_attempts,
             events: EventQueue::new(),
             in_flight: InFlightPackets::new(),
             ingress: StreamingDecoder::new(),
@@ -69,6 +71,8 @@ pub enum EngineOutput {
     Write(WriteEvent),
     /// A complete application message has been reassembled.
     Message(MessageEvent),
+    /// A message could not be sent reliably.
+    SendFailed(SendFailedEvent),
 }
 
 /// A non-blocking write request produced by the engine.
@@ -107,6 +111,24 @@ impl MessageEvent {
     pub const fn as_bytes(&self) -> &[u8] {
         self.bytes.split_at(self.len).0
     }
+}
+
+/// A reliable send failure produced by the engine.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SendFailedEvent {
+    /// Message identifier whose packet failed.
+    pub message_id: MessageId,
+    /// Packet number that reached the failure condition.
+    pub packet_number: PacketNumber,
+    /// Failure reason.
+    pub reason: SendFailureReason,
+}
+
+/// Reason a reliable send failed.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SendFailureReason {
+    /// The packet reached the configured retransmission attempt limit.
+    RetryLimitReached,
 }
 
 /// Result of `Engine::receive`.
@@ -161,6 +183,9 @@ mod tests {
             match event {
                 EngineOutput::Write(_) => writes += 1,
                 EngineOutput::Message(_) => panic!("sender should not receive its own message"),
+                EngineOutput::SendFailed(failed) => {
+                    panic!("sender should not fail in this test: {failed:?}");
+                }
             }
         }
 
@@ -325,6 +350,34 @@ mod tests {
             bytes[25],
             srt_core::MessageFlags::FIRST.bits() | srt_core::MessageFlags::LAST.bits()
         );
+    }
+
+    #[test]
+    fn engine_reports_send_failed_after_retry_limit() {
+        let mut engine = Engine::new(EngineConfig {
+            max_retransmit_attempts: 1,
+            ..EngineConfig::default()
+        });
+
+        let message_id = engine.send(b"hello").unwrap();
+        let first = next_write(&mut engine);
+
+        assert_eq!(first.packet_number.get(), 0);
+
+        engine.tick(1);
+        let retry = next_write(&mut engine);
+
+        assert_eq!(retry.packet_number, first.packet_number);
+
+        engine.tick(2);
+
+        let Some(EngineOutput::SendFailed(failed)) = engine.poll_event() else {
+            panic!("engine should report send failure");
+        };
+
+        assert_eq!(failed.message_id, message_id);
+        assert_eq!(failed.packet_number, first.packet_number);
+        assert_eq!(failed.reason, super::SendFailureReason::RetryLimitReached);
     }
 
     fn fragment_len_from_wire(bytes: &[u8]) -> usize {

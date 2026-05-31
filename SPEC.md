@@ -4,7 +4,7 @@ SRT, Serial Realtime Transport, is a protocol standard for message-oriented real
 
 This document is intentionally high level. The current goal is to keep protocol ownership and crate boundaries clear while the first no-std draft is hardened.
 
-The current version is a v1 draft-locked no-std protocol scaffold. It is suitable for internal testing and boundary review, but it is not yet a finalized interoperable transport implementation with complete reliability algorithms.
+The current version is a v1 no-std protocol foundation. It is suitable for internal testing and boundary review, but v1 is not complete until reliable transport behavior is implemented and verified.
 
 ## Scope
 
@@ -50,4 +50,5 @@ Both implementation environments must implement the same protocol. Environment-s
 
 All current crates are protocol-standard crates. They are kept `no_std` so the standard remains portable to MCU environments.
 
-See [SRT v1 Stable Protocol Draft](architectures/v1/srt-stable-protocol-draft.md) for the locked v1 draft wire and packet model.
+See [SRT v1 Stable Protocol Draft](architectures/v1/srt-stable-protocol-draft.md) for the current v1 draft wire and packet model.
+See [SRT v1 Reliable Transport Plan](architectures/v1/srt-reliable-transport-plan.md) for the remaining v1 reliability work.

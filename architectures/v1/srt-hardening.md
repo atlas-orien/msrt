@@ -12,10 +12,10 @@ v1 hardening
   当前范围已完成。
 
 v1 stable protocol
-  draft-locked。
+  reliable transport 尚未完成。
 ```
 
-因此，v1 这个基础阶段已经可以收关。它不是最终完整可靠性算法版本，但已经完成 no_std 协议骨架、wire hardening 和第一版 stable draft-lock。
+因此，v1 还不能收关。当前已经完成 no_std 协议骨架和 wire hardening，但 v1 的目标是可靠传输，还需要补齐可靠性语义和测试。
 
 `hardening` 的意思是加固。它不是重新设计方向，也不是引入新的运行环境适配层，而是在 v1 MVP 已经跑通的基础上，把协议推进到更接近真实串口使用的状态。
 
@@ -320,4 +320,4 @@ v1 MVP 证明了 SRT 的方向是可行的。
 
 v1 hardening 已经证明 SRT 可以面对真实串口 byte stream。
 
-当前可以说 v1 基础协议阶段已经完成，后续应进入可靠性算法和多 channel 行为的 v2 设计。
+当前只能说 v1 foundation 和 hardening 当前范围已经完成。后续仍然属于 v1：需要进入可靠传输补齐阶段，而不是直接进入 v2。

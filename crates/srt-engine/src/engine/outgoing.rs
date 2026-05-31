@@ -76,8 +76,10 @@ impl Engine {
             }))?;
             self.in_flight.track(InFlightPacket {
                 packet_number,
+                message_id,
                 bytes: wire,
                 len: written,
+                attempts: 0,
             })?;
             self.next_packet_number = self.next_packet_number.next();
 

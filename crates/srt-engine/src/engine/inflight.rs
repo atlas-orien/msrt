@@ -1,6 +1,6 @@
 //! In-flight packet tracking.
 
-use srt_core::{Error, ErrorKind, PacketNumber, Result};
+use srt_core::{Error, ErrorKind, MessageId, PacketNumber, Result};
 
 use crate::{MAX_IN_FLIGHT_PACKETS, MAX_WIRE_BYTES};
 
@@ -8,8 +8,10 @@ use crate::{MAX_IN_FLIGHT_PACKETS, MAX_WIRE_BYTES};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct InFlightPacket {
     pub(crate) packet_number: PacketNumber,
+    pub(crate) message_id: MessageId,
     pub(crate) bytes: [u8; MAX_WIRE_BYTES],
     pub(crate) len: usize,
+    pub(crate) attempts: u8,
 }
 
 /// Fixed-capacity in-flight packet set.
@@ -64,5 +66,29 @@ impl InFlightPackets {
 
     pub(crate) fn packets(&self) -> impl Iterator<Item = &InFlightPacket> {
         self.packets.iter().flatten()
+    }
+
+    pub(crate) fn remove(&mut self, packet_number: PacketNumber) -> Option<InFlightPacket> {
+        for slot in &mut self.packets {
+            if slot
+                .map(|packet| packet.packet_number == packet_number)
+                .unwrap_or(false)
+            {
+                let packet = slot.take();
+                self.len = self.len.saturating_sub(1);
+                return packet;
+            }
+        }
+
+        None
+    }
+
+    pub(crate) fn note_retransmit(&mut self, packet_number: PacketNumber) {
+        for packet in self.packets.iter_mut().flatten() {
+            if packet.packet_number == packet_number {
+                packet.attempts = packet.attempts.saturating_add(1);
+                return;
+            }
+        }
     }
 }

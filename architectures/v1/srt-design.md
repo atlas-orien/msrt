@@ -67,11 +67,11 @@ SRT 的可靠性应该同时理解 packet 和 channel。
 
 协议未来应该支持 ack、重传、超时处理、重复包检测、滑动窗口。不是所有消息都需要同一种可靠性。某些实时 channel 可能更关心新鲜度，而不是保证每一个旧消息都送达。
 
-当前 v1 MVP 已经实现最小 ACK、in-flight packet tracking 和 tick-driven retransmit，用于验证协议闭环。它还不是完整可靠性算法，也不是最终 wire 兼容标准。
+当前 v1 MVP 已经实现最小 ACK、in-flight packet tracking 和 tick-driven retransmit，用于验证协议闭环。它还不是可靠传输完成版本，也不是最终 wire 兼容标准。
 
 ## v1 MVP 用户 API
 
-v1 的重点不是完整可靠性算法，而是先冻结外部用户应该看到的最小 API。
+v1 的最终目标是可靠传输。当前阶段先冻结外部用户应该看到的最小 API，下一步必须补齐可靠性语义。
 
 外部用户不应该自己拆 packet，也不应该自己判断一条 message 需要发几次。用户提交的是完整 message：
 
@@ -185,24 +185,24 @@ send(message)
 - 不实现 CLI。
 - 不实现 simulator。
 - 不实现完整重传算法。
-- 不实现完整可靠性算法。
+- 不实现 UART / OS runtime adapter。
 
-当前 v1 基础目标已经完成：冻结架构、crate 边界、第一版 wire format draft-lock，并验证最小协议行为。
+当前 v1 foundation 目标已经完成：冻结架构、crate 边界、第一版 wire format draft，并验证最小协议行为。
 
 ## 后续推进顺序
 
-当前 v1 基础协议阶段已经完成：
+当前 v1 foundation 已经完成：
 
 1. streaming wire decode，支持半包、粘包、一次 receive 多包。
-2. 第一版 wire format draft-lock。
+2. 第一版 wire format draft。
 3. Packet / Frame serialization 对齐。
 4. duplicate packet detection、ACK 和 tick retransmit 的最小闭环。
 5. smoke 覆盖噪声、CRC 错误、丢包、重发、ACK 和双向 message。
 
-后续推进顺序：
+v1 后续推进顺序：
 
 1. 完善 retry/failure event。
 2. 支持多 message、多 channel 的 reassembly。
 3. 实现 partial reliability / latest-only 策略。
 4. 设计 heapless/no-alloc buffer 策略。
-5. 如确实需要，再恢复独立 channel 状态管理 crate。
+5. 增加可靠传输验收 smoke 和单元测试。

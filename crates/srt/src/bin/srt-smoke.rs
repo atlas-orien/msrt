@@ -146,6 +146,9 @@ fn poll_one_endpoint(
             *received = true;
             true
         }
+        Some(Event::SendFailed(failed)) => {
+            panic!("{src_name}: unexpected send failure: {failed:?}");
+        }
         None => false,
     }
 }
@@ -241,6 +244,9 @@ fn drain_until_message(
             Some(Event::Message(message)) => {
                 print_message(src_name, message);
                 return message;
+            }
+            Some(Event::SendFailed(failed)) => {
+                panic!("{src_name}: unexpected send failure: {failed:?}");
             }
             None => panic!("{src_name}: expected a complete message"),
         }

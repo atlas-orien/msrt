@@ -13,8 +13,9 @@ pub use srt_reliability as reliability;
 pub use srt_wire as wire;
 
 pub use srt_engine::{
-    DEFAULT_FRAGMENT_BYTES, Engine, EngineConfig, EngineOutput, MAX_EVENTS, MAX_MESSAGE_BYTES,
-    MAX_WIRE_BYTES, MessageEvent, ReceiveReport, WriteEvent,
+    DEFAULT_FRAGMENT_BYTES, DEFAULT_MAX_RETRANSMIT_ATTEMPTS, Engine, EngineConfig, EngineOutput,
+    MAX_EVENTS, MAX_MESSAGE_BYTES, MAX_WIRE_BYTES, MessageEvent, ReceiveReport, SendFailedEvent,
+    SendFailureReason, WriteEvent,
 };
 
 /// User-facing engine configuration.
@@ -27,3 +28,5 @@ pub type Message = MessageEvent;
 pub type Write = WriteEvent;
 /// User-facing receive report.
 pub type Receive = ReceiveReport;
+/// User-facing failed send event.
+pub type SendFailed = SendFailedEvent;
