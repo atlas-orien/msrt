@@ -13,6 +13,7 @@ pub(crate) struct InFlightPacket {
     pub(crate) bytes: [u8; MAX_WIRE_BYTES],
     pub(crate) len: usize,
     pub(crate) attempts: u8,
+    pub(crate) last_sent_ms: u64,
 }
 
 /// Fixed-capacity in-flight packet set.
@@ -81,10 +82,11 @@ impl InFlightPackets {
         }
     }
 
-    pub(crate) fn note_retransmit(&mut self, packet_number: PacketNumber) {
+    pub(crate) fn note_retransmit(&mut self, packet_number: PacketNumber, now_ms: u64) {
         for packet in self.packets.iter_mut().flatten() {
             if packet.packet_number == packet_number {
                 packet.attempts = packet.attempts.saturating_add(1);
+                packet.last_sent_ms = now_ms;
                 return;
             }
         }

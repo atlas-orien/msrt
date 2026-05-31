@@ -20,6 +20,8 @@ pub const MAX_REASSEMBLY_MESSAGES: usize = 4;
 pub const DEFAULT_FRAGMENT_BYTES: usize = 32;
 /// Default maximum retransmission attempts before a send fails.
 pub const DEFAULT_MAX_RETRANSMIT_ATTEMPTS: u8 = 3;
+/// Default retransmission timeout in engine ticks.
+pub const DEFAULT_RETRANSMIT_TIMEOUT_MS: u64 = 1;
 
 /// Minimal protocol engine configuration.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -32,6 +34,8 @@ pub struct EngineConfig {
     pub fragment_bytes: usize,
     /// Maximum retransmission attempts before a packet is considered failed.
     pub max_retransmit_attempts: u8,
+    /// Ticks that must elapse before an in-flight packet is eligible for retransmission.
+    pub retransmit_timeout_ms: u64,
 }
 
 impl Default for EngineConfig {
@@ -41,6 +45,7 @@ impl Default for EngineConfig {
             initial_message_id: MessageId::ZERO,
             fragment_bytes: DEFAULT_FRAGMENT_BYTES,
             max_retransmit_attempts: DEFAULT_MAX_RETRANSMIT_ATTEMPTS,
+            retransmit_timeout_ms: DEFAULT_RETRANSMIT_TIMEOUT_MS,
         }
     }
 }

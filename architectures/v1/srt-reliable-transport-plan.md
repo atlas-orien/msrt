@@ -18,6 +18,7 @@
 - fixed-slot 多 message reassembly 的最小边界。
 - half packet、sticky packet、noise、CRC error、drop、duplicate、同时双向发送 smoke。
 - ACK range 的最小 fixed-capacity 编码和批量 in-flight 清理。
+- retransmit timeout tick 的最小策略。
 
 但这些只能证明 foundation 是正确的，不能证明 v1 已经是可靠传输。
 
@@ -164,9 +165,15 @@ reason = RetryLimitReached
 - 同一条 message 的其它 in-flight packet 会被移除。
 - 同一条 message 只产生一次 failed event。
 
+当前已经补齐：
+
+- `retransmit_timeout_ms` 配置。
+- in-flight packet 记录 `last_sent_ms`。
+- `tick(now)` 只有达到 timeout 后才重发。
+- 每次重发后更新 `last_sent_ms`。
+
 后续仍需要继续补齐：
 
-- timeout tick 策略。
 - message 失败后的对端取消 / 本端清理语义。
 
 ## 下一步三：多 message reassembly

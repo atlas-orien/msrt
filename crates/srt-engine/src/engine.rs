@@ -31,6 +31,7 @@ pub struct Engine {
     pub(crate) next_message_id: MessageId,
     pub(crate) fragment_bytes: usize,
     pub(crate) max_retransmit_attempts: u8,
+    pub(crate) retransmit_timeout_ms: u64,
     pub(crate) events: EventQueue,
     pub(crate) in_flight: InFlightPackets,
     pub(crate) ack_ranges: AckRanges,
@@ -48,6 +49,7 @@ impl Engine {
             next_message_id: config.initial_message_id,
             fragment_bytes: config.fragment_bytes,
             max_retransmit_attempts: config.max_retransmit_attempts,
+            retransmit_timeout_ms: config.retransmit_timeout_ms,
             events: EventQueue::new(),
             in_flight: InFlightPackets::new(),
             ack_ranges: AckRanges::new(),
@@ -370,6 +372,29 @@ mod tests {
 
         assert_eq!(next_write(&mut engine).packet_number.get(), 1);
         assert!(engine.poll_event().is_none());
+    }
+
+    #[test]
+    fn engine_tick_waits_for_retransmit_timeout() {
+        let mut engine = Engine::new(EngineConfig {
+            retransmit_timeout_ms: 10,
+            ..EngineConfig::default()
+        });
+
+        engine.send(b"hello").unwrap();
+        let first = next_write(&mut engine);
+
+        engine.tick(9);
+        assert!(engine.poll_event().is_none());
+
+        engine.tick(10);
+        assert_eq!(next_write(&mut engine).packet_number, first.packet_number);
+
+        engine.tick(19);
+        assert!(engine.poll_event().is_none());
+
+        engine.tick(20);
+        assert_eq!(next_write(&mut engine).packet_number, first.packet_number);
     }
 
     #[test]

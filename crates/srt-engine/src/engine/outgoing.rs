@@ -92,6 +92,7 @@ impl Engine {
                 bytes: wire,
                 len: written,
                 attempts: 0,
+                last_sent_ms: 0,
             })?;
             self.next_packet_number = self.next_packet_number.next();
 

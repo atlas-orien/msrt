@@ -9,7 +9,7 @@ impl Engine {
     ///
     /// The MVP engine keeps this as a boundary for future ACK timeout and
     /// retransmission logic.
-    pub fn tick(&mut self, _now_ms: u64) {
+    pub fn tick(&mut self, now_ms: u64) {
         let mut retransmits = [None; MAX_IN_FLIGHT_PACKETS];
         let mut retransmit_len = 0;
         let mut failures = [None; MAX_IN_FLIGHT_PACKETS];
@@ -18,6 +18,10 @@ impl Engine {
         let mut failed_message_len = 0;
 
         for packet in self.in_flight.packets() {
+            if now_ms.saturating_sub(packet.last_sent_ms) < self.retransmit_timeout_ms {
+                continue;
+            }
+
             if packet.attempts >= self.max_retransmit_attempts {
                 let already_failed = failed_messages[..failed_message_len]
                     .iter()
@@ -48,7 +52,7 @@ impl Engine {
         }
 
         for packet in retransmits[..retransmit_len].iter().flatten() {
-            self.in_flight.note_retransmit(packet.packet_number);
+            self.in_flight.note_retransmit(packet.packet_number, now_ms);
             let _ = self.events.push(EngineOutput::Write(WriteEvent {
                 packet_number: packet.packet_number,
                 bytes: packet.bytes,

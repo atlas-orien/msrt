@@ -14,9 +14,9 @@ pub use srt_wire as wire;
 
 pub use srt_core::ChannelId;
 pub use srt_engine::{
-    DEFAULT_FRAGMENT_BYTES, DEFAULT_MAX_RETRANSMIT_ATTEMPTS, Engine, EngineConfig, EngineOutput,
-    MAX_EVENTS, MAX_MESSAGE_BYTES, MAX_WIRE_BYTES, MessageEvent, ReceiveReport, SendFailedEvent,
-    SendFailureReason, WriteEvent,
+    DEFAULT_FRAGMENT_BYTES, DEFAULT_MAX_RETRANSMIT_ATTEMPTS, DEFAULT_RETRANSMIT_TIMEOUT_MS, Engine,
+    EngineConfig, EngineOutput, MAX_EVENTS, MAX_MESSAGE_BYTES, MAX_WIRE_BYTES, MessageEvent,
+    ReceiveReport, SendFailedEvent, SendFailureReason, WriteEvent,
 };
 
 /// User-facing engine configuration.
