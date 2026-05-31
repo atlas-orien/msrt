@@ -11,7 +11,8 @@ pub mod scheduler;
 pub mod time;
 
 pub use config::{
-    DEFAULT_FRAGMENT_BYTES, EngineConfig, MAX_EVENTS, MAX_MESSAGE_BYTES, MAX_WIRE_BYTES,
+    DEFAULT_FRAGMENT_BYTES, EngineConfig, MAX_EVENTS, MAX_IN_FLIGHT_PACKETS, MAX_MESSAGE_BYTES,
+    MAX_WIRE_BYTES,
 };
 pub use engine::{Engine, EngineOutput, MessageEvent, ReceiveReport, WriteEvent};
 pub use event::{EngineEvent, EngineEventKind};

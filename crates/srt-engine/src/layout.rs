@@ -17,6 +17,8 @@ pub(crate) const FRAGMENT_HEADER_LEN: usize =
     MESSAGE_ID_LEN + MESSAGE_LEN_LEN + FRAGMENT_OFFSET_LEN + FRAGMENT_FLAGS_LEN;
 /// Encoded packet metadata length before fragment bytes.
 pub(crate) const PACKET_META_LEN: usize = PACKET_NUMBER_LEN + FRAGMENT_HEADER_LEN;
+/// Encoded ACK packet payload length.
+pub(crate) const ACK_PACKET_LEN: usize = PACKET_NUMBER_LEN + PACKET_NUMBER_LEN;
 
 /// Fragment is the first fragment of a message.
 pub(crate) const FRAGMENT_FIRST: u8 = 1 << 0;

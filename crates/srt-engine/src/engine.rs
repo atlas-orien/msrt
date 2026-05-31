@@ -6,8 +6,11 @@ use srt_core::{
 use srt_wire::{Checksum, Crc16, EnvelopeHeader, EnvelopeMagic, WIRE_HEADER_LEN, WireFlags};
 
 use crate::{
-    EngineConfig, MAX_EVENTS, MAX_MESSAGE_BYTES, MAX_WIRE_BYTES,
-    layout::{CHECKSUM_LEN, FRAGMENT_FIRST, FRAGMENT_LAST, PACKET_META_LEN, PACKET_NUMBER_LEN},
+    EngineConfig, MAX_EVENTS, MAX_IN_FLIGHT_PACKETS, MAX_MESSAGE_BYTES, MAX_WIRE_BYTES,
+    layout::{
+        ACK_PACKET_LEN, CHECKSUM_LEN, FRAGMENT_FIRST, FRAGMENT_LAST, PACKET_META_LEN,
+        PACKET_NUMBER_LEN,
+    },
 };
 
 /// Minimal non-blocking SRT protocol engine.
@@ -21,6 +24,7 @@ pub struct Engine {
     next_message_id: MessageId,
     fragment_bytes: usize,
     events: EventQueue,
+    in_flight: InFlightPackets,
     reassembly: ReassemblyBuffer,
 }
 
@@ -33,6 +37,7 @@ impl Engine {
             next_message_id: config.initial_message_id,
             fragment_bytes: config.fragment_bytes,
             events: EventQueue::new(),
+            in_flight: InFlightPackets::new(),
             reassembly: ReassemblyBuffer::new(),
         }
     }
@@ -59,9 +64,13 @@ impl Engine {
     }
 
     fn receive_bytes(&mut self, bytes: &[u8]) -> ReceiveReport {
-        match decode_message_fragment(bytes, &Crc16) {
-            FragmentDecode::Fragment(fragment) => {
+        match decode_packet(bytes, &Crc16) {
+            PacketDecode::Data(fragment) => {
                 let packet_number = fragment.packet_number;
+                if self.queue_ack(packet_number).is_err() {
+                    return ReceiveReport::Error(Error::new(ErrorKind::Engine));
+                }
+
                 match self.reassembly.observe(fragment) {
                     Ok(Some(message)) => {
                         if self.events.push(EngineOutput::Message(message)).is_err() {
@@ -73,9 +82,15 @@ impl Engine {
                     Err(error) => ReceiveReport::Error(error),
                 }
             }
-            FragmentDecode::Noise { skipped } => ReceiveReport::Noise { skipped },
-            FragmentDecode::Corrupted => ReceiveReport::Corrupted,
-            FragmentDecode::Incomplete { needed } => ReceiveReport::Incomplete { needed },
+            PacketDecode::Ack(ack) => {
+                self.in_flight.ack(ack.acknowledged);
+                ReceiveReport::Ack {
+                    packet_number: ack.acknowledged,
+                }
+            }
+            PacketDecode::Noise { skipped } => ReceiveReport::Noise { skipped },
+            PacketDecode::Corrupted => ReceiveReport::Corrupted,
+            PacketDecode::Incomplete { needed } => ReceiveReport::Incomplete { needed },
         }
     }
 
@@ -88,7 +103,25 @@ impl Engine {
     ///
     /// The MVP engine keeps this as a boundary for future ACK timeout and
     /// retransmission logic.
-    pub fn tick(&mut self, _now_ms: u64) {}
+    pub fn tick(&mut self, _now_ms: u64) {
+        let mut retransmits = [None; MAX_IN_FLIGHT_PACKETS];
+        let mut retransmit_len = 0;
+
+        for packet in self.in_flight.packets() {
+            if retransmit_len < retransmits.len() {
+                retransmits[retransmit_len] = Some(*packet);
+                retransmit_len += 1;
+            }
+        }
+
+        for packet in retransmits[..retransmit_len].iter().flatten() {
+            let _ = self.events.push(EngineOutput::Write(WriteEvent {
+                packet_number: packet.packet_number,
+                bytes: packet.bytes,
+                len: packet.len,
+            }));
+        }
+    }
 
     /// Returns the next packet number that will be assigned.
     #[must_use]
@@ -129,6 +162,11 @@ impl Engine {
                 bytes: wire,
                 len: written,
             }))?;
+            self.in_flight.track(InFlightPacket {
+                packet_number,
+                bytes: wire,
+                len: written,
+            })?;
             self.next_packet_number = self.next_packet_number.next();
 
             if message.is_empty() {
@@ -137,6 +175,21 @@ impl Engine {
 
             offset = end;
         }
+
+        Ok(())
+    }
+
+    fn queue_ack(&mut self, acknowledged: PacketNumber) -> Result<()> {
+        let packet_number = self.next_packet_number;
+        let mut wire = [0; MAX_WIRE_BYTES];
+        let written = encode_ack_packet(packet_number, acknowledged, &mut wire, &Crc16)?;
+
+        self.events.push(EngineOutput::Write(WriteEvent {
+            packet_number,
+            bytes: wire,
+            len: written,
+        }))?;
+        self.next_packet_number = self.next_packet_number.next();
 
         Ok(())
     }
@@ -197,6 +250,11 @@ pub enum ReceiveReport {
         /// Packet number decoded from the envelope.
         packet_number: PacketNumber,
     },
+    /// An ACK packet was accepted.
+    Ack {
+        /// Packet number acknowledged by the peer.
+        packet_number: PacketNumber,
+    },
     /// The input did not contain a valid magic prefix at offset zero.
     Noise {
         /// Number of bytes treated as noise.
@@ -214,11 +272,17 @@ pub enum ReceiveReport {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum FragmentDecode<'a> {
-    Fragment(DecodedFragment<'a>),
+enum PacketDecode<'a> {
+    Data(DecodedFragment<'a>),
+    Ack(DecodedAck),
     Noise { skipped: usize },
     Corrupted,
     Incomplete { needed: Option<usize> },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct DecodedAck {
+    acknowledged: PacketNumber,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -239,6 +303,67 @@ struct FragmentToEncode<'a> {
     fragment_offset: usize,
     flags: u8,
     fragment: &'a [u8],
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct InFlightPacket {
+    packet_number: PacketNumber,
+    bytes: [u8; MAX_WIRE_BYTES],
+    len: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct InFlightPackets {
+    packets: [Option<InFlightPacket>; MAX_IN_FLIGHT_PACKETS],
+    len: usize,
+}
+
+impl InFlightPackets {
+    const fn new() -> Self {
+        Self {
+            packets: [None; MAX_IN_FLIGHT_PACKETS],
+            len: 0,
+        }
+    }
+
+    fn track(&mut self, packet: InFlightPacket) -> Result<()> {
+        for slot in &mut self.packets {
+            if slot
+                .map(|current| current.packet_number == packet.packet_number)
+                .unwrap_or(false)
+            {
+                *slot = Some(packet);
+                return Ok(());
+            }
+        }
+
+        for slot in &mut self.packets {
+            if slot.is_none() {
+                *slot = Some(packet);
+                self.len += 1;
+                return Ok(());
+            }
+        }
+
+        Err(Error::new(ErrorKind::Engine))
+    }
+
+    fn ack(&mut self, packet_number: PacketNumber) {
+        for slot in &mut self.packets {
+            if slot
+                .map(|packet| packet.packet_number == packet_number)
+                .unwrap_or(false)
+            {
+                *slot = None;
+                self.len = self.len.saturating_sub(1);
+                return;
+            }
+        }
+    }
+
+    fn packets(&self) -> impl Iterator<Item = &InFlightPacket> {
+        self.packets.iter().flatten()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -287,7 +412,8 @@ struct ReassemblyBuffer {
     active: bool,
     message_id: MessageId,
     expected_len: usize,
-    received_len: usize,
+    last_seen: bool,
+    received: [bool; MAX_MESSAGE_BYTES],
     bytes: [u8; MAX_MESSAGE_BYTES],
 }
 
@@ -297,7 +423,8 @@ impl ReassemblyBuffer {
             active: false,
             message_id: MessageId::ZERO,
             expected_len: 0,
-            received_len: 0,
+            last_seen: false,
+            received: [false; MAX_MESSAGE_BYTES],
             bytes: [0; MAX_MESSAGE_BYTES],
         }
     }
@@ -307,11 +434,23 @@ impl ReassemblyBuffer {
             return Err(Error::new(ErrorKind::Engine));
         }
 
-        if !self.active || fragment.flags & FRAGMENT_FIRST != 0 {
+        if !self.active {
+            if fragment.flags & FRAGMENT_FIRST == 0 {
+                return Ok(None);
+            }
+
             self.active = true;
             self.message_id = fragment.message_id;
             self.expected_len = fragment.message_len;
-            self.received_len = 0;
+            self.last_seen = false;
+            self.received = [false; MAX_MESSAGE_BYTES];
+            self.bytes = [0; MAX_MESSAGE_BYTES];
+        } else if self.message_id != fragment.message_id && fragment.flags & FRAGMENT_FIRST != 0 {
+            self.active = true;
+            self.message_id = fragment.message_id;
+            self.expected_len = fragment.message_len;
+            self.last_seen = false;
+            self.received = [false; MAX_MESSAGE_BYTES];
             self.bytes = [0; MAX_MESSAGE_BYTES];
         }
 
@@ -326,9 +465,20 @@ impl ReassemblyBuffer {
         }
 
         self.bytes[fragment.fragment_offset..end].copy_from_slice(fragment.bytes);
-        self.received_len = core::cmp::max(self.received_len, end);
 
-        if fragment.flags & FRAGMENT_LAST != 0 && self.received_len == self.expected_len {
+        for received in &mut self.received[fragment.fragment_offset..end] {
+            *received = true;
+        }
+
+        if fragment.flags & FRAGMENT_LAST != 0 {
+            self.last_seen = true;
+        }
+
+        if self.last_seen
+            && self.received[..self.expected_len]
+                .iter()
+                .all(|received| *received)
+        {
             let message = MessageEvent {
                 message_id: self.message_id,
                 bytes: self.bytes,
@@ -386,19 +536,48 @@ fn encode_message_fragment(
     Ok(total_len)
 }
 
-fn decode_message_fragment<'a>(bytes: &'a [u8], checksum: &impl Checksum) -> FragmentDecode<'a> {
+fn encode_ack_packet(
+    packet_number: PacketNumber,
+    acknowledged: PacketNumber,
+    out: &mut [u8],
+    checksum: &impl Checksum,
+) -> Result<usize> {
+    let packet_len = u16::try_from(ACK_PACKET_LEN).map_err(|_| Error::new(ErrorKind::Engine))?;
+    let envelope_header = EnvelopeHeader::new(packet_len, WireFlags::CHECKSUM_PRESENT);
+    let total_len = envelope_header.total_len();
+
+    if out.len() < total_len {
+        return Err(Error::buffer_too_small());
+    }
+
+    out[..2].copy_from_slice(&EnvelopeMagic::SRT.bytes());
+    out[2] = envelope_header.version;
+    out[3] = envelope_header.header_len;
+    out[4..6].copy_from_slice(&envelope_header.packet_len.to_le_bytes());
+    out[6] = envelope_header.flags.bits();
+    out[7] = envelope_header.reserved;
+    out[8..12].copy_from_slice(&packet_number.get().to_le_bytes());
+    out[12..16].copy_from_slice(&acknowledged.get().to_le_bytes());
+
+    let checksum_value = checksum.calculate(&out[..total_len - CHECKSUM_LEN]);
+    out[total_len - CHECKSUM_LEN..total_len].copy_from_slice(&checksum_value.to_le_bytes());
+
+    Ok(total_len)
+}
+
+fn decode_packet<'a>(bytes: &'a [u8], checksum: &impl Checksum) -> PacketDecode<'a> {
     let Some(offset) = find_magic(bytes) else {
-        return FragmentDecode::Noise {
+        return PacketDecode::Noise {
             skipped: bytes.len(),
         };
     };
 
     if offset > 0 {
-        return FragmentDecode::Noise { skipped: offset };
+        return PacketDecode::Noise { skipped: offset };
     }
 
     if bytes.len() < WIRE_HEADER_LEN + CHECKSUM_LEN {
-        return FragmentDecode::Incomplete {
+        return PacketDecode::Incomplete {
             needed: Some(WIRE_HEADER_LEN + CHECKSUM_LEN),
         };
     }
@@ -407,7 +586,7 @@ fn decode_message_fragment<'a>(bytes: &'a [u8], checksum: &impl Checksum) -> Fra
     let total_len = WIRE_HEADER_LEN + packet_len + CHECKSUM_LEN;
 
     if bytes.len() < total_len {
-        return FragmentDecode::Incomplete {
+        return PacketDecode::Incomplete {
             needed: Some(total_len),
         };
     }
@@ -415,15 +594,35 @@ fn decode_message_fragment<'a>(bytes: &'a [u8], checksum: &impl Checksum) -> Fra
     let expected = u16::from_le_bytes([bytes[total_len - 2], bytes[total_len - 1]]);
 
     if !checksum.verify(&bytes[..total_len - CHECKSUM_LEN], expected) {
-        return FragmentDecode::Corrupted;
+        return PacketDecode::Corrupted;
+    }
+
+    if packet_len == ACK_PACKET_LEN {
+        return match ack_from_wire(bytes) {
+            Some(ack) => PacketDecode::Ack(ack),
+            None => PacketDecode::Incomplete {
+                needed: Some(WIRE_HEADER_LEN + ACK_PACKET_LEN + CHECKSUM_LEN),
+            },
+        };
     }
 
     match fragment_from_wire(bytes, packet_len) {
-        Some(fragment) => FragmentDecode::Fragment(fragment),
-        None => FragmentDecode::Incomplete {
+        Some(fragment) => PacketDecode::Data(fragment),
+        None => PacketDecode::Incomplete {
             needed: Some(WIRE_HEADER_LEN + PACKET_META_LEN + CHECKSUM_LEN),
         },
     }
+}
+
+fn ack_from_wire(bytes: &[u8]) -> Option<DecodedAck> {
+    let start = WIRE_HEADER_LEN + PACKET_NUMBER_LEN;
+    let end = start + PACKET_NUMBER_LEN;
+    let raw = bytes.get(start..end)?;
+    let raw = u32::from_le_bytes(raw.try_into().ok()?);
+
+    Some(DecodedAck {
+        acknowledged: PacketNumber::new(raw),
+    })
 }
 
 fn fragment_from_wire(bytes: &[u8], packet_len: usize) -> Option<DecodedFragment<'_>> {
@@ -521,14 +720,17 @@ mod tests {
 
             assert!(matches!(
                 b.receive(write.as_bytes()),
-                ReceiveReport::Packet { .. }
+                ReceiveReport::Packet { .. } | ReceiveReport::Ack { .. }
             ));
         }
 
-        let Some(EngineOutput::Message(message)) = b.poll_event() else {
-            panic!("receiver should emit a complete message");
-        };
+        while let Some(event) = b.poll_event() {
+            if let EngineOutput::Message(message) = event {
+                assert_eq!(message.as_bytes(), b"hello srt testing");
+                return;
+            }
+        }
 
-        assert_eq!(message.as_bytes(), b"hello srt testing");
+        panic!("receiver should emit a complete message");
     }
 }
