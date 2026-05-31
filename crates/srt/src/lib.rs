@@ -1,6 +1,8 @@
 #![no_std]
 #![doc = "No-std facade crate for the Serial Realtime Transport protocol."]
 
+pub mod endpoint;
+
 /// Core protocol primitives.
 pub use srt_core as core;
 /// Protocol engine boundaries.
@@ -11,3 +13,8 @@ pub use srt_error as error;
 pub use srt_reliability as reliability;
 /// Wire envelope boundaries.
 pub use srt_wire as wire;
+
+pub use endpoint::{
+    DEFAULT_FRAGMENT_BYTES, Endpoint, EndpointConfig, EndpointEvent, MAX_EVENTS, MAX_MESSAGE_BYTES,
+    MAX_WIRE_BYTES, MessageEvent, ReceiveReport, WriteEvent,
+};

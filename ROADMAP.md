@@ -4,7 +4,7 @@ This roadmap describes the current scaffold milestone and the next implementatio
 
 ## v0.1 Protocol Scaffold
 
-Status: complete.
+Status: refinement in progress.
 
 The current workspace freezes the no-std protocol crate boundaries:
 
@@ -17,6 +17,15 @@ The current workspace freezes the no-std protocol crate boundaries:
 
 This milestone is not a usable transport implementation yet. It defines the protocol ownership model, public boundaries, basic tests, smoke simulation, CI, git hooks, and architecture documents.
 
+The current refinement focus is the no-std engine model:
+
+- long-lived endpoint state
+- non-blocking `receive(&mut link)`
+- internal `feed(bytes)` ingress pipeline
+- application-driven `send(...)`
+- explicit `tick(now)`
+- event-based output through `poll_event()`
+
 ## Next Phases
 
 1. Freeze the first wire format draft.
@@ -26,19 +35,6 @@ This milestone is not a usable transport implementation yet. It defines the prot
 5. Implement reliability policies.
 6. Add heapless/no-alloc buffer strategies.
 7. Add host and MCU adapters after the standard core stabilizes.
-
-## v0.2 Wire Format Draft
-
-Status: design in progress.
-
-The next milestone focuses on the first concrete wire format draft:
-
-- Wire Envelope layout
-- Packet Header layout
-- Protocol Frame layout
-- CRC16 coverage and parameters
-- decoder state-machine strategy
-- table-driven encode/decode tests
 
 ## Current Non-goals
 

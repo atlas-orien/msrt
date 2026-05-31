@@ -9,7 +9,8 @@ Current status: traits and basic types only. No complete protocol state machine 
 ## Responsibilities
 
 - message send entry points
-- byte receive entry points
+- non-blocking link receive entry points
+- internal feed(bytes) ingress boundary
 - engine tick boundary
 - engine events
 - ACK response boundary

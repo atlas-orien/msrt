@@ -5,7 +5,7 @@ use srt_core::Result;
 use crate::{
     event::EngineEvent,
     link::RawLink,
-    receive::{PacketInput, ReceiveAction, ReceiveInput, Receiver},
+    receive::{FeedProgress, PacketInput, ReceiveAction, ReceiveInput, ReceiveProgress, Receiver},
     send::{SendIntent, Sender},
     time::Instant,
 };
@@ -17,9 +17,17 @@ pub trait ProtocolEngine: Sender + Receiver {
         self.send(intent)
     }
 
-    /// Accepts bytes read from the lower link and advances receive-side protocol state.
-    fn receive(&mut self, input: ReceiveInput<'_>) -> Result<()> {
-        self.receive_bytes(input)
+    /// Reads available bytes from a link and advances receive-side protocol state.
+    fn receive<L>(&mut self, link: &mut L, scratch: &mut [u8]) -> Result<ReceiveProgress>
+    where
+        L: crate::LinkRead,
+    {
+        Receiver::receive(self, link, scratch)
+    }
+
+    /// Feeds already-read bytes into the internal ingress pipeline.
+    fn feed_input(&mut self, input: ReceiveInput<'_>) -> Result<FeedProgress> {
+        self.feed(input)
     }
 
     /// Accepts a decoded packet and advances receive-side protocol state.

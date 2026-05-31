@@ -14,7 +14,9 @@ pub use engine::{EngineDriver, ProtocolEngine};
 pub use event::{EngineEvent, EngineEventKind};
 pub use link::{LinkIo, LinkRead, LinkWrite, RawLink};
 pub use message::{DeliveredMessage, MessageDelivery, Reassembly};
-pub use receive::{PacketInput, ReceiveAction, ReceiveInput, Receiver};
+pub use receive::{
+    FeedProgress, PacketInput, ReceiveAction, ReceiveInput, ReceiveProgress, Receiver,
+};
 pub use scheduler::{Schedule, Scheduler};
 pub use send::{SendIntent, SendOptions, Sender};
 pub use time::{Duration, Instant};

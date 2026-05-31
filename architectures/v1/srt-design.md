@@ -69,6 +69,70 @@ SRT 的可靠性应该同时理解 packet 和 stream。
 
 当前代码只定义边界，不实现完整算法。
 
+## v1 MVP 用户 API
+
+v1 的重点不是完整可靠性算法，而是先冻结外部用户应该看到的最小 API。
+
+外部用户不应该自己拆 packet，也不应该自己判断一条 message 需要发几次。用户提交的是完整 message：
+
+```text
+endpoint.send(message)
+```
+
+`send` 必须是非阻塞的。它只把完整 message 交给 SRT endpoint，内部自动完成：
+
+```text
+message
+  -> 分配 message_id
+  -> 按 fragment size 拆成多个 fragment
+  -> 每个 fragment 封装成 packet
+  -> 每个 packet 编码成 wire bytes
+  -> 通过 Write 事件交给外部链路写出
+```
+
+外部链路收到 bytes 后，用户只需要把当前已经收到的 bytes 喂回 endpoint：
+
+```text
+endpoint.receive(bytes)
+```
+
+`receive` 也必须是非阻塞的。它处理当前 bytes，可能只收到半个 packet，也可能一次收到多个 packet。完整 message 不应该靠 `receive` 阻塞等待，而是通过事件交付：
+
+```text
+poll_event()
+  -> Write(bytes)
+  -> Message(bytes)
+  -> MessageAcked
+  -> MessageFailed
+```
+
+因此 v1 MVP 的用户心智模型是：
+
+```text
+send(message)
+receive(bytes)
+tick(now)
+poll_event()
+```
+
+其中：
+
+- `send(message)`：提交完整 message，内部自动拆 packet，立即返回。
+- `receive(bytes)`：提交当前已经到达的链路 bytes，推进接收状态，立即返回。
+- `tick(now)`：推进 ACK 超时和重传状态，立即返回。
+- `poll_event()`：取出协议产生的输出，例如需要写出的 bytes 或完整 message。
+
+ACK 与重传的方向在 v1 必须保留边界：
+
+```text
+send(message)
+  -> 产生多个 Write(packet)
+  -> 等待对端 ACK
+  -> 未 ACK 的 packet 未来由 tick 触发重传
+```
+
+但是 v1 不需要马上实现完整 ACK range、拥塞控制或复杂 loss recovery。
+
 ## 当前非目标
 
 - 不实现 UART driver。
