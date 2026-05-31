@@ -2,9 +2,9 @@
 
 This roadmap describes the current scaffold milestone and the next implementation phases.
 
-## v0.1 / v1 MVP
+## v1
 
-Status: complete as an MVP.
+Status: MVP complete, hardening next.
 
 The current workspace freezes the no-std protocol crate boundaries and contains a minimal working protocol engine:
 
@@ -33,7 +33,9 @@ The v1 MVP engine demonstrates:
 - tick-driven retransmission
 - bidirectional Mac-to-MCU style smoke simulation
 
-## Next Phases
+## v1 Hardening
+
+Hardening is still v1 work. It turns the MVP into a protocol that can face real serial byte streams.
 
 1. Implement streaming wire decode for half packets, sticky packets, and multiple packets per receive.
 2. Freeze the first wire format draft.
@@ -42,7 +44,8 @@ The v1 MVP engine demonstrates:
 5. Implement retransmission timeout policy, retry limits, and failure events.
 6. Add multi-message and multi-stream reassembly.
 7. Add heapless/no-alloc buffer strategy configuration.
-8. Add host and MCU adapters after the standard core stabilizes.
+
+Runtime adapters remain out of this repository.
 
 ## Current Non-goals
 
