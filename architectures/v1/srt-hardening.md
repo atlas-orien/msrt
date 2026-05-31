@@ -266,15 +266,22 @@ engine.receive(bytes)
 
 ### 第三批：srt-reliability
 
-1. 增加 duplicate packet detection。
-2. 增加 ACK policy。
-3. 增加 ACK range。
-4. 增加 retransmit timeout policy。
-5. 增加 retry limit。
-6. 增加 send failed event。
-7. 增加 partial reliability / latest-only policy 的实际决策。
+v1 hardening 先完成最小可靠性工具，而不是完整可靠性算法。
 
-第三批完成后，当前 MVP 的简单 ACK / retransmit 逻辑应该逐步迁移到明确的 reliability policy。
+已进入 v1 hardening 范围的内容：
+
+1. 增加 fixed-capacity duplicate packet detection。
+2. 增加 fixed-capacity ACK tracker。
+3. 增加 retry-limit retransmit policy。
+
+仍然留到后续协议冻结前继续设计的内容：
+
+1. ACK range。
+2. retransmit timeout policy 的完整时间模型。
+3. send failed event。
+4. partial reliability / latest-only policy 的实际决策。
+
+第三批完成后，当前 MVP 的简单 ACK / retransmit 逻辑开始迁移到明确的 reliability policy，但不会在 v1 hardening 阶段提前实现完整算法。
 
 ### 第四批：协议冻结
 

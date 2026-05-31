@@ -3,7 +3,10 @@
 use srt::{Config, Engine, Event, MAX_WIRE_BYTES, Message, Receive, Write};
 
 fn main() {
-    let mut mac = Engine::new(Config::default());
+    let mut mac = Engine::new(Config {
+        fragment_bytes: 12,
+        ..Config::default()
+    });
     let mut mcu = Engine::new(Config::default());
 
     inject_noise("mcu", &mut mcu);
@@ -16,7 +19,7 @@ fn main() {
 
     println!("mac: tick triggers retransmit for packets without ACK");
     mac.tick(1);
-    drain_clean("mac", &mut mac, "mcu", &mut mcu);
+    drain_sticky("mac", &mut mac, "mcu", &mut mcu);
 
     let ping = drain_until_message("mcu", &mut mcu, "mac", &mut mac);
     assert_eq!(
@@ -31,7 +34,9 @@ fn main() {
     let pong = drain_until_message("mac", &mut mac, "mcu", &mut mcu);
     assert_eq!(pong.as_bytes(), b"pong from mcu; same no-std engine");
 
-    println!("srt smoke ok: noise, crc error, drop, ack, retransmit, and bidirectional messages");
+    println!(
+        "srt smoke ok: half packet, sticky packets, noise, crc error, drop, ack, retransmit, and bidirectional messages"
+    );
 }
 
 fn inject_noise(name: &str, engine: &mut Engine) {
@@ -74,6 +79,38 @@ fn drain_clean(src_name: &str, src: &mut Engine, dst_name: &str, dst: &mut Engin
     }
 }
 
+fn drain_sticky(src_name: &str, src: &mut Engine, dst_name: &str, dst: &mut Engine) {
+    let mut bytes = [0; MAX_WIRE_BYTES * 4];
+    let mut len = 0;
+
+    while let Some(event) = src.poll_event() {
+        let Event::Write(write) = event else {
+            continue;
+        };
+        let end = len + write.as_bytes().len();
+
+        println!(
+            "{src_name} -> {dst_name}: sticky packet_number={}, wire_bytes={}",
+            write.packet_number.get(),
+            write.as_bytes().len()
+        );
+
+        if end > bytes.len() {
+            log_receive(dst_name, dst.receive(&bytes[..len]));
+            len = 0;
+        }
+
+        let end = len + write.as_bytes().len();
+        bytes[len..end].copy_from_slice(write.as_bytes());
+        len = end;
+    }
+
+    if len > 0 {
+        println!("{src_name} -> {dst_name}: sticky receive bytes={len}");
+        log_receive(dst_name, dst.receive(&bytes[..len]));
+    }
+}
+
 fn drain_until_message(
     src_name: &str,
     src: &mut Engine,
@@ -104,6 +141,9 @@ fn log_receive(name: &str, report: Receive) {
         Receive::Packet { packet_number } => {
             println!("{name}: accepted packet_number={}", packet_number.get());
         }
+        Receive::Duplicate { packet_number } => {
+            println!("{name}: duplicate packet_number={}", packet_number.get());
+        }
         Receive::Ack { packet_number } => {
             println!("{name}: acked packet_number={}", packet_number.get());
         }
@@ -133,6 +173,7 @@ fn print_message(name: &str, message: Message) {
 
 #[derive(Debug, Default)]
 struct DemoLink {
+    split_packet_zero: bool,
     dropped_packet_one: bool,
     corrupted_packet_two: bool,
 }
@@ -144,6 +185,17 @@ impl DemoLink {
 
     fn deliver(&mut self, src_name: &str, dst_name: &str, dst: &mut Engine, write: Write) {
         let packet_number = write.packet_number.get();
+
+        if packet_number == 0 && !self.split_packet_zero {
+            self.split_packet_zero = true;
+            let split = 3;
+
+            println!("{src_name} -> {dst_name}: half packet_number={packet_number} part=1");
+            log_receive(dst_name, dst.receive(&write.as_bytes()[..split]));
+            println!("{src_name} -> {dst_name}: half packet_number={packet_number} part=2");
+            log_receive(dst_name, dst.receive(&write.as_bytes()[split..]));
+            return;
+        }
 
         if packet_number == 1 && !self.dropped_packet_one {
             self.dropped_packet_one = true;

@@ -10,7 +10,13 @@
 在一个 message-oriented serial transport 里，哪些 packet 需要确认，哪些 packet 需要重传，哪些 packet 应该被丢弃，哪些 message fragment 已经可以交付？
 ```
 
-当前阶段只冻结模块边界和 trait 方向，不实现完整算法。
+当前 v1 hardening 阶段仍然不实现完整可靠性算法，但会补充少量 no-alloc 的最小策略组件，用来验证 engine 边界：
+
+- 固定容量 ACK tracker。
+- 固定容量 packet dedup。
+- retry-limit retransmit policy。
+
+这些组件不是最终算法，只是让 engine 不再把所有可靠性判断都写死在自己内部。
 
 ## 位置
 
@@ -192,7 +198,17 @@ Deadline
   超过时间窗口后不再重传。
 ```
 
-当前阶段只保留 `RetransmitPolicy` 之类的 trait，不实现具体策略。
+当前阶段保留 `RetransmitPolicy` 边界，并提供一个最小 `RetryLimitPolicy`，用于表达：
+
+```text
+attempts < max_attempts
+  -> retransmit
+
+attempts >= max_attempts
+  -> drop
+```
+
+它不绑定具体时钟，也不决定 packet bytes 如何重新写出。
 
 ## 超时
 
@@ -212,7 +228,7 @@ Deadline
 
 串口通信可能出现重传后的重复 packet。
 
-`srt-reliability` 需要保留 duplicate detection 边界：
+`srt-reliability` 需要保留 duplicate detection 边界，并提供固定容量的最小 packet dedup：
 
 ```text
 PacketNumber
@@ -220,6 +236,15 @@ PacketNumber
 ```
 
 重复 packet 仍然可能需要触发 ACK，因为对端可能没有收到之前的 ACK。
+
+engine 的策略应该是：
+
+```text
+duplicate data packet
+  -> 仍然 ACK
+  -> 不重复进入 message reassembly
+  -> 不重复交付 Message event
+```
 
 ## 滑动窗口
 

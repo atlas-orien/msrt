@@ -4,7 +4,7 @@ Reliability policy boundaries for SRT.
 
 This crate defines packet acknowledgement, retransmission, timeout, deduplication, sliding window, and message fragment reliability boundaries.
 
-Current status: traits and boundary types only. No complete reliability algorithm is implemented yet.
+Current status: traits, boundary types, and small no-alloc packet policy helpers.
 
 ## Responsibilities
 
@@ -27,7 +27,7 @@ Current status: traits and boundary types only. No complete reliability algorith
 
 ## Design
 
-See [srt-reliability design](../../architectures/srt-reliability-design.md).
+See [srt-reliability design](../../architectures/v1/srt-reliability-design.md).
 
 ## Current Structure
 

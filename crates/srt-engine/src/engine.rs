@@ -3,10 +3,13 @@
 use srt_core::{
     Error, ErrorKind, Flags, MessageId, Packet, PacketHeader, PacketNumber, PacketType, Result,
 };
+use srt_reliability::{Dedup, DedupDecision, PacketDedup};
 use srt_wire::{Checksum, Crc16, EnvelopeHeader, EnvelopeMagic, WIRE_HEADER_LEN, WireFlags};
+use srt_wire::{StreamDecodeOutcome, StreamingDecoder};
 
 use crate::{
-    EngineConfig, MAX_EVENTS, MAX_IN_FLIGHT_PACKETS, MAX_MESSAGE_BYTES, MAX_WIRE_BYTES,
+    EngineConfig, MAX_EVENTS, MAX_IN_FLIGHT_PACKETS, MAX_INGRESS_BYTES, MAX_MESSAGE_BYTES,
+    MAX_WIRE_BYTES,
     layout::{
         ACK_PACKET_LEN, CHECKSUM_LEN, FRAGMENT_FIRST, FRAGMENT_LAST, PACKET_META_LEN,
         PACKET_NUMBER_LEN,
@@ -25,6 +28,8 @@ pub struct Engine {
     fragment_bytes: usize,
     events: EventQueue,
     in_flight: InFlightPackets,
+    ingress: StreamingDecoder<MAX_INGRESS_BYTES>,
+    dedup: PacketDedup<MAX_IN_FLIGHT_PACKETS>,
     reassembly: ReassemblyBuffer,
 }
 
@@ -38,6 +43,8 @@ impl Engine {
             fragment_bytes: config.fragment_bytes,
             events: EventQueue::new(),
             in_flight: InFlightPackets::new(),
+            ingress: StreamingDecoder::new(),
+            dedup: PacketDedup::new(),
             reassembly: ReassemblyBuffer::new(),
         }
     }
@@ -64,11 +71,62 @@ impl Engine {
     }
 
     fn receive_bytes(&mut self, bytes: &[u8]) -> ReceiveReport {
-        match decode_packet(bytes, &Crc16) {
+        let mut input = bytes;
+        let mut report = ReceiveReport::Incomplete { needed: None };
+
+        loop {
+            let outcome = match self.ingress.feed(input, &Crc16) {
+                Ok(outcome) => outcome,
+                Err(error) => return ReceiveReport::Error(error),
+            };
+            input = &[];
+
+            match outcome {
+                StreamDecodeOutcome::Packet {
+                    packet_bytes,
+                    consumed: _,
+                } => {
+                    let packet = match PacketBytes::try_from_slice(packet_bytes) {
+                        Ok(packet) => packet,
+                        Err(error) => return ReceiveReport::Error(error),
+                    };
+                    report = self.receive_complete_packet(packet.as_bytes());
+
+                    if matches!(report, ReceiveReport::Error(_)) {
+                        return report;
+                    }
+                }
+                StreamDecodeOutcome::NeedMore { additional } => {
+                    return match report {
+                        ReceiveReport::Incomplete { .. } => {
+                            ReceiveReport::Incomplete { needed: additional }
+                        }
+                        other => other,
+                    };
+                }
+                StreamDecodeOutcome::Noise { skipped } => {
+                    report = ReceiveReport::Noise { skipped };
+                }
+                StreamDecodeOutcome::Corrupted { consumed: _ } => {
+                    report = ReceiveReport::Corrupted;
+                }
+                StreamDecodeOutcome::Resync { skipped } => {
+                    report = ReceiveReport::Noise { skipped };
+                }
+            }
+        }
+    }
+
+    fn receive_complete_packet(&mut self, bytes: &[u8]) -> ReceiveReport {
+        match decode_packet_bytes(bytes) {
             PacketDecode::Data(fragment) => {
                 let packet_number = fragment.packet_number;
                 if self.queue_ack(packet_number).is_err() {
                     return ReceiveReport::Error(Error::new(ErrorKind::Engine));
+                }
+
+                if self.dedup.observe(packet_number) == DedupDecision::Duplicate {
+                    return ReceiveReport::Duplicate { packet_number };
                 }
 
                 match self.reassembly.observe(fragment) {
@@ -88,9 +146,7 @@ impl Engine {
                     packet_number: ack.acknowledged,
                 }
             }
-            PacketDecode::Noise { skipped } => ReceiveReport::Noise { skipped },
-            PacketDecode::Corrupted => ReceiveReport::Corrupted,
-            PacketDecode::Incomplete { needed } => ReceiveReport::Incomplete { needed },
+            PacketDecode::Malformed => ReceiveReport::Error(Error::malformed()),
         }
     }
 
@@ -250,6 +306,11 @@ pub enum ReceiveReport {
         /// Packet number decoded from the envelope.
         packet_number: PacketNumber,
     },
+    /// A duplicate packet envelope was acknowledged but not processed again.
+    Duplicate {
+        /// Duplicate packet number.
+        packet_number: PacketNumber,
+    },
     /// An ACK packet was accepted.
     Ack {
         /// Packet number acknowledged by the peer.
@@ -275,9 +336,7 @@ pub enum ReceiveReport {
 enum PacketDecode<'a> {
     Data(DecodedFragment<'a>),
     Ack(DecodedAck),
-    Noise { skipped: usize },
-    Corrupted,
-    Incomplete { needed: Option<usize> },
+    Malformed,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -303,6 +362,32 @@ struct FragmentToEncode<'a> {
     fragment_offset: usize,
     flags: u8,
     fragment: &'a [u8],
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct PacketBytes {
+    bytes: [u8; MAX_WIRE_BYTES],
+    len: usize,
+}
+
+impl PacketBytes {
+    fn try_from_slice(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() > MAX_WIRE_BYTES {
+            return Err(Error::buffer_too_small());
+        }
+
+        let mut packet = Self {
+            bytes: [0; MAX_WIRE_BYTES],
+            len: bytes.len(),
+        };
+        packet.bytes[..bytes.len()].copy_from_slice(bytes);
+
+        Ok(packet)
+    }
+
+    const fn as_bytes(&self) -> &[u8] {
+        self.bytes.split_at(self.len).0
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -565,57 +650,20 @@ fn encode_ack_packet(
     Ok(total_len)
 }
 
-fn decode_packet<'a>(bytes: &'a [u8], checksum: &impl Checksum) -> PacketDecode<'a> {
-    let Some(offset) = find_magic(bytes) else {
-        return PacketDecode::Noise {
-            skipped: bytes.len(),
-        };
-    };
-
-    if offset > 0 {
-        return PacketDecode::Noise { skipped: offset };
+fn decode_packet_bytes(bytes: &[u8]) -> PacketDecode<'_> {
+    if bytes.len() == ACK_PACKET_LEN {
+        return ack_from_packet_bytes(bytes)
+            .map(PacketDecode::Ack)
+            .unwrap_or(PacketDecode::Malformed);
     }
 
-    if bytes.len() < WIRE_HEADER_LEN + CHECKSUM_LEN {
-        return PacketDecode::Incomplete {
-            needed: Some(WIRE_HEADER_LEN + CHECKSUM_LEN),
-        };
-    }
-
-    let packet_len = u16::from_le_bytes([bytes[4], bytes[5]]) as usize;
-    let total_len = WIRE_HEADER_LEN + packet_len + CHECKSUM_LEN;
-
-    if bytes.len() < total_len {
-        return PacketDecode::Incomplete {
-            needed: Some(total_len),
-        };
-    }
-
-    let expected = u16::from_le_bytes([bytes[total_len - 2], bytes[total_len - 1]]);
-
-    if !checksum.verify(&bytes[..total_len - CHECKSUM_LEN], expected) {
-        return PacketDecode::Corrupted;
-    }
-
-    if packet_len == ACK_PACKET_LEN {
-        return match ack_from_wire(bytes) {
-            Some(ack) => PacketDecode::Ack(ack),
-            None => PacketDecode::Incomplete {
-                needed: Some(WIRE_HEADER_LEN + ACK_PACKET_LEN + CHECKSUM_LEN),
-            },
-        };
-    }
-
-    match fragment_from_wire(bytes, packet_len) {
-        Some(fragment) => PacketDecode::Data(fragment),
-        None => PacketDecode::Incomplete {
-            needed: Some(WIRE_HEADER_LEN + PACKET_META_LEN + CHECKSUM_LEN),
-        },
-    }
+    fragment_from_packet_bytes(bytes)
+        .map(PacketDecode::Data)
+        .unwrap_or(PacketDecode::Malformed)
 }
 
-fn ack_from_wire(bytes: &[u8]) -> Option<DecodedAck> {
-    let start = WIRE_HEADER_LEN + PACKET_NUMBER_LEN;
+fn ack_from_packet_bytes(bytes: &[u8]) -> Option<DecodedAck> {
+    let start = PACKET_NUMBER_LEN;
     let end = start + PACKET_NUMBER_LEN;
     let raw = bytes.get(start..end)?;
     let raw = u32::from_le_bytes(raw.try_into().ok()?);
@@ -625,15 +673,23 @@ fn ack_from_wire(bytes: &[u8]) -> Option<DecodedAck> {
     })
 }
 
-fn fragment_from_wire(bytes: &[u8], packet_len: usize) -> Option<DecodedFragment<'_>> {
-    let packet_number = packet_number_from_wire(bytes)?;
-    let message_id = MessageId::new(u32::from_le_bytes(bytes.get(12..16)?.try_into().ok()?));
-    let message_len = u16::from_le_bytes(bytes.get(16..18)?.try_into().ok()?) as usize;
-    let fragment_offset = u16::from_le_bytes(bytes.get(18..20)?.try_into().ok()?) as usize;
-    let flags = *bytes.get(20)?;
-    let start = WIRE_HEADER_LEN + PACKET_META_LEN;
-    let end = WIRE_HEADER_LEN + packet_len;
-    let fragment = bytes.get(start..end)?;
+fn fragment_from_packet_bytes(bytes: &[u8]) -> Option<DecodedFragment<'_>> {
+    if bytes.len() < PACKET_META_LEN {
+        return None;
+    }
+
+    let packet_number = packet_number_from_packet_bytes(bytes)?;
+    let message_id = MessageId::new(u32::from_le_bytes(bytes.get(4..8)?.try_into().ok()?));
+    let message_len = u16::from_le_bytes(bytes.get(8..10)?.try_into().ok()?) as usize;
+    let fragment_offset = u16::from_le_bytes(bytes.get(10..12)?.try_into().ok()?) as usize;
+    let flags = *bytes.get(12)?;
+    let fragment = bytes.get(PACKET_META_LEN..)?;
+
+    let end = fragment_offset.checked_add(fragment.len())?;
+
+    if end > message_len {
+        return None;
+    }
 
     Some(DecodedFragment {
         packet_number,
@@ -645,16 +701,8 @@ fn fragment_from_wire(bytes: &[u8], packet_len: usize) -> Option<DecodedFragment
     })
 }
 
-fn find_magic(bytes: &[u8]) -> Option<usize> {
-    bytes
-        .windows(EnvelopeMagic::SRT.bytes().len())
-        .position(|window| window == EnvelopeMagic::SRT.bytes())
-}
-
-fn packet_number_from_wire(bytes: &[u8]) -> Option<PacketNumber> {
-    let start = WIRE_HEADER_LEN;
-    let end = start + PACKET_NUMBER_LEN;
-    let raw = bytes.get(start..end)?;
+fn packet_number_from_packet_bytes(bytes: &[u8]) -> Option<PacketNumber> {
+    let raw = bytes.get(..PACKET_NUMBER_LEN)?;
     let raw = u32::from_le_bytes(raw.try_into().ok()?);
 
     Some(PacketNumber::new(raw))
@@ -735,6 +783,84 @@ mod tests {
     }
 
     #[test]
+    fn engine_receives_half_packet() {
+        let mut a = Engine::new(EngineConfig::default());
+        let mut b = Engine::new(EngineConfig::default());
+
+        a.send(b"hello").unwrap();
+        let write = next_write(&mut a);
+        let split = 3;
+
+        assert_eq!(
+            b.receive(&write.as_bytes()[..split]),
+            ReceiveReport::Incomplete {
+                needed: Some(srt_wire::WIRE_HEADER_LEN - split)
+            }
+        );
+        assert!(matches!(
+            b.receive(&write.as_bytes()[split..]),
+            ReceiveReport::Packet { .. }
+        ));
+        assert_message(&mut b, b"hello");
+    }
+
+    #[test]
+    fn engine_receives_sticky_packets_and_multiple_packets_per_receive() {
+        let mut a = Engine::new(EngineConfig {
+            fragment_bytes: 5,
+            ..EngineConfig::default()
+        });
+        let mut b = Engine::new(EngineConfig::default());
+        let mut bytes = [0; crate::MAX_WIRE_BYTES * 4];
+        let mut len = 0;
+
+        a.send(b"hello srt testing").unwrap();
+
+        while let Some(event) = a.poll_event() {
+            let EngineOutput::Write(write) = event else {
+                continue;
+            };
+            let end = len + write.as_bytes().len();
+            bytes[len..end].copy_from_slice(write.as_bytes());
+            len = end;
+        }
+
+        assert!(matches!(
+            b.receive(&bytes[..len]),
+            ReceiveReport::Packet { .. }
+        ));
+        assert_message(&mut b, b"hello srt testing");
+    }
+
+    #[test]
+    fn engine_acknowledges_duplicate_without_delivering_twice() {
+        let mut a = Engine::new(EngineConfig::default());
+        let mut b = Engine::new(EngineConfig::default());
+
+        a.send(b"hello").unwrap();
+        let write = next_write(&mut a);
+
+        assert!(matches!(
+            b.receive(write.as_bytes()),
+            ReceiveReport::Packet { .. }
+        ));
+        assert_message(&mut b, b"hello");
+        assert!(matches!(
+            b.receive(write.as_bytes()),
+            ReceiveReport::Duplicate { .. }
+        ));
+
+        let mut duplicate_messages = 0;
+        while let Some(event) = b.poll_event() {
+            if matches!(event, EngineOutput::Message(_)) {
+                duplicate_messages += 1;
+            }
+        }
+
+        assert_eq!(duplicate_messages, 0);
+    }
+
+    #[test]
     fn engine_uses_greedy_fragmentation() {
         let mut engine = Engine::new(EngineConfig {
             fragment_bytes: 10,
@@ -761,5 +887,24 @@ mod tests {
         let packet_len = u16::from_le_bytes([bytes[4], bytes[5]]) as usize;
 
         packet_len - crate::layout::PACKET_META_LEN
+    }
+
+    fn next_write(engine: &mut Engine) -> super::WriteEvent {
+        let Some(EngineOutput::Write(write)) = engine.poll_event() else {
+            panic!("engine should produce a write event");
+        };
+
+        write
+    }
+
+    fn assert_message(engine: &mut Engine, expected: &[u8]) {
+        while let Some(event) = engine.poll_event() {
+            if let EngineOutput::Message(message) = event {
+                assert_eq!(message.as_bytes(), expected);
+                return;
+            }
+        }
+
+        panic!("engine should produce a complete message");
     }
 }

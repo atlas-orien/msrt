@@ -104,6 +104,10 @@ impl<const N: usize> StreamingDecoder<N> {
         &'a mut self,
         checksum: &impl Checksum,
     ) -> Result<StreamDecodeOutcome<'a>> {
+        if self.len == 0 {
+            return Ok(StreamDecodeOutcome::NeedMore { additional: None });
+        }
+
         let Some(offset) = find_magic(&self.bytes[..self.len]) else {
             let skipped = self.len;
             self.len = 0;

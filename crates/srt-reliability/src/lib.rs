@@ -7,8 +7,8 @@ pub mod policy;
 
 pub use message::{FragmentRange, MessageFragment, MessageKey, MessageStatus};
 pub use packet::{
-    AckOutcome, AckTracker, Dedup, DedupDecision, PacketReliabilityEvent, PacketState,
-    RetransmitDecision, RetransmitPolicy, SlidingWindow, TimeoutEvent, TimeoutPolicy,
-    WindowDecision,
+    AckOutcome, AckTracker, Dedup, DedupDecision, PacketAckTracker, PacketDedup,
+    PacketReliabilityEvent, PacketState, RetransmitDecision, RetransmitPolicy, RetryLimitPolicy,
+    SlidingWindow, TimeoutEvent, TimeoutPolicy, WindowDecision,
 };
 pub use policy::{ReliabilityMode, StreamReliability};

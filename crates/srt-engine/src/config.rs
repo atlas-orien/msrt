@@ -4,6 +4,8 @@ use srt_core::{MessageId, PacketNumber};
 
 /// Maximum encoded wire bytes held by one MVP engine event.
 pub const MAX_WIRE_BYTES: usize = 128;
+/// Maximum ingress bytes buffered by the engine streaming decoder.
+pub const MAX_INGRESS_BYTES: usize = MAX_WIRE_BYTES * MAX_EVENTS;
 /// Maximum complete message bytes held by the MVP engine.
 pub const MAX_MESSAGE_BYTES: usize = 256;
 /// Maximum pending engine events.
