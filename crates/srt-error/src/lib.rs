@@ -12,8 +12,8 @@ pub enum ErrorKind {
     Frame,
     /// A reliability invariant failed.
     Reliability,
-    /// A stream invariant failed.
-    Stream,
+    /// A channel invariant failed.
+    Channel,
     /// A protocol engine invariant failed.
     Engine,
     /// The requested operation is unsupported by this implementation.

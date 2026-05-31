@@ -3,10 +3,12 @@
 use srt::{
     Config, Engine, Event,
     core::{
-        Flags, MessageId, Packet, PacketHeader, PacketNumber, PacketType, StreamFlags, StreamFrame,
-        StreamId,
+        ChannelId, Flags, MessageFlags, MessageFrame, MessageId, Packet, PacketHeader,
+        PacketNumber, PacketType,
     },
-    reliability::{FragmentRange, MessageFragment, MessageKey, ReliabilityMode, StreamReliability},
+    reliability::{
+        ChannelReliability, FragmentRange, MessageFragment, MessageKey, ReliabilityMode,
+    },
     wire::{EnvelopeHeader, EnvelopeMagic, WireEnvelope, WireFlags},
 };
 
@@ -33,20 +35,20 @@ fn facade_exposes_core_packet_and_wire_envelope() {
 #[test]
 fn facade_exposes_reliability_fragment_view() {
     let bytes = [1, 2, 3, 4];
-    let frame = StreamFrame::new(
-        StreamId::new(7),
+    let frame = MessageFrame::new(
+        ChannelId::new(7),
         MessageId::new(9),
         8,
         2,
-        StreamFlags::FIRST,
+        MessageFlags::FIRST,
         &bytes,
     );
 
-    let fragment = MessageFragment::try_from_stream_frame(frame).unwrap();
+    let fragment = MessageFragment::try_from_message_frame(frame).unwrap();
 
     assert_eq!(
         fragment.key,
-        MessageKey::new(StreamId::new(7), MessageId::new(9))
+        MessageKey::new(ChannelId::new(7), MessageId::new(9))
     );
     assert_eq!(fragment.range, FragmentRange::new(2, 4));
 }
@@ -68,9 +70,9 @@ fn facade_exposes_concrete_engine_api() {
 
 #[test]
 fn facade_exposes_reliability_policy_types() {
-    let stream_id = StreamId::new(3);
-    let policy = StreamReliability::new(stream_id, ReliabilityMode::LatestOnly, 1, Some(100));
+    let channel_id = ChannelId::new(3);
+    let policy = ChannelReliability::new(channel_id, ReliabilityMode::LatestOnly, 1, Some(100));
 
-    assert_eq!(policy.stream_id, stream_id);
+    assert_eq!(policy.channel_id, channel_id);
     assert_eq!(policy.mode, ReliabilityMode::LatestOnly);
 }

@@ -82,7 +82,7 @@ srt
 - multiple packets per receive。
 - noise before magic。
 - CRC error 后 resync。
-- streaming decoder state。
+- channeling decoder state。
 
 原因是这些问题都发生在 `raw bytes -> complete wire envelope` 这一层。
 
@@ -92,7 +92,7 @@ srt
 - packet 是否重复。
 - message 是否已经完整。
 - 是否需要重传。
-- stream_id 怎么路由。
+- channel_id 怎么路由。
 
 ### srt-reliability 负责什么
 
@@ -232,7 +232,7 @@ v1 hardening 不应该引入：
 
 ### 第一批：srt-wire
 
-1. 在 `srt-wire` 中实现 streaming decoder 状态机。
+1. 在 `srt-wire` 中实现 channeling decoder 状态机。
 2. 让 decoder 支持 half packet。
 3. 让 decoder 支持 sticky packet。
 4. 让 decoder 支持 multiple packets per receive。
@@ -250,7 +250,7 @@ CRC error
 
 ### 第二批：srt-engine
 
-1. 将 `srt-engine::receive(bytes)` 改成使用 `srt-wire` streaming decoder。
+1. 将 `srt-engine::receive(bytes)` 改成使用 `srt-wire` channeling decoder。
 2. engine 内部循环处理 decoder 产出的多个 packet。
 3. 更新 smoke simulation，模拟半包、粘包、一次多包、噪声和 CRC 错误。
 4. 清理 engine 内部临时 wire parsing 代码。
@@ -288,7 +288,7 @@ v1 hardening 先完成最小可靠性工具，而不是完整可靠性算法。
 1. 冻结第一版 wire format draft。
 2. 清理 MVP 临时 packet layout。
 3. 把 Packet / Frame serialization 边界写清楚。
-4. 增加多 message / 多 stream reassembly。
+4. 增加多 message / 多 channel reassembly。
 5. 更新架构文档和 README。
 
 ## Hardening 验收标准

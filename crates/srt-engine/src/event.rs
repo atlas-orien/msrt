@@ -1,6 +1,6 @@
 //! Engine events.
 
-use srt_core::{PacketNumber, StreamId};
+use srt_core::{ChannelId, PacketNumber};
 use srt_reliability::{MessageKey, PacketReliabilityEvent};
 
 use crate::time::Instant;
@@ -25,11 +25,11 @@ pub enum EngineEventKind {
 /// Events emitted by the protocol engine to its embedding environment.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum EngineEvent {
-    /// A complete message is available for a stream.
+    /// A complete message is available for a channel.
     MessageReceived {
-        /// Stream that owns the message.
-        stream_id: StreamId,
-        /// Message identity on the stream.
+        /// Channel that owns the message.
+        channel_id: ChannelId,
+        /// Message identity on the channel.
         message_key: MessageKey,
     },
     /// A protocol response should be written to the lower link.

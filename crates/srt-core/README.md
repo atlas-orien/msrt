@@ -11,9 +11,7 @@ This crate owns packet and protocol frame primitives for the common SRT protocol
 - `packet/number`: packet number.
 - `packet/payload`: borrowed payload view containing encoded protocol frames.
 - `frame`: protocol frame entry point.
-- `frame/stream`: message-oriented STREAM frame.
+- `frame/message`: message-oriented MESSAGE frame.
 - `frame/ack`: ACK frame.
-- `frame/ping`: PING frame.
-- `frame/reset_stream`: RESET_STREAM frame.
 
 Current status: boundary-only scaffold.

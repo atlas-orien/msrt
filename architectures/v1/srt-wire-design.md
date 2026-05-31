@@ -6,7 +6,7 @@
 
 这里的 wire 不是 protocol frame。
 
-SRT 中的 `Frame` 已经有明确含义：它是 `Packet Payload` 内的协议语义单元，例如 `STREAM`、`ACK`、`PING`。
+SRT 中的 `Frame` 已经有明确含义：它是 `Packet Payload` 内的协议语义单元，例如 `MESSAGE`、`ACK`。
 
 因此串口外层边界不能再叫 frame，应该叫：
 
@@ -44,7 +44,7 @@ srt-wire
 
 ```text
 Application Message
-  -> STREAM Frame fragments
+  -> MESSAGE Frame fragments
   -> Packet Payload
   -> SRT Packet
   -> Wire Envelope
@@ -110,9 +110,8 @@ Wire Envelope
     ├── Packet Header
     ├── Packet Number
     └── Packet Payload
-        ├── STREAM Frame
-        ├── ACK Frame
-        └── PING Frame
+        ├── MESSAGE Frame
+        └── ACK Frame
 ```
 
 注意：不是 Packet 在 Frame 里面，也不是 Wire Envelope 是 Protocol Frame。
@@ -289,7 +288,7 @@ Encoder 不负责：
 - 生成 ACK
 - 判断重传
 - 分配 PacketNumber
-- 创建 STREAM Frame
+- 创建 MESSAGE Frame
 
 Decoder 不负责：
 
@@ -370,7 +369,7 @@ Wire
 
 `srt-wire` 不负责：
 
-- STREAM Frame 语义
+- MESSAGE Frame 语义
 - ACK 语义
 - 重传
 - 去重

@@ -3,12 +3,8 @@
 /// Protocol frame type carried inside packet payloads.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FrameKind {
-    /// Carries one message fragment on a stream.
-    Stream,
+    /// Carries one message fragment on a channel.
+    Message,
     /// Carries acknowledgement information.
     Ack,
-    /// Keeps the link active or elicits acknowledgement.
-    Ping,
-    /// Resets a stream.
-    ResetStream,
 }

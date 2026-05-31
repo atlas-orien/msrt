@@ -39,12 +39,10 @@ Serial Envelope / Wire Boundary
 它应该理解：
 
 - 上层 message
-- stream 路由
+- channel 路由
 - Packet Number 分配
-- STREAM Frame 生成
+- MESSAGE Frame 生成
 - ACK Frame 生成
-- PING 响应
-- RESET_STREAM 处理
 - packet 去重
 - packet ack
 - retransmit tick
@@ -100,9 +98,9 @@ engine 内部需要逐步变成：
 
 ```text
 message bytes
-  -> stream routing
+  -> channel routing
   -> message_id allocation
-  -> STREAM Frame fragments using greedy fragmentation
+  -> MESSAGE Frame fragments using greedy fragmentation
   -> Packet payload
   -> Packet
   -> wire bytes
@@ -380,11 +378,9 @@ receive packet
   -> poll_event produces LinkWrite / AckRequired
 ```
 
-PING 不需要单独的 PONG Frame。
+SRT v1 不定义独立 PING / PONG Frame。
 
-PING 的响应可以是 ACK。
-
-这和 QUIC 的方向一致，也更适合保持 frame 类型精简。
+如果后续需要心跳，可以先用 engine/reliability 的 packet 级 ACK 语义或专门的 SRT heartbeat 设计表达，而不是提前继承 QUIC 的 PING 对象。
 
 发送方不应该在 `send(message)` 里阻塞等待 ACK。更合理的方式是：
 
@@ -441,12 +437,12 @@ packet sent
 
 SRT 是 message-oriented，不是无限 byte-stream。
 
-engine 最终需要负责把 STREAM Frame fragments 重组成完整 message。
+engine 最终需要负责把 MESSAGE Frame fragments 重组成完整 message。
 
 核心 key 是：
 
 ```text
-stream_id + message_id
+channel_id + message_id
 ```
 
 完整性判断依赖：
@@ -480,19 +476,19 @@ receive(packet fragment N)
   -> queue MessageReceived
 ```
 
-当前 MVP 已经按 byte coverage 判断 `[0, message_len)` 是否完整，可以避免中间丢包时误交付。最终版本还需要处理重复 packet、多个并发 message、多个 stream 和资源回收。
+当前 MVP 已经按 byte coverage 判断 `[0, message_len)` 是否完整，可以避免中间丢包时误交付。最终版本还需要处理重复 packet、多个并发 message、多个 channel 和资源回收。
 
-## StreamId 与用户 API
+## ChannelId 与用户 API
 
-协议 wire format 必须携带 `stream_id`。
+协议 wire format 必须携带 `channel_id`。
 
-但用户 API 不一定必须直接传 `stream_id`。
+但用户 API 不一定必须直接传 `channel_id`。
 
 未来 engine 可以支持两种层次：
 
 ```text
 低层 API
-  send(stream_id, message)
+  send(channel_id, message)
 
 高层 API
   send_topic("imu", message)
@@ -500,9 +496,9 @@ receive(packet fragment N)
   send_control(message)
 ```
 
-高层 API 可以由 engine 或上层封装映射到 `StreamId`。
+高层 API 可以由 engine 或上层封装映射到 `ChannelId`。
 
-第一阶段先不引入 `SendOptions` 或 send trait。v1 只保留 concrete `Engine::send(message)`，等真实 stream 路由需求出现后再扩展。
+第一阶段先不引入 `SendOptions` 或 send trait。v1 只保留 concrete `Engine::send(message)`，等真实 channel 路由需求出现后再扩展。
 
 ## RawLink 边界
 

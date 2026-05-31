@@ -1,13 +1,13 @@
 //! Message delivery and reassembly boundaries.
 
-use srt_core::{Result, StreamId};
+use srt_core::{ChannelId, Result};
 use srt_reliability::{MessageFragment, MessageKey, MessageStatus};
 
 /// Borrowed message delivered by the engine.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DeliveredMessage<'a> {
-    /// Stream that owns the message.
-    pub stream_id: StreamId,
+    /// Channel that owns the message.
+    pub channel_id: ChannelId,
     /// Message key.
     pub key: MessageKey,
     /// Complete message bytes.
@@ -17,9 +17,9 @@ pub struct DeliveredMessage<'a> {
 impl<'a> DeliveredMessage<'a> {
     /// Creates a delivered message view.
     #[must_use]
-    pub const fn new(stream_id: StreamId, key: MessageKey, bytes: &'a [u8]) -> Self {
+    pub const fn new(channel_id: ChannelId, key: MessageKey, bytes: &'a [u8]) -> Self {
         Self {
-            stream_id,
+            channel_id,
             key,
             bytes,
         }

@@ -2,7 +2,7 @@
 
 `srt-reliability` 是 SRT 的可靠性策略边界 crate。
 
-它不定义 Packet，也不定义 Frame。Packet、Packet Header、Packet Number、ACK Frame、STREAM Frame 等协议结构都属于 `srt-core`。
+它不定义 Packet，也不定义 Frame。Packet、Packet Header、Packet Number、ACK Frame、MESSAGE Frame 等协议结构都属于 `srt-core`。
 
 `srt-reliability` 的职责是回答一个问题：
 
@@ -48,7 +48,7 @@ Serial Envelope / Wire Boundary
   部分可靠，旧数据可以被新数据覆盖。
 
 心跳消息
-  可以用 PING + ACK，不需要重传旧心跳。
+  后续可以用 SRT 自己的 heartbeat 或 ACK 语义表达，不需要重传旧心跳。
 
 日志消息
   可以使用低优先级窗口。
@@ -83,8 +83,8 @@ reliability 判断是否应该做。
 
 - `PacketNumber`
 - `AckFrame`
-- `StreamFrame`
-- `StreamId`
+- `MessageFrame`
+- `ChannelId`
 - `MessageId`
 - `message_len`
 - `fragment_offset`
@@ -98,7 +98,7 @@ reliability 判断是否应该做。
   -> 超时后由策略决定是否重传
 ```
 
-`StreamFrame` 内的 `StreamId`、`MessageId`、`message_len`、`fragment_offset` 用于 message fragment 级重组和交付判断。
+`MessageFrame` 内的 `ChannelId`、`MessageId`、`message_len`、`fragment_offset` 用于 message fragment 级重组和交付判断。
 
 ## Packet 级可靠性
 
@@ -129,12 +129,12 @@ PacketNumber 是否仍在窗口内？
 
 SRT 是 message-oriented transport。
 
-STREAM Frame 承载的是完整 message 的 fragment，而不是无限 byte-stream 的任意切片。
+MESSAGE Frame 承载的是完整 message 的 fragment，而不是无限 byte-stream 的任意切片。
 
 因此 reliability 未来还需要服务 message fragment 重组：
 
 ```text
-stream_id + message_id
+channel_id + message_id
   定位一条 message。
 
 message_len
@@ -156,7 +156,7 @@ engine 才能把完整 message bytes 交付给上层。
 
 ## ACK
 
-SRT 借鉴 QUIC 的方向：PING 不需要单独的 PONG Frame，ACK 可以作为响应。
+SRT 借鉴 QUIC 的 ACK 思想，但 v1 不定义独立 PING / PONG Frame。
 
 ACK 的语义是：
 
@@ -180,7 +180,7 @@ message completed
 
 ## 重传
 
-重传策略不应该直接假设所有 stream 都强可靠。
+重传策略不应该直接假设所有 channel 都强可靠。
 
 未来可能存在不同策略：
 
@@ -192,7 +192,7 @@ BestEffort
   不重传，适合高频实时遥测。
 
 LatestOnly
-  旧 message 可以被同 stream 的新 message 替代。
+  旧 message 可以被同 channel 的新 message 替代。
 
 Deadline
   超过时间窗口后不再重传。
@@ -304,7 +304,7 @@ srt-reliability/src/
 └── policy.rs
 ```
 
-这个结构按可靠性关心的层次拆分：packet 级可靠性、message fragment 级边界、stream/message 的可靠性策略描述。
+这个结构按可靠性关心的层次拆分：packet 级可靠性、message fragment 级边界、channel/message 的可靠性策略描述。
 
 ## 第一阶段结论
 

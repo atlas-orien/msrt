@@ -42,7 +42,7 @@ Hardening is still v1 work. It turns the MVP into a protocol that can face real 
 3. Move MVP packet encoding toward the final Packet / Frame serialization model.
 4. Implement duplicate packet detection and better ACK semantics.
 5. Implement retransmission timeout policy, retry limits, and failure events.
-6. Add multi-message and multi-stream reassembly.
+6. Add multi-message and multi-channel reassembly.
 7. Add heapless/no-alloc buffer strategy configuration.
 
 Runtime adapters remain out of this repository.

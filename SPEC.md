@@ -13,7 +13,7 @@ The SRT standard owns:
 - core protocol primitive types
 - packet and protocol frame boundaries
 - wire envelope boundaries
-- stream identity and routing semantics
+- channel identity and routing semantics
 - acknowledgement and partial-reliability concepts
 - ordering, deduplication, timeout, and sliding-window contracts
 - protocol engine behavior for send, receive, response, and progress

@@ -1,22 +1,22 @@
 //! Message fragment identifiers and ranges.
 
-use srt_core::{Error, ErrorKind, MessageId, Result, StreamFrame, StreamId};
+use srt_core::{ChannelId, Error, ErrorKind, MessageFrame, MessageId, Result};
 
-/// Key that identifies one message on one stream.
+/// Key that identifies one message on one channel.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct MessageKey {
-    /// Logical stream that owns the message.
-    pub stream_id: StreamId,
-    /// Message identifier scoped to the stream.
+    /// Logical channel that owns the message.
+    pub channel_id: ChannelId,
+    /// Message identifier scoped to the channel.
     pub message_id: MessageId,
 }
 
 impl MessageKey {
     /// Creates a message key.
     #[must_use]
-    pub const fn new(stream_id: StreamId, message_id: MessageId) -> Self {
+    pub const fn new(channel_id: ChannelId, message_id: MessageId) -> Self {
         Self {
-            stream_id,
+            channel_id,
             message_id,
         }
     }
@@ -57,7 +57,7 @@ impl FragmentRange {
     }
 }
 
-/// Reliability-facing view of a STREAM frame fragment.
+/// Reliability-facing view of a MESSAGE frame fragment.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MessageFragment {
     /// Message identity.
@@ -79,8 +79,8 @@ impl MessageFragment {
         }
     }
 
-    /// Builds a message fragment descriptor from a STREAM frame.
-    pub fn try_from_stream_frame(frame: StreamFrame<'_>) -> Result<Self> {
+    /// Builds a message fragment descriptor from a MESSAGE frame.
+    pub fn try_from_message_frame(frame: MessageFrame<'_>) -> Result<Self> {
         let len =
             u32::try_from(frame.data.len()).map_err(|_| Error::new(ErrorKind::Reliability))?;
         let range = FragmentRange::new(frame.fragment_offset, len);
@@ -90,7 +90,7 @@ impl MessageFragment {
         }
 
         Ok(Self::new(
-            MessageKey::new(frame.stream_id, frame.message_id),
+            MessageKey::new(frame.channel_id, frame.message_id),
             frame.message_len,
             range,
         ))
@@ -99,7 +99,7 @@ impl MessageFragment {
 
 #[cfg(test)]
 mod tests {
-    use srt_core::{MessageId, StreamFlags, StreamFrame, StreamId};
+    use srt_core::{ChannelId, MessageFlags, MessageFrame, MessageId};
 
     use super::{FragmentRange, MessageFragment, MessageKey};
 
@@ -110,22 +110,22 @@ mod tests {
     }
 
     #[test]
-    fn stream_frame_maps_to_message_fragment() {
+    fn message_frame_maps_to_message_fragment() {
         let bytes = [1, 2, 3];
-        let frame = StreamFrame::new(
-            StreamId::new(7),
+        let frame = MessageFrame::new(
+            ChannelId::new(7),
             MessageId::new(9),
             8,
             2,
-            StreamFlags::EMPTY,
+            MessageFlags::EMPTY,
             &bytes,
         );
 
-        let fragment = MessageFragment::try_from_stream_frame(frame).unwrap();
+        let fragment = MessageFragment::try_from_message_frame(frame).unwrap();
 
         assert_eq!(
             fragment.key,
-            MessageKey::new(StreamId::new(7), MessageId::new(9))
+            MessageKey::new(ChannelId::new(7), MessageId::new(9))
         );
         assert_eq!(fragment.range, FragmentRange::new(2, 3));
     }

@@ -45,11 +45,9 @@ Serial Byte Stream
 - `PacketType`
 - `Frame`
 - `FrameKind`
-- `StreamFrame`
+- `MessageFrame`
 - `AckFrame`
-- `PingFrame`
-- `ResetStreamFrame`
-- `StreamId`
+- `ChannelId`
 - `MessageId`
 - 协议基础常量和限制
 
@@ -94,7 +92,7 @@ PacketNumber
   用于 ack、去重、重传。
 ```
 
-`stream_id` 不属于 packet header。它属于 `STREAM Frame`。
+`channel_id` 不属于 packet header。它属于 `MESSAGE Frame`。
 
 ## Frame
 
@@ -103,31 +101,28 @@ PacketNumber
 初版 frame 类型：
 
 ```text
-STREAM
+MESSAGE
   承载一段 message fragment。
 
 ACK
   承载确认信息。
-
-PING
-  心跳或保活。
-
-RESET_STREAM
-  重置某个 stream。
 ```
 
 后续可以扩展：
 
 ```text
-MAX_DATA
-MAX_STREAMS
-CONNECTION_CLOSE
+MAX_MESSAGES
+HEARTBEAT
+CANCEL_MESSAGE
+CLOSE_CHANNEL
 ...
 ```
 
-## Message-Oriented Stream
+注意：SRT v1 不直接继承 QUIC 的 `PING` / `RESET_STREAM`。SRT 的第一公民是 message，不是通用 byte-stream。心跳、取消 message、关闭 channel 等能力后续应该按 SRT 自己的 message runtime 语义设计，而不是提前把 QUIC 对象搬进 core。
 
-SRT stream 是 message-oriented，不是 TCP 式无限 byte-stream。
+## Message-Oriented Channel
+
+SRT channel 是 message-oriented，不是 TCP 式无限 byte-stream。
 
 上层应用负责：
 
@@ -140,7 +135,7 @@ SRT 负责：
 
 ```text
 message bytes
-  -> 分片成 STREAM Frames
+  -> 分片成 MESSAGE Frames
   -> 放入 Packet Payload
   -> 接收端重组成完整 message bytes
   -> 交付给上层
@@ -148,13 +143,13 @@ message bytes
 
 上层应用不需要自己处理 message length、半包、粘包或 fragment reassembly。
 
-## STREAM Frame
+## MESSAGE Frame
 
-`StreamFrame` 承载某个 stream 上的一段 message fragment。
+`MessageFrame` 承载某个 channel 上的一段 message fragment。
 
 ```text
-StreamFrame
-├── stream_id
+MessageFrame
+├── channel_id
 ├── message_id
 ├── message_len
 ├── fragment_offset
@@ -164,8 +159,8 @@ StreamFrame
 
 字段含义：
 
-- `stream_id`：逻辑 stream。
-- `message_id`：这个 stream 上的一条 message。
+- `channel_id`：逻辑 channel。
+- `message_id`：这个 channel 上的一条 message。
 - `message_len`：完整 message 的总长度。
 - `fragment_offset`：当前 fragment 在 message bytes 中的位置。
 - `flags`：例如 first、last 等 fragment 语义。
@@ -174,7 +169,7 @@ StreamFrame
 接收端根据：
 
 ```text
-stream_id + message_id + message_len + fragment_offset
+channel_id + message_id + message_len + fragment_offset
 ```
 
 重组完整 message。
@@ -187,15 +182,15 @@ stream_id + message_id + message_len + fragment_offset
 
 就可以交付完整 message bytes。
 
-## StreamId
+## ChannelId
 
-协议 wire format 必须携带 `stream_id`。否则接收端无法判断 message 属于哪个逻辑通道，也无法做 QoS、可靠性、重组和 engine 路由。
+协议 wire format 必须携带 `channel_id`。否则接收端无法判断 message 属于哪个逻辑通道，也无法做 QoS、可靠性、重组和 engine 路由。
 
-用户 API 可以不直接暴露 `stream_id`。
+用户 API 可以不直接暴露 `channel_id`。
 
 ```text
 低层 API
-  send(stream_id, message_bytes)
+  send(channel_id, message_bytes)
 
 高层 API
   send_control(message_bytes)
@@ -207,17 +202,17 @@ stream_id + message_id + message_len + fragment_offset
 
 ```text
 channel / topic / actor
-  -> stream_id
-  -> STREAM frame
+  -> channel_id
+  -> MESSAGE frame
   -> Packet
 ```
 
-## StreamId 分配与双向通信
+## ChannelId 分配与双向通信
 
-双向通信时，stream id 需要表达发起方和方向。可以借鉴 QUIC 的思想，在 stream id 的低 bits 中编码属性：
+双向通信时，channel id 需要表达发起方和方向。可以借鉴 QUIC 的思想，在 channel id 的低 bits 中编码属性：
 
 ```text
-StreamId(u16)
+ChannelId(u16)
 
 bit 0: initiator
   0 = endpoint A initiated
@@ -227,7 +222,7 @@ bit 1: direction
   0 = bidirectional
   1 = unidirectional
 
-high bits: stream index
+high bits: channel index
 ```
 
 这只是方向，不是最终定稿。
@@ -236,16 +231,16 @@ high bits: stream index
 
 ```text
 0..63
-  reserved system streams
+  reserved system channels
 
 64..1023
-  static application streams
+  static application channels
 
 1024..
-  dynamic streams
+  dynamic channels
 ```
 
-固定 `StreamId` 适合 MCU 固定协议、控制链路、遥测链路。动态 `StreamId` 适合 actor/topic/engine 自动分配。
+固定 `ChannelId` 适合 MCU 固定协议、控制链路、遥测链路。动态 `ChannelId` 适合 actor/topic/engine 自动分配。
 
 ## 目录结构
 
@@ -263,10 +258,8 @@ srt-core/src/
 │   └── ty.rs
 └── frame/
     ├── kind.rs
-    ├── stream.rs
-    ├── ack.rs
-    ├── ping.rs
-    └── reset_stream.rs
+    ├── channel.rs
+    └── ack.rs
 ```
 
 `lib.rs` 只做模块声明和 re-export。
@@ -276,8 +269,8 @@ srt-core/src/
 ```text
 Packet 是传输单元。
 Frame 是 packet payload 内的语义单元。
-STREAM Frame 承载 message fragment。
-Stream 是逻辑通道。
+MESSAGE Frame 承载 message fragment。
+Channel 是逻辑通道。
 SRT 保留 message 边界。
 串口 envelope 是字节流边界，不是 protocol frame。
 ```

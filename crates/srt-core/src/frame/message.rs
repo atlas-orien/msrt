@@ -1,38 +1,38 @@
-//! STREAM frame primitives.
+//! MESSAGE frame primitives.
 
-/// A logical stream identifier.
+/// A logical channel identifier.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct StreamId(pub u16);
+pub struct ChannelId(pub u16);
 
-impl StreamId {
-    /// Reserved control stream.
+impl ChannelId {
+    /// Reserved control channel.
     pub const CONTROL: Self = Self(0);
 
-    /// Creates a stream identifier from its raw value.
+    /// Creates a channel identifier from its raw value.
     #[must_use]
     pub const fn new(raw: u16) -> Self {
         Self(raw)
     }
 
-    /// Returns the raw stream identifier value.
+    /// Returns the raw channel identifier value.
     #[must_use]
     pub const fn get(self) -> u16 {
         self.0
     }
 
-    /// Returns whether this is the reserved control stream.
+    /// Returns whether this is the reserved control channel.
     #[must_use]
     pub const fn is_control(self) -> bool {
         self.0 == Self::CONTROL.0
     }
 }
 
-/// Message identifier scoped to a stream.
+/// Message identifier scoped to a channel.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct MessageId(pub u32);
 
 impl MessageId {
-    /// First message identifier on a stream.
+    /// First message identifier on a channel.
     pub const ZERO: Self = Self(0);
 
     /// Creates a message identifier from its raw value.
@@ -48,11 +48,11 @@ impl MessageId {
     }
 }
 
-/// STREAM frame flags.
+/// MESSAGE frame flags.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct StreamFlags(pub u8);
+pub struct MessageFlags(pub u8);
 
-impl StreamFlags {
+impl MessageFlags {
     /// Empty flag set.
     pub const EMPTY: Self = Self(0);
 
@@ -87,17 +87,17 @@ impl StreamFlags {
     }
 }
 
-/// Borrowed stream fragment bytes.
+/// Borrowed message fragment bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct StreamData<'a> {
+pub struct MessageData<'a> {
     bytes: &'a [u8],
 }
 
-impl<'a> StreamData<'a> {
-    /// Empty stream data.
+impl<'a> MessageData<'a> {
+    /// Empty message data.
     pub const EMPTY: Self = Self { bytes: &[] };
 
-    /// Creates stream data from borrowed bytes.
+    /// Creates message data from borrowed bytes.
     #[must_use]
     pub const fn new(bytes: &'a [u8]) -> Self {
         Self { bytes }
@@ -122,74 +122,74 @@ impl<'a> StreamData<'a> {
     }
 }
 
-/// STREAM frame carrying one message fragment.
+/// MESSAGE frame carrying one message fragment.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct StreamFrame<'a> {
-    /// Logical stream.
-    pub stream_id: StreamId,
-    /// Message identifier scoped to the stream.
+pub struct MessageFrame<'a> {
+    /// Logical channel.
+    pub channel_id: ChannelId,
+    /// Message identifier scoped to the channel.
     pub message_id: MessageId,
     /// Complete message length in bytes.
     pub message_len: u32,
     /// Fragment byte offset inside the complete message.
     pub fragment_offset: u32,
-    /// STREAM frame flags.
-    pub flags: StreamFlags,
+    /// MESSAGE frame flags.
+    pub flags: MessageFlags,
     /// Fragment bytes.
-    pub data: StreamData<'a>,
+    pub data: MessageData<'a>,
 }
 
-impl<'a> StreamFrame<'a> {
-    /// Creates a STREAM frame.
+impl<'a> MessageFrame<'a> {
+    /// Creates a MESSAGE frame.
     #[must_use]
     pub const fn new(
-        stream_id: StreamId,
+        channel_id: ChannelId,
         message_id: MessageId,
         message_len: u32,
         fragment_offset: u32,
-        flags: StreamFlags,
+        flags: MessageFlags,
         data: &'a [u8],
     ) -> Self {
         Self {
-            stream_id,
+            channel_id,
             message_id,
             message_len,
             fragment_offset,
             flags,
-            data: StreamData::new(data),
+            data: MessageData::new(data),
         }
     }
 
     /// Returns whether this is the first fragment.
     #[must_use]
     pub const fn is_first(self) -> bool {
-        self.flags.contains(StreamFlags::FIRST)
+        self.flags.contains(MessageFlags::FIRST)
     }
 
     /// Returns whether this is the last fragment.
     #[must_use]
     pub const fn is_last(self) -> bool {
-        self.flags.contains(StreamFlags::LAST)
+        self.flags.contains(MessageFlags::LAST)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{MessageId, StreamFlags, StreamFrame, StreamId};
+    use super::{ChannelId, MessageFlags, MessageFrame, MessageId};
 
     #[test]
-    fn stream_frame_carries_message_fragment() {
+    fn message_frame_carries_message_fragment() {
         let data = [1, 2, 3];
-        let frame = StreamFrame::new(
-            StreamId::new(9),
+        let frame = MessageFrame::new(
+            ChannelId::new(9),
             MessageId::new(7),
             10,
             0,
-            StreamFlags::FIRST,
+            MessageFlags::FIRST,
             &data,
         );
 
-        assert_eq!(frame.stream_id.get(), 9);
+        assert_eq!(frame.channel_id.get(), 9);
         assert_eq!(frame.message_id.get(), 7);
         assert_eq!(frame.data.len(), 3);
         assert!(frame.is_first());
