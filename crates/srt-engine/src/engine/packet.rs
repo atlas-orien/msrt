@@ -1,7 +1,8 @@
 //! v1 draft packet byte layout glue.
 
 use srt_core::{
-    ChannelId, Error, Flags, FrameKind, MessageFlags, MessageId, PacketNumber, PacketType, Result,
+    AckFrame, AckRange, ChannelId, Error, Flags, FrameKind, MAX_ACK_RANGES, MessageFlags,
+    MessageId, PacketNumber, PacketType, Result,
 };
 
 use crate::{
@@ -23,7 +24,7 @@ pub(crate) enum PacketDecode<'a> {
 /// Decoded ACK packet.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct DecodedAck {
-    pub(crate) acknowledged: PacketNumber,
+    pub(crate) frame: AckFrame,
 }
 
 /// Decoded message fragment.
@@ -121,11 +122,40 @@ fn ack_from_packet_bytes(bytes: &[u8]) -> Option<DecodedAck> {
         return None;
     }
 
-    let raw = bytes.get(1..5)?;
-    let raw = u32::from_le_bytes(raw.try_into().ok()?);
+    let largest = PacketNumber::new(u32::from_le_bytes(bytes.get(1..5)?.try_into().ok()?));
+    let range_count = *bytes.get(5)?;
+
+    if range_count as usize > MAX_ACK_RANGES {
+        return None;
+    }
+
+    let empty = AckRange::new(PacketNumber::ZERO, PacketNumber::ZERO);
+    let mut ranges = [empty; MAX_ACK_RANGES];
+    let mut offset = 6;
+    let mut index = 0;
+
+    while index < MAX_ACK_RANGES {
+        let start = PacketNumber::new(u32::from_le_bytes(
+            bytes.get(offset..offset + 4)?.try_into().ok()?,
+        ));
+        let end = PacketNumber::new(u32::from_le_bytes(
+            bytes.get(offset + 4..offset + 8)?.try_into().ok()?,
+        ));
+
+        if index < range_count as usize {
+            ranges[index] = AckRange::new(start, end);
+        }
+
+        offset += 8;
+        index += 1;
+    }
 
     Some(DecodedAck {
-        acknowledged: PacketNumber::new(raw),
+        frame: AckFrame {
+            largest_acknowledged: largest,
+            range_count,
+            ranges,
+        },
     })
 }
 

@@ -12,6 +12,10 @@ pub const MAX_MESSAGE_BYTES: usize = 256;
 pub const MAX_EVENTS: usize = 16;
 /// Maximum in-flight packets tracked by the MVP engine.
 pub const MAX_IN_FLIGHT_PACKETS: usize = 16;
+/// Maximum observed packets retained for ACK range generation.
+pub const MAX_ACK_TRACKED_PACKETS: usize = 16;
+/// Maximum incomplete messages tracked by the reassembly table.
+pub const MAX_REASSEMBLY_MESSAGES: usize = 4;
 /// Default maximum message fragment bytes per packet.
 pub const DEFAULT_FRAGMENT_BYTES: usize = 32;
 /// Default maximum retransmission attempts before a send fails.

@@ -1,5 +1,6 @@
 //! Minimal protocol engine implementation.
 
+pub(crate) mod ack;
 pub(crate) mod inflight;
 pub(crate) mod ingress;
 pub(crate) mod outgoing;
@@ -8,13 +9,15 @@ pub(crate) mod queue;
 pub(crate) mod reassembly;
 pub(crate) mod retransmit;
 
-use srt_core::{Error, MessageId, PacketNumber};
+use srt_core::{ChannelId, Error, MessageId, PacketNumber};
 use srt_reliability::PacketDedup;
 use srt_wire::StreamingDecoder;
 
 use crate::{
     EngineConfig, MAX_IN_FLIGHT_PACKETS, MAX_INGRESS_BYTES, MAX_MESSAGE_BYTES, MAX_WIRE_BYTES,
-    engine::{inflight::InFlightPackets, queue::EventQueue, reassembly::ReassemblyBuffer},
+    engine::{
+        ack::AckRanges, inflight::InFlightPackets, queue::EventQueue, reassembly::ReassemblyBuffer,
+    },
 };
 
 /// Minimal non-blocking SRT protocol engine.
@@ -30,6 +33,7 @@ pub struct Engine {
     pub(crate) max_retransmit_attempts: u8,
     pub(crate) events: EventQueue,
     pub(crate) in_flight: InFlightPackets,
+    pub(crate) ack_ranges: AckRanges,
     pub(crate) ingress: StreamingDecoder<MAX_INGRESS_BYTES>,
     pub(crate) dedup: PacketDedup<MAX_IN_FLIGHT_PACKETS>,
     pub(crate) reassembly: ReassemblyBuffer,
@@ -46,6 +50,7 @@ impl Engine {
             max_retransmit_attempts: config.max_retransmit_attempts,
             events: EventQueue::new(),
             in_flight: InFlightPackets::new(),
+            ack_ranges: AckRanges::new(),
             ingress: StreamingDecoder::new(),
             dedup: PacketDedup::new(),
             reassembly: ReassemblyBuffer::new(),
@@ -97,6 +102,8 @@ impl WriteEvent {
 /// A complete message delivered by the engine.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MessageEvent {
+    /// Logical channel that carried the message.
+    pub channel_id: ChannelId,
     /// Message identifier scoped to this engine.
     pub message_id: MessageId,
     /// Fixed storage containing complete message bytes.
@@ -116,6 +123,8 @@ impl MessageEvent {
 /// A reliable send failure produced by the engine.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SendFailedEvent {
+    /// Logical channel whose message failed.
+    pub channel_id: ChannelId,
     /// Message identifier that failed.
     pub message_id: MessageId,
     /// Failure reason.
@@ -220,6 +229,109 @@ mod tests {
         }
 
         panic!("receiver should emit a complete message");
+    }
+
+    #[test]
+    fn engine_reassembles_interleaved_messages() {
+        let mut a = Engine::new(EngineConfig {
+            fragment_bytes: 2,
+            ..EngineConfig::default()
+        });
+        let mut b = Engine::new(EngineConfig::default());
+        let mut writes = [None; 4];
+        let mut write_count = 0;
+
+        a.send(b"abcd").unwrap();
+        a.send(b"wxyz").unwrap();
+
+        while let Some(event) = a.poll_event() {
+            let EngineOutput::Write(write) = event else {
+                continue;
+            };
+            writes[write_count] = Some(write);
+            write_count += 1;
+        }
+
+        assert_eq!(write_count, 4);
+
+        for index in [0, 2, 1, 3] {
+            let write = writes[index].expect("write should be captured");
+            assert!(matches!(
+                b.receive(write.as_bytes()),
+                ReceiveReport::Packet { .. }
+            ));
+        }
+
+        assert_message(&mut b, b"abcd");
+        assert_message(&mut b, b"wxyz");
+    }
+
+    #[test]
+    fn engine_send_on_uses_channel_id() {
+        let mut a = Engine::new(EngineConfig::default());
+        let mut b = Engine::new(EngineConfig::default());
+        let channel_id = srt_core::ChannelId::new(7);
+
+        a.send_on(channel_id, b"hello").unwrap();
+
+        let write = next_write(&mut a);
+        let bytes = write.as_bytes();
+
+        assert_eq!(
+            u16::from_le_bytes(bytes[15..17].try_into().unwrap()),
+            channel_id.get()
+        );
+        assert!(matches!(
+            b.receive(write.as_bytes()),
+            ReceiveReport::Packet { .. }
+        ));
+
+        let message = next_message(&mut b);
+
+        assert_eq!(message.channel_id, channel_id);
+        assert_eq!(message.as_bytes(), b"hello");
+    }
+
+    #[test]
+    fn engine_ack_range_clears_multiple_in_flight_packets() {
+        let mut a = Engine::new(EngineConfig {
+            fragment_bytes: 2,
+            ..EngineConfig::default()
+        });
+        let mut b = Engine::new(EngineConfig::default());
+        let mut last_ack = None;
+
+        a.send(b"abcdef").unwrap();
+
+        while let Some(event) = a.poll_event() {
+            let EngineOutput::Write(write) = event else {
+                continue;
+            };
+
+            assert!(matches!(
+                b.receive(write.as_bytes()),
+                ReceiveReport::Packet { .. }
+            ));
+        }
+
+        while let Some(event) = b.poll_event() {
+            let EngineOutput::Write(write) = event else {
+                continue;
+            };
+
+            last_ack = Some(write);
+        }
+
+        let last_ack = last_ack.expect("receiver should emit ACK range");
+
+        assert!(matches!(
+            a.receive(last_ack.as_bytes()),
+            ReceiveReport::Ack { .. }
+        ));
+
+        a.tick(1);
+
+        assert!(a.poll_event().is_none());
     }
 
     #[test]
@@ -374,6 +486,7 @@ mod tests {
         };
 
         assert_eq!(failed.message_id, message_id);
+        assert_eq!(failed.channel_id, srt_core::ChannelId::CONTROL);
         assert_eq!(failed.reason, super::SendFailureReason::RetryLimitReached);
     }
 
@@ -406,6 +519,7 @@ mod tests {
         };
 
         assert_eq!(failed.message_id, message_id);
+        assert_eq!(failed.channel_id, srt_core::ChannelId::CONTROL);
         assert_eq!(failed.reason, super::SendFailureReason::RetryLimitReached);
         assert!(engine.poll_event().is_none());
     }
@@ -425,10 +539,15 @@ mod tests {
     }
 
     fn assert_message(engine: &mut Engine, expected: &[u8]) {
+        let message = next_message(engine);
+
+        assert_eq!(message.as_bytes(), expected);
+    }
+
+    fn next_message(engine: &mut Engine) -> super::MessageEvent {
         while let Some(event) = engine.poll_event() {
             if let EngineOutput::Message(message) = event {
-                assert_eq!(message.as_bytes(), expected);
-                return;
+                return message;
             }
         }
 

@@ -15,7 +15,9 @@
 - 最小 ACK、dedup、in-flight、tick retransmit。
 - `SendFailed` / `RetryLimitReached` 事件边界。
 - message 级失败聚合的最小边界。
+- fixed-slot 多 message reassembly 的最小边界。
 - half packet、sticky packet、noise、CRC error、drop、duplicate、同时双向发送 smoke。
+- ACK range 的最小 fixed-capacity 编码和批量 in-flight 清理。
 
 但这些只能证明 foundation 是正确的，不能证明 v1 已经是可靠传输。
 
@@ -90,7 +92,7 @@ v1 也不做：
 
 ## 下一步一：ACK range
 
-当前 ACK 是 single packet ACK。
+当前状态：ACK range 已开始落地。
 
 这可以跑通 demo，但效率和语义都不够完整。
 
@@ -111,6 +113,20 @@ ack_ranges...
 - 支持后续 retransmit decision。
 
 v1 可以先限制 ACK range 数量，保持 no_std 固定容量。
+
+当前已经补齐：
+
+- `AckRange`。
+- fixed-capacity `AckFrame`。
+- ACK frame 编码 / 解码。
+- 接收端累计 observed packet numbers 并生成 ACK range。
+- 发送端收到 ACK range 后清理多个 in-flight packet。
+
+后续仍需要补齐：
+
+- ACK range 的正式 wire draft 文档更新。
+- gap 场景下只重发缺失 packet 的验收测试。
+- ACK range 压缩和过期策略。
 
 ## 下一步二：重试失败事件
 
@@ -155,7 +171,7 @@ reason = RetryLimitReached
 
 ## 下一步三：多 message reassembly
 
-当前 reassembly buffer 只能很好地表达“一次接收方向上一条 message”。
+当前状态：fixed-slot 多 message reassembly 已开始落地。
 
 真实场景中，同一端可能连续收到：
 
@@ -185,9 +201,21 @@ MAX_MESSAGE_BYTES
 - 完成一条 message 后释放对应 slot。
 - 超出 reassembly budget 时产生错误或 drop 策略。
 
+当前已经补齐：
+
+- `MAX_REASSEMBLY_MESSAGES`。
+- 按 `ChannelId + MessageId` 查找 reassembly slot。
+- A/B 两条 message fragment 交错到达时可以分别完成。
+
+后续仍需要补齐：
+
+- reassembly slot timeout。
+- reassembly budget 满后的明确策略。
+- 多 channel smoke。
+
 ## 下一步四：多 channel
 
-当前所有 message 默认走 control channel。
+当前状态：`send_on(channel_id, message)` 已开始落地。
 
 v1 需要证明：
 
@@ -208,6 +236,20 @@ send_on(channel_id, message)
 ```text
 send(message) == send_on(ChannelId::CONTROL, message)
 ```
+
+当前已经补齐：
+
+- `Engine::send_on(channel_id, message)`。
+- facade 导出 `srt::ChannelId`。
+- outgoing MESSAGE frame 编码传入的 `channel_id`。
+- `MessageEvent` 携带 `channel_id`。
+- `SendFailedEvent` 携带 `channel_id`。
+- 多 channel smoke，验证不同 channel 的 fragment 交错到达时不会串台。
+
+后续仍需要补齐：
+
+- channel 级 reliability policy。
+- 不同 channel 的独立 message id 策略是否需要调整。
 
 ## 下一步五：partial reliability
 
@@ -294,11 +336,11 @@ failed messages produce explicit failed events
 2. 给 in-flight packet 增加 attempts metadata。已开始落地。
 3. 实现最小 retry limit。已开始落地。
 4. 实现 message 级失败聚合。已开始落地。
-5. 把 reassembly 从 single buffer 改成 fixed slot table。
-6. 增加 `send_on(channel_id, message)`。
-7. 实现 ACK range 数据结构和编码。
-8. 让 retransmit 只重发缺失 packet。
-9. 补 smoke 和单元测试。
+5. 把 reassembly 从 single buffer 改成 fixed slot table。已开始落地。
+6. 增加 `send_on(channel_id, message)`。已开始落地。
+7. 实现 ACK range 数据结构和编码。已开始落地。
+8. 让 retransmit 只重发缺失 packet。已开始落地。
+9. 补 smoke 和单元测试。已开始落地。
 10. 最后再更新 stable protocol draft。
 
 ## 结论

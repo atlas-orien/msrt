@@ -1,6 +1,6 @@
 //! In-flight packet tracking.
 
-use srt_core::{Error, ErrorKind, MessageId, PacketNumber, Result};
+use srt_core::{AckFrame, ChannelId, Error, ErrorKind, MessageId, PacketNumber, Result};
 
 use crate::{MAX_IN_FLIGHT_PACKETS, MAX_WIRE_BYTES};
 
@@ -8,6 +8,7 @@ use crate::{MAX_IN_FLIGHT_PACKETS, MAX_WIRE_BYTES};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct InFlightPacket {
     pub(crate) packet_number: PacketNumber,
+    pub(crate) channel_id: ChannelId,
     pub(crate) message_id: MessageId,
     pub(crate) bytes: [u8; MAX_WIRE_BYTES],
     pub(crate) len: usize,
@@ -51,15 +52,15 @@ impl InFlightPackets {
         Err(Error::new(ErrorKind::Engine))
     }
 
-    pub(crate) fn ack(&mut self, packet_number: PacketNumber) {
+    pub(crate) fn ack_frame(&mut self, frame: AckFrame) {
         for slot in &mut self.packets {
-            if slot
-                .map(|packet| packet.packet_number == packet_number)
-                .unwrap_or(false)
-            {
+            let Some(packet) = *slot else {
+                continue;
+            };
+
+            if frame.acknowledges(packet.packet_number) {
                 *slot = None;
                 self.len = self.len.saturating_sub(1);
-                return;
             }
         }
     }
@@ -68,10 +69,10 @@ impl InFlightPackets {
         self.packets.iter().flatten()
     }
 
-    pub(crate) fn remove_message(&mut self, message_id: MessageId) {
+    pub(crate) fn remove_message(&mut self, channel_id: ChannelId, message_id: MessageId) {
         for slot in &mut self.packets {
             if slot
-                .map(|packet| packet.message_id == message_id)
+                .map(|packet| packet.channel_id == channel_id && packet.message_id == message_id)
                 .unwrap_or(false)
             {
                 *slot = None;

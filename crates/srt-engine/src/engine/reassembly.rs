@@ -1,29 +1,21 @@
-//! Message reassembly buffer.
+//! Message reassembly table.
 
-use srt_core::{Error, ErrorKind, MessageFlags, MessageId, Result};
+use srt_core::{ChannelId, Error, ErrorKind, MessageFlags, MessageId, Result};
 
-use crate::{MAX_MESSAGE_BYTES, MessageEvent, engine::packet::DecodedFragment};
+use crate::{
+    MAX_MESSAGE_BYTES, MAX_REASSEMBLY_MESSAGES, MessageEvent, engine::packet::DecodedFragment,
+};
 
-/// Fixed-capacity MVP message reassembly buffer.
+/// Fixed-capacity message reassembly table.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct ReassemblyBuffer {
-    active: bool,
-    message_id: MessageId,
-    expected_len: usize,
-    last_seen: bool,
-    received: [bool; MAX_MESSAGE_BYTES],
-    bytes: [u8; MAX_MESSAGE_BYTES],
+    slots: [ReassemblySlot; MAX_REASSEMBLY_MESSAGES],
 }
 
 impl ReassemblyBuffer {
     pub(crate) const fn new() -> Self {
         Self {
-            active: false,
-            message_id: MessageId::ZERO,
-            expected_len: 0,
-            last_seen: false,
-            received: [false; MAX_MESSAGE_BYTES],
-            bytes: [0; MAX_MESSAGE_BYTES],
+            slots: [ReassemblySlot::new(); MAX_REASSEMBLY_MESSAGES],
         }
     }
 
@@ -35,29 +27,74 @@ impl ReassemblyBuffer {
             return Err(Error::new(ErrorKind::Engine));
         }
 
-        if !self.active {
-            if !MessageFlags::from_bits(fragment.flags).contains(MessageFlags::FIRST) {
-                return Ok(None);
-            }
+        let key = MessageKey {
+            channel_id: fragment.channel_id,
+            message_id: fragment.message_id,
+        };
+        let index = match self.find_slot(key) {
+            Some(index) => index,
+            None => self.allocate_slot(key, fragment)?,
+        };
 
-            self.active = true;
-            self.message_id = fragment.message_id;
-            self.expected_len = fragment.message_len;
-            self.last_seen = false;
-            self.received = [false; MAX_MESSAGE_BYTES];
-            self.bytes = [0; MAX_MESSAGE_BYTES];
-        } else if self.message_id != fragment.message_id
-            && MessageFlags::from_bits(fragment.flags).contains(MessageFlags::FIRST)
-        {
-            self.active = true;
-            self.message_id = fragment.message_id;
-            self.expected_len = fragment.message_len;
-            self.last_seen = false;
-            self.received = [false; MAX_MESSAGE_BYTES];
-            self.bytes = [0; MAX_MESSAGE_BYTES];
+        self.slots[index].observe(fragment)
+    }
+
+    fn find_slot(&self, key: MessageKey) -> Option<usize> {
+        self.slots
+            .iter()
+            .position(|slot| slot.active && slot.key == key)
+    }
+
+    fn allocate_slot(&mut self, key: MessageKey, fragment: DecodedFragment<'_>) -> Result<usize> {
+        if !MessageFlags::from_bits(fragment.flags).contains(MessageFlags::FIRST) {
+            return Err(Error::new(ErrorKind::Engine));
         }
 
-        if self.message_id != fragment.message_id || self.expected_len != fragment.message_len {
+        let Some(index) = self.slots.iter().position(|slot| !slot.active) else {
+            return Err(Error::new(ErrorKind::Engine));
+        };
+
+        self.slots[index] = ReassemblySlot::start(key, fragment.message_len);
+
+        Ok(index)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ReassemblySlot {
+    active: bool,
+    key: MessageKey,
+    expected_len: usize,
+    last_seen: bool,
+    received: [bool; MAX_MESSAGE_BYTES],
+    bytes: [u8; MAX_MESSAGE_BYTES],
+}
+
+impl ReassemblySlot {
+    const fn new() -> Self {
+        Self {
+            active: false,
+            key: MessageKey::ZERO,
+            expected_len: 0,
+            last_seen: false,
+            received: [false; MAX_MESSAGE_BYTES],
+            bytes: [0; MAX_MESSAGE_BYTES],
+        }
+    }
+
+    const fn start(key: MessageKey, expected_len: usize) -> Self {
+        Self {
+            active: true,
+            key,
+            expected_len,
+            last_seen: false,
+            received: [false; MAX_MESSAGE_BYTES],
+            bytes: [0; MAX_MESSAGE_BYTES],
+        }
+    }
+
+    fn observe(&mut self, fragment: DecodedFragment<'_>) -> Result<Option<MessageEvent>> {
+        if self.expected_len != fragment.message_len {
             return Err(Error::new(ErrorKind::Engine));
         }
 
@@ -77,13 +114,10 @@ impl ReassemblyBuffer {
             self.last_seen = true;
         }
 
-        if self.last_seen
-            && self.received[..self.expected_len]
-                .iter()
-                .all(|received| *received)
-        {
+        if self.is_complete() {
             let message = MessageEvent {
-                message_id: self.message_id,
+                channel_id: self.key.channel_id,
+                message_id: self.key.message_id,
                 bytes: self.bytes,
                 len: self.expected_len,
             };
@@ -94,4 +128,24 @@ impl ReassemblyBuffer {
             Ok(None)
         }
     }
+
+    fn is_complete(&self) -> bool {
+        self.last_seen
+            && self.received[..self.expected_len]
+                .iter()
+                .all(|received| *received)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct MessageKey {
+    channel_id: ChannelId,
+    message_id: MessageId,
+}
+
+impl MessageKey {
+    const ZERO: Self = Self {
+        channel_id: ChannelId::CONTROL,
+        message_id: MessageId::ZERO,
+    };
 }

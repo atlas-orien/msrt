@@ -1,13 +1,16 @@
 //! Mac-to-MCU smoke test simulation for the SRT facade crate.
 
-use srt::{Config, Engine, Event, MAX_WIRE_BYTES, Message, Receive, Write, core::PacketType};
+use srt::{
+    ChannelId, Config, Engine, Event, MAX_WIRE_BYTES, Message, Receive, Write, core::PacketType,
+};
 
 fn main() {
     sequential_smoke();
     simultaneous_duplex_smoke();
+    multi_channel_smoke();
 
     println!(
-        "srt smoke ok: half packet, sticky packets, noise, crc error, drop, ack, retransmit, simultaneous duplex, and bidirectional messages"
+        "srt smoke ok: half packet, sticky packets, noise, crc error, drop, ack, retransmit, simultaneous duplex, multi-channel, and bidirectional messages"
     );
 }
 
@@ -103,6 +106,67 @@ fn simultaneous_duplex_smoke() {
         mcu_received,
         "mcu should receive the simultaneous mac message"
     );
+}
+
+fn multi_channel_smoke() {
+    let mut mac = Engine::new(Config {
+        fragment_bytes: 5,
+        ..Config::default()
+    });
+    let mut mcu = Engine::new(Config::default());
+    let nav_channel = ChannelId::new(1);
+    let telemetry_channel = ChannelId::new(2);
+    let nav_message = b"nav-message";
+    let telemetry_message = b"telemetry";
+    let mut writes = [None; 5];
+    let mut write_count = 0;
+
+    println!("multi-channel: queue messages on channel 1 and channel 2");
+    mac.send_on(nav_channel, nav_message)
+        .expect("queue nav channel message");
+    mac.send_on(telemetry_channel, telemetry_message)
+        .expect("queue telemetry channel message");
+
+    while let Some(event) = mac.poll_event() {
+        let Event::Write(write) = event else {
+            continue;
+        };
+
+        writes[write_count] = Some(write);
+        write_count += 1;
+    }
+
+    assert_eq!(write_count, 5);
+
+    for index in [0, 3, 1, 4, 2] {
+        let write = writes[index].expect("multi-channel write");
+
+        println!(
+            "mac -> mcu: multi-channel packet_number={}, wire_bytes={}",
+            write.packet_number.get(),
+            write.as_bytes().len()
+        );
+        log_receive("mcu", mcu.receive(write.as_bytes()));
+    }
+
+    let first = drain_next_local_message("mcu", &mut mcu);
+    let second = drain_next_local_message("mcu", &mut mcu);
+
+    assert_channel_message(
+        first,
+        nav_channel,
+        nav_message,
+        telemetry_channel,
+        telemetry_message,
+    );
+    assert_channel_message(
+        second,
+        nav_channel,
+        nav_message,
+        telemetry_channel,
+        telemetry_message,
+    );
+    assert_ne!(first.channel_id, second.channel_id);
 }
 
 fn pump_duplex(
@@ -250,6 +314,40 @@ fn drain_until_message(
             }
             None => panic!("{src_name}: expected a complete message"),
         }
+    }
+}
+
+fn drain_next_local_message(name: &str, engine: &mut Engine) -> Message {
+    loop {
+        match engine.poll_event() {
+            Some(Event::Write(_)) => {
+                // ACK events are expected while draining received messages.
+            }
+            Some(Event::Message(message)) => {
+                print_message(name, message);
+                return message;
+            }
+            Some(Event::SendFailed(failed)) => {
+                panic!("{name}: unexpected send failure: {failed:?}");
+            }
+            None => panic!("{name}: expected a local message"),
+        }
+    }
+}
+
+fn assert_channel_message(
+    message: Message,
+    nav_channel: ChannelId,
+    nav_message: &[u8],
+    telemetry_channel: ChannelId,
+    telemetry_message: &[u8],
+) {
+    if message.channel_id == nav_channel {
+        assert_eq!(message.as_bytes(), nav_message);
+    } else if message.channel_id == telemetry_channel {
+        assert_eq!(message.as_bytes(), telemetry_message);
+    } else {
+        panic!("unexpected channel_id={:?}", message.channel_id);
     }
 }
 

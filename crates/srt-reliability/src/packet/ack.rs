@@ -78,16 +78,16 @@ impl<const N: usize> PacketAckTracker<N> {
     /// Applies an ACK frame.
     #[must_use]
     pub fn apply_ack(&mut self, frame: AckFrame) -> AckOutcome {
-        let packet_number = frame.largest_acknowledged;
-
         for slot in &mut self.packets {
             let Some(mut tracked) = *slot else {
                 continue;
             };
 
-            if tracked.packet_number != packet_number {
+            if !frame.acknowledges(tracked.packet_number) {
                 continue;
             }
+
+            let packet_number = tracked.packet_number;
 
             return match tracked.state {
                 PacketState::InFlight => {
@@ -100,7 +100,9 @@ impl<const N: usize> PacketAckTracker<N> {
             };
         }
 
-        AckOutcome::Ignored { packet_number }
+        AckOutcome::Ignored {
+            packet_number: frame.largest_acknowledged,
+        }
     }
 }
 
@@ -167,5 +169,25 @@ mod tests {
             tracker.on_ack(AckFrame::new(packet_number)),
             AckOutcome::AlreadyAcked { packet_number }
         );
+    }
+
+    #[test]
+    fn ack_tracker_applies_ack_range() {
+        let mut tracker = PacketAckTracker::<4>::new();
+        let start = PacketNumber::new(1);
+        let end = PacketNumber::new(3);
+        let ranges = [srt_core::AckRange::new(start, end); srt_core::MAX_ACK_RANGES];
+
+        tracker.on_packet_sent(start);
+        tracker.on_packet_sent(PacketNumber::new(2));
+        tracker.on_packet_sent(end);
+
+        assert_eq!(
+            tracker.on_ack(AckFrame::from_ranges(ranges, 1)),
+            AckOutcome::NewlyAcked {
+                packet_number: start
+            }
+        );
+        assert_eq!(tracker.state_of(start), PacketState::Acked);
     }
 }

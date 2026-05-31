@@ -30,6 +30,9 @@ pub(crate) const MESSAGE_FRAME_HEADER_LEN: usize = FRAME_TYPE_LEN
     + FRAGMENT_OFFSET_LEN
     + FRAGMENT_FLAGS_LEN;
 /// Encoded ACK frame length in bytes.
-pub(crate) const ACK_FRAME_LEN: usize = FRAME_TYPE_LEN + PACKET_NUMBER_LEN;
+pub(crate) const ACK_FRAME_LEN: usize = FRAME_TYPE_LEN
+    + PACKET_NUMBER_LEN
+    + core::mem::size_of::<u8>()
+    + srt_core::MAX_ACK_RANGES * 2 * PACKET_NUMBER_LEN;
 /// Encoded ACK packet length.
 pub(crate) const ACK_PACKET_LEN: usize = PACKET_HEADER_LEN + ACK_FRAME_LEN;

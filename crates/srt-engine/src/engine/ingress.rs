@@ -89,9 +89,9 @@ impl Engine {
                 }
             }
             PacketDecode::Ack(ack) => {
-                self.in_flight.ack(ack.acknowledged);
+                self.in_flight.ack_frame(ack.frame);
                 ReceiveReport::Ack {
-                    packet_number: ack.acknowledged,
+                    packet_number: ack.frame.largest_acknowledged,
                 }
             }
             PacketDecode::Malformed => ReceiveReport::Error(Error::malformed()),

@@ -1,7 +1,8 @@
 //! Outgoing message fragmentation and ACK encoding.
 
 use srt_core::{
-    ChannelId, Error, ErrorKind, Flags, FrameKind, MessageId, PacketNumber, PacketType, Result,
+    AckFrame, ChannelId, Error, ErrorKind, Flags, FrameKind, MAX_ACK_RANGES, MessageId,
+    PacketNumber, PacketType, Result,
 };
 use srt_wire::{Checksum, Crc16, EnvelopeHeader, EnvelopeMagic, WireFlags};
 
@@ -17,18 +18,27 @@ impl Engine {
     /// The caller submits the complete message once. The engine splits it into
     /// packet-sized write events internally.
     pub fn send(&mut self, message: &[u8]) -> Result<MessageId> {
+        self.send_on(ChannelId::CONTROL, message)
+    }
+
+    /// Queues a complete message on a logical channel.
+    ///
+    /// This is the channel-aware form of [`Engine::send`].
+    pub fn send_on(&mut self, channel_id: ChannelId, message: &[u8]) -> Result<MessageId> {
         let fragment_bytes = self.fragment_bytes.clamp(1, max_fragment_bytes());
         let message_id = self.next_message_id;
-        self.send_message_fragments(message_id, message, fragment_bytes)?;
+        self.send_message_fragments(channel_id, message_id, message, fragment_bytes)?;
         self.next_message_id = MessageId::new(self.next_message_id.get().wrapping_add(1));
 
         Ok(message_id)
     }
 
     pub(crate) fn queue_ack(&mut self, acknowledged: PacketNumber) -> Result<()> {
+        self.ack_ranges.observe(acknowledged);
+        let frame = self.ack_ranges.frame();
         let packet_number = self.next_packet_number;
         let mut wire = [0; MAX_WIRE_BYTES];
-        let written = encode_ack_packet(packet_number, acknowledged, &mut wire, &Crc16)?;
+        let written = encode_ack_packet(packet_number, frame, &mut wire, &Crc16)?;
 
         self.events.push(EngineOutput::Write(WriteEvent {
             packet_number,
@@ -42,6 +52,7 @@ impl Engine {
 
     fn send_message_fragments(
         &mut self,
+        channel_id: ChannelId,
         message_id: MessageId,
         message: &[u8],
         fragment_bytes: usize,
@@ -60,7 +71,7 @@ impl Engine {
             let flags = fragment_flags(offset, end, message.len());
             let encoded = FragmentToEncode {
                 packet_number,
-                channel_id: ChannelId::CONTROL,
+                channel_id,
                 message_id,
                 message_len: message.len(),
                 fragment_offset: offset,
@@ -76,6 +87,7 @@ impl Engine {
             }))?;
             self.in_flight.track(InFlightPacket {
                 packet_number,
+                channel_id,
                 message_id,
                 bytes: wire,
                 len: written,
@@ -150,7 +162,7 @@ fn encode_message_fragment(
 
 fn encode_ack_packet(
     packet_number: PacketNumber,
-    acknowledged: PacketNumber,
+    frame: AckFrame,
     out: &mut [u8],
     checksum: &impl Checksum,
 ) -> Result<usize> {
@@ -172,7 +184,18 @@ fn encode_ack_packet(
     out[9] = 0;
     out[10..14].copy_from_slice(&packet_number.get().to_le_bytes());
     out[14] = FrameKind::Ack.code();
-    out[15..19].copy_from_slice(&acknowledged.get().to_le_bytes());
+    out[15..19].copy_from_slice(&frame.largest_acknowledged.get().to_le_bytes());
+    out[19] = frame.range_count;
+
+    let mut offset = 20;
+    let mut index = 0;
+
+    while index < MAX_ACK_RANGES {
+        out[offset..offset + 4].copy_from_slice(&frame.ranges[index].start.get().to_le_bytes());
+        out[offset + 4..offset + 8].copy_from_slice(&frame.ranges[index].end.get().to_le_bytes());
+        offset += 8;
+        index += 1;
+    }
 
     let checksum_value = checksum.calculate(&out[..total_len - CHECKSUM_LEN]);
     out[total_len - CHECKSUM_LEN..total_len].copy_from_slice(&checksum_value.to_le_bytes());

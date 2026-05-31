@@ -4,7 +4,7 @@ pub mod ack;
 pub mod kind;
 pub mod message;
 
-pub use ack::AckFrame;
+pub use ack::{AckFrame, AckRange, MAX_ACK_RANGES};
 pub use kind::FrameKind;
 pub use message::{ChannelId, MessageData, MessageFlags, MessageFrame, MessageId};
 
