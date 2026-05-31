@@ -14,12 +14,21 @@ impl Engine {
         let mut retransmit_len = 0;
         let mut failures = [None; MAX_IN_FLIGHT_PACKETS];
         let mut failure_len = 0;
+        let mut failed_messages = [None; MAX_IN_FLIGHT_PACKETS];
+        let mut failed_message_len = 0;
 
         for packet in self.in_flight.packets() {
             if packet.attempts >= self.max_retransmit_attempts {
-                if failure_len < failures.len() {
+                let already_failed = failed_messages[..failed_message_len]
+                    .iter()
+                    .flatten()
+                    .any(|message_id| *message_id == packet.message_id);
+
+                if !already_failed && failure_len < failures.len() {
                     failures[failure_len] = Some(*packet);
                     failure_len += 1;
+                    failed_messages[failed_message_len] = Some(packet.message_id);
+                    failed_message_len += 1;
                 }
             } else if retransmit_len < retransmits.len() {
                 retransmits[retransmit_len] = Some(*packet);
@@ -28,10 +37,9 @@ impl Engine {
         }
 
         for packet in failures[..failure_len].iter().flatten() {
-            let _ = self.in_flight.remove(packet.packet_number);
+            self.in_flight.remove_message(packet.message_id);
             let _ = self.events.push(EngineOutput::SendFailed(SendFailedEvent {
                 message_id: packet.message_id,
-                packet_number: packet.packet_number,
                 reason: SendFailureReason::RetryLimitReached,
             }));
         }

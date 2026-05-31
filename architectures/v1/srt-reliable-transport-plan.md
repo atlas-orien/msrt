@@ -14,6 +14,7 @@
 - Packet Header / MESSAGE Frame / ACK Frame 基础布局。
 - 最小 ACK、dedup、in-flight、tick retransmit。
 - `SendFailed` / `RetryLimitReached` 事件边界。
+- message 级失败聚合的最小边界。
 - half packet、sticky packet、noise、CRC error、drop、duplicate、同时双向发送 smoke。
 
 但这些只能证明 foundation 是正确的，不能证明 v1 已经是可靠传输。
@@ -141,11 +142,16 @@ EngineOutput::SendFailed {
 reason = RetryLimitReached
 ```
 
+当前已经补齐：
+
+- 一个 packet 达到 retry limit 后，按 message 产生 `SendFailed`。
+- 同一条 message 的其它 in-flight packet 会被移除。
+- 同一条 message 只产生一次 failed event。
+
 后续仍需要继续补齐：
 
 - timeout tick 策略。
-- message 级失败聚合。
-- 多 fragment message 中部分 packet 失败后的整体 message 失败处理。
+- message 失败后的对端取消 / 本端清理语义。
 
 ## 下一步三：多 message reassembly
 
@@ -287,12 +293,13 @@ failed messages produce explicit failed events
 1. 定义 `SendFailed` / `RetryLimitReached` 事件。已开始落地。
 2. 给 in-flight packet 增加 attempts metadata。已开始落地。
 3. 实现最小 retry limit。已开始落地。
-4. 把 reassembly 从 single buffer 改成 fixed slot table。
-5. 增加 `send_on(channel_id, message)`。
-6. 实现 ACK range 数据结构和编码。
-7. 让 retransmit 只重发缺失 packet。
-8. 补 smoke 和单元测试。
-9. 最后再更新 stable protocol draft。
+4. 实现 message 级失败聚合。已开始落地。
+5. 把 reassembly 从 single buffer 改成 fixed slot table。
+6. 增加 `send_on(channel_id, message)`。
+7. 实现 ACK range 数据结构和编码。
+8. 让 retransmit 只重发缺失 packet。
+9. 补 smoke 和单元测试。
+10. 最后再更新 stable protocol draft。
 
 ## 结论
 

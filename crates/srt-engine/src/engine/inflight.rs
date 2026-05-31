@@ -68,19 +68,16 @@ impl InFlightPackets {
         self.packets.iter().flatten()
     }
 
-    pub(crate) fn remove(&mut self, packet_number: PacketNumber) -> Option<InFlightPacket> {
+    pub(crate) fn remove_message(&mut self, message_id: MessageId) {
         for slot in &mut self.packets {
             if slot
-                .map(|packet| packet.packet_number == packet_number)
+                .map(|packet| packet.message_id == message_id)
                 .unwrap_or(false)
             {
-                let packet = slot.take();
+                *slot = None;
                 self.len = self.len.saturating_sub(1);
-                return packet;
             }
         }
-
-        None
     }
 
     pub(crate) fn note_retransmit(&mut self, packet_number: PacketNumber) {

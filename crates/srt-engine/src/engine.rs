@@ -116,10 +116,8 @@ impl MessageEvent {
 /// A reliable send failure produced by the engine.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SendFailedEvent {
-    /// Message identifier whose packet failed.
+    /// Message identifier that failed.
     pub message_id: MessageId,
-    /// Packet number that reached the failure condition.
-    pub packet_number: PacketNumber,
     /// Failure reason.
     pub reason: SendFailureReason,
 }
@@ -127,7 +125,7 @@ pub struct SendFailedEvent {
 /// Reason a reliable send failed.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SendFailureReason {
-    /// The packet reached the configured retransmission attempt limit.
+    /// At least one packet for the message reached the configured retransmission attempt limit.
     RetryLimitReached,
 }
 
@@ -376,8 +374,40 @@ mod tests {
         };
 
         assert_eq!(failed.message_id, message_id);
-        assert_eq!(failed.packet_number, first.packet_number);
         assert_eq!(failed.reason, super::SendFailureReason::RetryLimitReached);
+    }
+
+    #[test]
+    fn engine_send_failed_is_message_scoped() {
+        let mut engine = Engine::new(EngineConfig {
+            fragment_bytes: 2,
+            max_retransmit_attempts: 1,
+            ..EngineConfig::default()
+        });
+
+        let message_id = engine.send(b"hello").unwrap();
+        let first = next_write(&mut engine);
+        let second = next_write(&mut engine);
+        let third = next_write(&mut engine);
+
+        assert_eq!(first.packet_number.get(), 0);
+        assert_eq!(second.packet_number.get(), 1);
+        assert_eq!(third.packet_number.get(), 2);
+
+        engine.tick(1);
+        assert_eq!(next_write(&mut engine).packet_number, first.packet_number);
+        assert_eq!(next_write(&mut engine).packet_number, second.packet_number);
+        assert_eq!(next_write(&mut engine).packet_number, third.packet_number);
+
+        engine.tick(2);
+
+        let Some(EngineOutput::SendFailed(failed)) = engine.poll_event() else {
+            panic!("engine should report message failure");
+        };
+
+        assert_eq!(failed.message_id, message_id);
+        assert_eq!(failed.reason, super::SendFailureReason::RetryLimitReached);
+        assert!(engine.poll_event().is_none());
     }
 
     fn fragment_len_from_wire(bytes: &[u8]) -> usize {
