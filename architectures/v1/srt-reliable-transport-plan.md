@@ -19,6 +19,7 @@
 - half packet、sticky packet、noise、CRC error、drop、duplicate、同时双向发送 smoke。
 - ACK range 的最小 fixed-capacity 编码和批量 in-flight 清理。
 - retransmit timeout tick 的最小策略。
+- reassembly slot timeout 和 budget 满时的明确错误边界。
 
 但这些只能证明 foundation 是正确的，不能证明 v1 已经是可靠传输。
 
@@ -213,12 +214,9 @@ MAX_MESSAGE_BYTES
 - `MAX_REASSEMBLY_MESSAGES`。
 - 按 `ChannelId + MessageId` 查找 reassembly slot。
 - A/B 两条 message fragment 交错到达时可以分别完成。
-
-后续仍需要补齐：
-
-- reassembly slot timeout。
-- reassembly budget 满后的明确策略。
-- 多 channel smoke。
+- `reassembly_timeout_ms` 配置。
+- incomplete reassembly slot timeout 后释放。
+- reassembly budget 满时返回明确 engine error。
 
 ## 下一步四：多 channel
 

@@ -77,7 +77,7 @@ impl Engine {
                     return ReceiveReport::Duplicate { packet_number };
                 }
 
-                match self.reassembly.observe(fragment) {
+                match self.reassembly.observe(fragment, self.now_ms) {
                     Ok(Some(message)) => {
                         if self.events.push(EngineOutput::Message(message)).is_err() {
                             return ReceiveReport::Error(Error::new(ErrorKind::Engine));

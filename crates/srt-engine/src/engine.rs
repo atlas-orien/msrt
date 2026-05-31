@@ -32,6 +32,8 @@ pub struct Engine {
     pub(crate) fragment_bytes: usize,
     pub(crate) max_retransmit_attempts: u8,
     pub(crate) retransmit_timeout_ms: u64,
+    pub(crate) reassembly_timeout_ms: u64,
+    pub(crate) now_ms: u64,
     pub(crate) events: EventQueue,
     pub(crate) in_flight: InFlightPackets,
     pub(crate) ack_ranges: AckRanges,
@@ -50,6 +52,8 @@ impl Engine {
             fragment_bytes: config.fragment_bytes,
             max_retransmit_attempts: config.max_retransmit_attempts,
             retransmit_timeout_ms: config.retransmit_timeout_ms,
+            reassembly_timeout_ms: config.reassembly_timeout_ms,
+            now_ms: 0,
             events: EventQueue::new(),
             in_flight: InFlightPackets::new(),
             ack_ranges: AckRanges::new(),
@@ -266,6 +270,63 @@ mod tests {
 
         assert_message(&mut b, b"abcd");
         assert_message(&mut b, b"wxyz");
+    }
+
+    #[test]
+    fn engine_rejects_fragment_when_reassembly_budget_is_full() {
+        let mut a = Engine::new(EngineConfig {
+            fragment_bytes: 2,
+            ..EngineConfig::default()
+        });
+        let mut b = Engine::new(EngineConfig::default());
+        let writes = first_fragments_for_five_messages(&mut a);
+
+        for write in &writes[..crate::MAX_REASSEMBLY_MESSAGES] {
+            assert!(matches!(
+                b.receive(write.expect("fragment").as_bytes()),
+                ReceiveReport::Packet { .. }
+            ));
+        }
+
+        assert!(matches!(
+            b.receive(
+                writes[crate::MAX_REASSEMBLY_MESSAGES]
+                    .expect("extra fragment")
+                    .as_bytes()
+            ),
+            ReceiveReport::Error(_)
+        ));
+    }
+
+    #[test]
+    fn engine_reassembly_timeout_releases_slot() {
+        let mut a = Engine::new(EngineConfig {
+            fragment_bytes: 2,
+            ..EngineConfig::default()
+        });
+        let mut b = Engine::new(EngineConfig {
+            reassembly_timeout_ms: 10,
+            ..EngineConfig::default()
+        });
+        let writes = first_fragments_for_five_messages(&mut a);
+
+        for write in &writes[..crate::MAX_REASSEMBLY_MESSAGES] {
+            assert!(matches!(
+                b.receive(write.expect("fragment").as_bytes()),
+                ReceiveReport::Packet { .. }
+            ));
+        }
+
+        b.tick(10);
+
+        assert!(matches!(
+            b.receive(
+                writes[crate::MAX_REASSEMBLY_MESSAGES]
+                    .expect("extra fragment")
+                    .as_bytes()
+            ),
+            ReceiveReport::Packet { .. }
+        ));
     }
 
     #[test]
@@ -637,6 +698,28 @@ mod tests {
             bytes,
             len: total_len,
         }
+    }
+
+    fn first_fragments_for_five_messages(engine: &mut Engine) -> [Option<super::WriteEvent>; 5] {
+        let mut fragments = [None; 5];
+        let mut write_index = 0;
+
+        for message in [b"aa00", b"bb11", b"cc22", b"dd33", b"ee44"] {
+            engine.send(message).unwrap();
+        }
+
+        while let Some(event) = engine.poll_event() {
+            let EngineOutput::Write(write) = event else {
+                continue;
+            };
+
+            if write_index % 2 == 0 {
+                fragments[write_index / 2] = Some(write);
+            }
+            write_index += 1;
+        }
+
+        fragments
     }
 
     fn assert_message(engine: &mut Engine, expected: &[u8]) {

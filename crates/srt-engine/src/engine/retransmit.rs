@@ -10,6 +10,9 @@ impl Engine {
     /// The MVP engine keeps this as a boundary for future ACK timeout and
     /// retransmission logic.
     pub fn tick(&mut self, now_ms: u64) {
+        self.now_ms = now_ms;
+        self.reassembly.expire(now_ms, self.reassembly_timeout_ms);
+
         let mut retransmits = [None; MAX_IN_FLIGHT_PACKETS];
         let mut retransmit_len = 0;
         let mut failures = [None; MAX_IN_FLIGHT_PACKETS];
