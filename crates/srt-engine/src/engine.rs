@@ -9,7 +9,7 @@ pub(crate) mod queue;
 pub(crate) mod reassembly;
 pub(crate) mod retransmit;
 
-use srt_core::{ChannelId, Error, MessageId, PacketNumber};
+use srt_core::{ChannelId, Error, MessageId, PacketNumber, Result};
 use srt_reliability::{ChannelReliability, PacketDedup, ReliabilityMode};
 use srt_wire::StreamingDecoder;
 
@@ -69,6 +69,34 @@ impl Engine {
     /// Polls one queued engine output event.
     pub fn poll_event(&mut self) -> Option<EngineOutput> {
         self.events.pop()
+    }
+
+    /// Queues a complete message for non-blocking protocol transmission.
+    ///
+    /// The caller submits the complete message once. The engine splits it into
+    /// packet-sized write events internally.
+    pub fn send(&mut self, message: &[u8]) -> Result<MessageId> {
+        self.send_on(ChannelId::CONTROL, message)
+    }
+
+    /// Queues a complete message on a logical channel.
+    ///
+    /// This is the channel-aware form of [`Engine::send`].
+    pub fn send_on(&mut self, channel_id: ChannelId, message: &[u8]) -> Result<MessageId> {
+        outgoing::send_on(self, channel_id, message)
+    }
+
+    /// Feeds already-arrived wire bytes into the engine.
+    ///
+    /// This method never waits for more bytes. It handles the current input and
+    /// queues events if a complete message becomes available.
+    pub fn receive(&mut self, bytes: &[u8]) -> ReceiveReport {
+        ingress::receive(self, bytes)
+    }
+
+    /// Advances time-driven protocol work.
+    pub fn tick(&mut self, now_ms: u64) {
+        retransmit::tick(self, now_ms);
     }
 
     /// Returns the next packet number that will be assigned.
