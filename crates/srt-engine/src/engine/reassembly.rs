@@ -135,6 +135,7 @@ impl ReassemblySlot {
         if self.is_complete() {
             let message = MessageEvent {
                 channel_id: self.key.channel_id,
+                profile: crate::ChannelProfile::default_for(self.key.channel_id),
                 message_id: self.key.message_id,
                 bytes: self.bytes,
                 len: self.expected_len,
@@ -163,7 +164,7 @@ struct MessageKey {
 
 impl MessageKey {
     const ZERO: Self = Self {
-        channel_id: ChannelId::CONTROL,
+        channel_id: ChannelId::DEFAULT,
         message_id: MessageId::ZERO,
     };
 }

@@ -12,8 +12,8 @@ fn reliable_transport_survives_drops_corruption_reordering_and_duplex_load() {
         fragment_bytes: 9,
         ..Config::default()
     });
-    let nav = ChannelId::new(1);
-    let telemetry = ChannelId::new(2);
+    let nav = ChannelId::new(16);
+    let telemetry = ChannelId::new(17);
     let mac_messages = [
         ExpectedMessage::new(nav, b"mac nav message one"),
         ExpectedMessage::new(telemetry, b"mac telemetry message two"),
@@ -144,7 +144,7 @@ struct DeliveredMessages {
 impl DeliveredMessages {
     const fn new() -> Self {
         Self {
-            messages: [(ChannelId::CONTROL, [0; 64], 0); 8],
+            messages: [(ChannelId::DEFAULT, [0; 64], 0); 8],
             len: 0,
         }
     }

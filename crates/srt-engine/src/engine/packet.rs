@@ -168,11 +168,11 @@ fn fragment_from_packet_bytes(
         return None;
     }
 
-    let channel_id = ChannelId::new(u16::from_le_bytes(bytes.get(1..3)?.try_into().ok()?));
-    let message_id = MessageId::new(u32::from_le_bytes(bytes.get(3..7)?.try_into().ok()?));
-    let message_len = u16::from_le_bytes(bytes.get(7..9)?.try_into().ok()?) as usize;
-    let fragment_offset = u16::from_le_bytes(bytes.get(9..11)?.try_into().ok()?) as usize;
-    let flags = *bytes.get(11)?;
+    let channel_id = ChannelId::new(*bytes.get(1)?);
+    let message_id = MessageId::new(u32::from_le_bytes(bytes.get(2..6)?.try_into().ok()?));
+    let message_len = u16::from_le_bytes(bytes.get(6..8)?.try_into().ok()?) as usize;
+    let fragment_offset = u16::from_le_bytes(bytes.get(8..10)?.try_into().ok()?) as usize;
+    let flags = *bytes.get(10)?;
     let fragment = bytes.get(MESSAGE_FRAME_HEADER_LEN..)?;
 
     let end = fragment_offset.checked_add(fragment.len())?;

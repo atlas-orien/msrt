@@ -2,28 +2,44 @@
 
 /// A logical channel identifier.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct ChannelId(pub u16);
+pub struct ChannelId(pub u8);
 
 impl ChannelId {
-    /// Reserved control channel.
-    pub const CONTROL: Self = Self(0);
+    /// Default application channel.
+    pub const DEFAULT: Self = Self(0);
+    /// Log channel reserved for diagnostic output.
+    pub const LOG: Self = Self(1);
+    /// First channel available for application-defined routing.
+    pub const FIRST_APPLICATION_DEFINED: Self = Self(16);
 
     /// Creates a channel identifier from its raw value.
     #[must_use]
-    pub const fn new(raw: u16) -> Self {
+    pub const fn new(raw: u8) -> Self {
         Self(raw)
     }
 
     /// Returns the raw channel identifier value.
     #[must_use]
-    pub const fn get(self) -> u16 {
+    pub const fn get(self) -> u8 {
         self.0
     }
 
-    /// Returns whether this is the reserved control channel.
+    /// Returns whether this is the default application channel.
     #[must_use]
-    pub const fn is_control(self) -> bool {
-        self.0 == Self::CONTROL.0
+    pub const fn is_default(self) -> bool {
+        self.0 == Self::DEFAULT.0
+    }
+
+    /// Returns whether this is the log channel.
+    #[must_use]
+    pub const fn is_log(self) -> bool {
+        self.0 == Self::LOG.0
+    }
+
+    /// Returns whether this channel is application-defined.
+    #[must_use]
+    pub const fn is_application_defined(self) -> bool {
+        self.0 >= Self::FIRST_APPLICATION_DEFINED.0
     }
 }
 

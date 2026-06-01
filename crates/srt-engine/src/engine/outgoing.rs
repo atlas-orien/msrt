@@ -157,12 +157,12 @@ fn encode_message_fragment(
     };
     out[10..14].copy_from_slice(&fragment_to_encode.packet_number.get().to_le_bytes());
     out[14] = FrameKind::Message.code();
-    out[15..17].copy_from_slice(&channel_id.to_le_bytes());
-    out[17..21].copy_from_slice(&fragment_to_encode.message_id.get().to_le_bytes());
-    out[21..23].copy_from_slice(&message_len.to_le_bytes());
-    out[23..25].copy_from_slice(&fragment_offset.to_le_bytes());
-    out[25] = fragment_to_encode.flags;
-    out[26..26 + fragment_to_encode.fragment.len()].copy_from_slice(fragment_to_encode.fragment);
+    out[15] = channel_id;
+    out[16..20].copy_from_slice(&fragment_to_encode.message_id.get().to_le_bytes());
+    out[20..22].copy_from_slice(&message_len.to_le_bytes());
+    out[22..24].copy_from_slice(&fragment_offset.to_le_bytes());
+    out[24] = fragment_to_encode.flags;
+    out[25..25 + fragment_to_encode.fragment.len()].copy_from_slice(fragment_to_encode.fragment);
 
     let checksum_value = checksum.calculate(&out[..total_len - CHECKSUM_LEN]);
     out[total_len - CHECKSUM_LEN..total_len].copy_from_slice(&checksum_value.to_le_bytes());

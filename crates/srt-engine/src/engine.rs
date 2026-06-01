@@ -14,8 +14,8 @@ use srt_reliability::{ChannelReliability, PacketDedup, ReliabilityMode};
 use srt_wire::StreamingDecoder;
 
 use crate::{
-    EngineConfig, MAX_CHANNEL_POLICIES, MAX_IN_FLIGHT_PACKETS, MAX_INGRESS_BYTES,
-    MAX_MESSAGE_BYTES, MAX_WIRE_BYTES,
+    ChannelProfile, ChannelSpec, EngineConfig, MAX_CHANNEL_POLICIES, MAX_CHANNEL_SPECS,
+    MAX_IN_FLIGHT_PACKETS, MAX_INGRESS_BYTES, MAX_MESSAGE_BYTES, MAX_WIRE_BYTES,
     engine::{
         ack::AckRanges, inflight::InFlightPackets, queue::EventQueue, reassembly::ReassemblyBuffer,
     },
@@ -34,6 +34,7 @@ pub struct Engine {
     pub(crate) max_retransmit_attempts: u8,
     pub(crate) retransmit_timeout_ms: u64,
     pub(crate) reassembly_timeout_ms: u64,
+    pub(crate) channel_specs: [Option<ChannelSpec>; MAX_CHANNEL_SPECS],
     pub(crate) channel_policies: [Option<ChannelReliability>; MAX_CHANNEL_POLICIES],
     pub(crate) now_ms: u64,
     pub(crate) events: EventQueue,
@@ -55,6 +56,7 @@ impl Engine {
             max_retransmit_attempts: config.max_retransmit_attempts,
             retransmit_timeout_ms: config.retransmit_timeout_ms,
             reassembly_timeout_ms: config.reassembly_timeout_ms,
+            channel_specs: config.channel_specs,
             channel_policies: config.channel_policies,
             now_ms: 0,
             events: EventQueue::new(),
@@ -76,7 +78,7 @@ impl Engine {
     /// The caller submits the complete message once. The engine splits it into
     /// packet-sized write events internally.
     pub fn send(&mut self, message: &[u8]) -> Result<MessageId> {
-        self.send_on(ChannelId::CONTROL, message)
+        self.send_on(ChannelId::DEFAULT, message)
     }
 
     /// Queues a complete message on a logical channel.
@@ -106,6 +108,21 @@ impl Engine {
     }
 
     pub(crate) fn reliability_mode(&self, channel_id: ChannelId) -> ReliabilityMode {
+        let mut spec_index = 0;
+
+        while spec_index < MAX_CHANNEL_SPECS {
+            if let Some(spec) = self.channel_specs[spec_index]
+                && spec.channel_id.get() == channel_id.get()
+            {
+                return spec.reliability_mode;
+            }
+            spec_index += 1;
+        }
+
+        if channel_id.is_log() {
+            return ReliabilityMode::BestEffort;
+        }
+
         let mut index = 0;
 
         while index < MAX_CHANNEL_POLICIES {
@@ -118,6 +135,21 @@ impl Engine {
         }
 
         ReliabilityMode::Reliable
+    }
+
+    pub(crate) fn channel_profile(&self, channel_id: ChannelId) -> ChannelProfile {
+        let mut index = 0;
+
+        while index < MAX_CHANNEL_SPECS {
+            if let Some(spec) = self.channel_specs[index]
+                && spec.channel_id.get() == channel_id.get()
+            {
+                return spec.profile;
+            }
+            index += 1;
+        }
+
+        ChannelProfile::default_for(channel_id)
     }
 }
 
@@ -156,6 +188,8 @@ impl WriteEvent {
 pub struct MessageEvent {
     /// Logical channel that carried the message.
     pub channel_id: ChannelId,
+    /// Protocol-level purpose associated with the channel.
+    pub profile: ChannelProfile,
     /// Message identifier scoped to this engine.
     pub message_id: MessageId,
     /// Fixed storage containing complete message bytes.
@@ -227,6 +261,7 @@ pub enum ReceiveReport {
 #[cfg(test)]
 mod tests {
     use super::{Engine, EngineConfig, EngineOutput, ReceiveReport};
+    use crate::{ChannelProfile, ChannelSpec};
     use srt_reliability::ChannelReliability;
 
     #[test]
@@ -387,10 +422,7 @@ mod tests {
         let write = next_write(&mut a);
         let bytes = write.as_bytes();
 
-        assert_eq!(
-            u16::from_le_bytes(bytes[15..17].try_into().unwrap()),
-            channel_id.get()
-        );
+        assert_eq!(bytes[15], channel_id.get());
         assert!(matches!(
             b.receive(write.as_bytes()),
             ReceiveReport::Packet { .. }
@@ -623,12 +655,9 @@ mod tests {
             write.packet_number.get()
         );
         assert_eq!(bytes[14], srt_core::FrameKind::Message.code());
+        assert_eq!(bytes[15], srt_core::ChannelId::DEFAULT.get());
         assert_eq!(
-            u16::from_le_bytes(bytes[15..17].try_into().unwrap()),
-            srt_core::ChannelId::CONTROL.get()
-        );
-        assert_eq!(
-            bytes[25],
+            bytes[24],
             srt_core::MessageFlags::FIRST.bits() | srt_core::MessageFlags::LAST.bits()
         );
     }
@@ -712,8 +741,79 @@ mod tests {
         };
 
         assert_eq!(message.channel_id, channel_id);
+        assert_eq!(message.profile, ChannelProfile::Data);
         assert_eq!(message.as_bytes(), b"hello best effort");
         assert!(receiver.poll_event().is_none());
+    }
+
+    #[test]
+    fn engine_send_uses_default_application_channel() {
+        let mut engine = Engine::new(EngineConfig::default());
+
+        engine.send(b"hello default").unwrap();
+
+        let write = next_write(&mut engine);
+        let bytes = write.as_bytes();
+
+        assert_eq!(bytes[15], srt_core::ChannelId::DEFAULT.get());
+    }
+
+    #[test]
+    fn engine_log_channel_defaults_to_best_effort_and_log_profile() {
+        let mut sender = Engine::new(EngineConfig::default());
+        let mut receiver = Engine::new(EngineConfig::default());
+
+        sender
+            .send_on(srt_core::ChannelId::LOG, b"log line")
+            .unwrap();
+
+        let write = next_write(&mut sender);
+
+        assert_eq!(write.as_bytes()[9], srt_core::Flags::EMPTY.bits());
+        assert_eq!(sender.in_flight.packets().count(), 0);
+
+        assert!(matches!(
+            receiver.receive(write.as_bytes()),
+            ReceiveReport::Packet { .. }
+        ));
+
+        let message = next_message(&mut receiver);
+
+        assert_eq!(message.channel_id, srt_core::ChannelId::LOG);
+        assert_eq!(message.profile, ChannelProfile::Log);
+        assert_eq!(message.as_bytes(), b"log line");
+        assert!(receiver.poll_event().is_none());
+    }
+
+    #[test]
+    fn engine_channel_spec_overrides_profile_and_reliability() {
+        let channel_id = srt_core::ChannelId::new(16);
+        let mut sender = Engine::new(EngineConfig {
+            channel_specs: [Some(ChannelSpec::log(channel_id)), None, None, None],
+            ..EngineConfig::default()
+        });
+        let mut receiver = Engine::new(EngineConfig {
+            channel_specs: [Some(ChannelSpec::log(channel_id)), None, None, None],
+            ..EngineConfig::default()
+        });
+
+        sender.send_on(channel_id, b"adapter log").unwrap();
+
+        let write = next_write(&mut sender);
+
+        assert_eq!(write.as_bytes()[9], srt_core::Flags::EMPTY.bits());
+        assert_eq!(sender.in_flight.packets().count(), 0);
+
+        assert!(matches!(
+            receiver.receive(write.as_bytes()),
+            ReceiveReport::Packet { .. }
+        ));
+
+        let message = next_message(&mut receiver);
+
+        assert_eq!(message.channel_id, channel_id);
+        assert_eq!(message.profile, ChannelProfile::Log);
+        assert_eq!(message.as_bytes(), b"adapter log");
     }
 
     #[test]
@@ -740,7 +840,7 @@ mod tests {
         };
 
         assert_eq!(failed.message_id, message_id);
-        assert_eq!(failed.channel_id, srt_core::ChannelId::CONTROL);
+        assert_eq!(failed.channel_id, srt_core::ChannelId::DEFAULT);
         assert_eq!(failed.reason, super::SendFailureReason::RetryLimitReached);
     }
 
@@ -773,7 +873,7 @@ mod tests {
         };
 
         assert_eq!(failed.message_id, message_id);
-        assert_eq!(failed.channel_id, srt_core::ChannelId::CONTROL);
+        assert_eq!(failed.channel_id, srt_core::ChannelId::DEFAULT);
         assert_eq!(failed.reason, super::SendFailureReason::RetryLimitReached);
         assert_eq!(engine.in_flight.packets().count(), 0);
         assert!(engine.poll_event().is_none());
@@ -821,7 +921,7 @@ mod tests {
         };
 
         assert_eq!(failed.message_id, message_id);
-        assert_eq!(failed.channel_id, srt_core::ChannelId::CONTROL);
+        assert_eq!(failed.channel_id, srt_core::ChannelId::DEFAULT);
         assert_eq!(failed.reason, super::SendFailureReason::RetryLimitReached);
         assert_eq!(engine.in_flight.packets().count(), 0);
         assert!(engine.poll_event().is_none());

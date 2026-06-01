@@ -13,7 +13,7 @@ pub(crate) const PACKET_HEADER_LEN: usize = PACKET_TYPE_LEN + PACKET_FLAGS_LEN +
 /// Encoded frame type length in bytes.
 pub(crate) const FRAME_TYPE_LEN: usize = core::mem::size_of::<u8>();
 /// Encoded channel identifier length in bytes.
-pub(crate) const CHANNEL_ID_LEN: usize = core::mem::size_of::<u16>();
+pub(crate) const CHANNEL_ID_LEN: usize = core::mem::size_of::<u8>();
 /// Encoded message identifier length in bytes.
 pub(crate) const MESSAGE_ID_LEN: usize = core::mem::size_of::<u32>();
 /// Encoded complete message length field size in bytes.

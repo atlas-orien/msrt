@@ -14,10 +14,10 @@ pub use srt_wire as wire;
 
 pub use srt_core::ChannelId;
 pub use srt_engine::{
-    DEFAULT_FRAGMENT_BYTES, DEFAULT_MAX_RETRANSMIT_ATTEMPTS, DEFAULT_REASSEMBLY_TIMEOUT_MS,
-    DEFAULT_RETRANSMIT_TIMEOUT_MS, Engine, EngineConfig, EngineOutput, MAX_CHANNEL_POLICIES,
-    MAX_EVENTS, MAX_MESSAGE_BYTES, MAX_WIRE_BYTES, MessageEvent, ReceiveReport, SendFailedEvent,
-    SendFailureReason, WriteEvent,
+    ChannelProfile, ChannelSpec, DEFAULT_FRAGMENT_BYTES, DEFAULT_MAX_RETRANSMIT_ATTEMPTS,
+    DEFAULT_REASSEMBLY_TIMEOUT_MS, DEFAULT_RETRANSMIT_TIMEOUT_MS, Engine, EngineConfig,
+    EngineOutput, MAX_CHANNEL_POLICIES, MAX_CHANNEL_SPECS, MAX_EVENTS, MAX_MESSAGE_BYTES,
+    MAX_WIRE_BYTES, MessageEvent, ReceiveReport, SendFailedEvent, SendFailureReason, WriteEvent,
 };
 pub use srt_reliability::{ChannelReliability, ReliabilityMode};
 

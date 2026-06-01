@@ -5,6 +5,7 @@
 ## 版本目录
 
 - [v1](v1/README.md)：no_std protocol 阶段，包含已完成的 foundation / hardening / reliable transport，以及 v1 protocol spec frozen baseline。
+- [v2](v2/README.md)：engine channel 语义细化阶段，先支持日志等用途型 channel。
 
 ## 当前阶段
 

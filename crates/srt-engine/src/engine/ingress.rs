@@ -78,7 +78,8 @@ fn receive_complete_packet(engine: &mut Engine, bytes: &[u8]) -> ReceiveReport {
             }
 
             match engine.reassembly.observe(fragment, engine.now_ms) {
-                Ok(Some(message)) => {
+                Ok(Some(mut message)) => {
+                    message.profile = engine.channel_profile(message.channel_id);
                     if engine.events.push(EngineOutput::Message(message)).is_err() {
                         return ReceiveReport::Error(Error::new(ErrorKind::Engine));
                     }
