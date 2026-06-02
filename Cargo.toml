@@ -5,8 +5,11 @@ edition = "2024"
 license = "Apache-2.0"
 authors = ["Atlas Orein <gamesworldcraft@gamil.com>"]
 repository = "https://github.com/atlas-orien/msrt"
+documentation = "https://docs.rs/msrt"
 readme = "README.md"
 description = "Portable MSRT protocol implementation."
+keywords = ["serial", "transport", "protocol", "no-std", "embedded"]
+categories = ["embedded", "network-programming", "no-std"]
 include = [
     "Cargo.toml",
     "LICENSE",
@@ -30,12 +33,3 @@ criterion = { version = "0.8.2", default-features = false }
 [[bench]]
 name = "protocol"
 harness = false
-
-[lints.rust]
-missing_docs = "warn"
-unsafe_code = "forbid"
-
-[lints.clippy]
-alloc_instead_of_core = "warn"
-std_instead_of_alloc = "warn"
-std_instead_of_core = "warn"
