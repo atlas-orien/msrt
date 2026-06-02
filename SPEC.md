@@ -41,14 +41,14 @@ Both implementation environments must implement the same protocol. Environment-s
 
 ## Current Crates
 
-- `msrt`: no_std facade crate for the protocol standard.
+- `msrt`: portable facade crate for the protocol standard.
 - `msrt::core`: shared primitive types and packet/frame boundaries.
 - `msrt::error`: shared protocol error types and result alias.
 - `msrt::reliability`: partial-reliability module boundaries.
 - `msrt::engine`: protocol engine boundary that coordinates send, receive, response, and progress.
 - `msrt::wire`: byte-stream wire envelope boundaries.
 
-All current crates are protocol-standard crates. They are kept `no_std` so the standard remains portable to MCU environments.
+The crate enables `std` by default, but it can be built with `default-features = false` so the standard remains portable to MCU environments.
 
 See [MSRT v1 Stable Protocol Draft](architectures/v1/srt-stable-protocol-draft.md) for the current v1 draft wire and packet model.
 See [MSRT v1 Reliable Transport Plan](architectures/v1/srt-reliable-transport-plan.md) for the remaining v1 reliability work.

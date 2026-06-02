@@ -1,5 +1,5 @@
-#![no_std]
-#![doc = "No-std MSRT protocol implementation."]
+#![cfg_attr(not(feature = "std"), no_std)]
+#![doc = "Portable MSRT protocol implementation."]
 
 /// Core protocol primitives.
 pub mod core;

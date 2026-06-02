@@ -4,7 +4,7 @@ MSRT means MSRT.
 
 MSRT is a common serial realtime transport protocol for MCU, robot, drone, and host-side systems. It is message-driven, channel-based, engine-friendly, and designed for realtime links with partial reliability.
 
-This repository is currently in the protocol-standard stage. The `msrt` crate defines the shared protocol boundary only. MCU `no_std` ports and host-side operating-system integrations are intentionally outside this repository for now.
+This repository is currently in the protocol-standard stage. The `msrt` crate defines the shared protocol boundary only. MCU ports and host-side operating-system integrations are intentionally outside this repository for now.
 
 The same standard protocol should be usable from two future implementation environments:
 
@@ -18,7 +18,17 @@ See [ROADMAP.md](ROADMAP.md) for the current scaffold scope and next phases.
 
 ## Crate
 
-`msrt` is a single no-std crate for the protocol standard. Internal protocol boundaries live as modules:
+`msrt` is a single portable crate for the protocol standard. It enables `std` by default for host ergonomics, but the protocol core remains usable without `std`:
+
+```toml
+# Host/default.
+msrt = "0.1"
+
+# MCU/no_std.
+msrt = { version = "0.1", default-features = false }
+```
+
+Internal protocol boundaries live as modules:
 
 - `core`: core protocol primitives.
 - `error`: shared protocol error types.

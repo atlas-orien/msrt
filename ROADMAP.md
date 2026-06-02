@@ -6,7 +6,7 @@ This roadmap describes the current scaffold milestone and the next implementatio
 
 Status: foundation complete, hardening complete for current scope, v1 reliable transport not complete.
 
-The current crate freezes the no-std protocol module boundaries and contains a minimal working protocol engine:
+The current crate freezes the portable protocol module boundaries and contains a minimal working protocol engine:
 
 - `msrt::core`
 - `msrt::error`
@@ -14,7 +14,7 @@ The current crate freezes the no-std protocol module boundaries and contains a m
 - `msrt::engine`
 - `msrt::wire`
 
-This milestone is not the final interoperable MSRT protocol standard. It is the first working no-std engine foundation. It defines the protocol ownership model, public boundaries, basic tests, smoke simulation, CI, git hooks, and architecture documents.
+This milestone is not the final interoperable MSRT protocol standard. It is the first working portable engine foundation. It defines the protocol ownership model, public boundaries, basic tests, smoke simulation, CI, git hooks, and architecture documents.
 
 The v1 MVP engine demonstrates:
 

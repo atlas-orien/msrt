@@ -1,12 +1,12 @@
 [package]
 name = "msrt"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 license = "Apache-2.0"
 authors = ["Atlas Orein <gamesworldcraft@gamil.com>"]
 repository = "https://github.com/atlas-orien/msrt"
 readme = "README.md"
-description = "No-std MSRT protocol implementation."
+description = "Portable MSRT protocol implementation."
 include = [
     "Cargo.toml",
     "LICENSE",
@@ -19,7 +19,8 @@ include = [
 ]
 
 [features]
-default = []
+default = ["std"]
+std = []
 
 [dependencies]
 
