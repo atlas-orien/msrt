@@ -24,11 +24,23 @@ pub const MAX_CHANNEL_SPECS: usize = 4;
 /// Default maximum message fragment bytes per packet.
 pub const DEFAULT_FRAGMENT_BYTES: usize = 32;
 /// Default maximum retransmission attempts before a send fails.
-pub const DEFAULT_MAX_RETRANSMIT_ATTEMPTS: u8 = 3;
+///
+/// This gives a reliable packet one initial send plus five retransmission
+/// opportunities. With the default 250 ms timeout, a missing ACK is reported
+/// after roughly 1.5 s, which is conservative for UART-like MCU links without
+/// hiding disconnects for too long.
+pub const DEFAULT_MAX_RETRANSMIT_ATTEMPTS: u8 = 5;
 /// Default retransmission timeout in engine ticks.
-pub const DEFAULT_RETRANSMIT_TIMEOUT_MS: u64 = 1;
+///
+/// The default is intentionally larger than the raw wire time of a 128-byte
+/// packet at 115200 baud. It leaves room for USB CDC buffering, MCU scheduler
+/// jitter, single-byte polling adapters, and the peer's ACK write path.
+pub const DEFAULT_RETRANSMIT_TIMEOUT_MS: u64 = 250;
 /// Default incomplete message reassembly timeout in engine ticks.
-pub const DEFAULT_REASSEMBLY_TIMEOUT_MS: u64 = 30;
+///
+/// This must outlive the default reliable-send retry window so late
+/// retransmitted fragments can still complete an in-progress message.
+pub const DEFAULT_REASSEMBLY_TIMEOUT_MS: u64 = 3000;
 
 /// Protocol-level purpose associated with a channel.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

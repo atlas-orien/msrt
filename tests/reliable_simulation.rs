@@ -38,7 +38,7 @@ fn reliable_transport_survives_drops_corruption_reordering_and_duplex_load() {
             .expect("queue mcu message");
     }
 
-    for now_ms in 0..32 {
+    for now_ms in 0..2_000 {
         pump_until_idle(
             &mut mac,
             &mut mcu,

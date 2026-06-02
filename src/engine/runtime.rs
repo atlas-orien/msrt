@@ -480,6 +480,7 @@ mod tests {
     fn engine_ack_range_gap_retransmits_only_missing_packet() {
         let mut engine = Engine::new(EngineConfig {
             fragment_bytes: 2,
+            retransmit_timeout_ms: 1,
             ..EngineConfig::default()
         });
 
@@ -820,6 +821,7 @@ mod tests {
     fn engine_reports_send_failed_after_retry_limit() {
         let mut engine = Engine::new(EngineConfig {
             max_retransmit_attempts: 1,
+            retransmit_timeout_ms: 1,
             ..EngineConfig::default()
         });
 
@@ -849,6 +851,7 @@ mod tests {
         let mut engine = Engine::new(EngineConfig {
             fragment_bytes: 2,
             max_retransmit_attempts: 1,
+            retransmit_timeout_ms: 1,
             ..EngineConfig::default()
         });
 
@@ -884,6 +887,7 @@ mod tests {
         let mut engine = Engine::new(EngineConfig {
             fragment_bytes: 2,
             max_retransmit_attempts: 1,
+            retransmit_timeout_ms: 1,
             ..EngineConfig::default()
         });
 

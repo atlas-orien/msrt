@@ -625,9 +625,24 @@ v1 当前默认：
 
 ```text
 DEFAULT_FRAGMENT_BYTES = 32
+DEFAULT_RETRANSMIT_TIMEOUT_MS = 250
+DEFAULT_MAX_RETRANSMIT_ATTEMPTS = 5
+DEFAULT_REASSEMBLY_TIMEOUT_MS = 3000
 ```
 
 这个值是 MCU / 串口友好的默认值，不来自 QUIC MTU。
+
+默认重传时间按 UART-like MCU link 设计，而不是按内存仿真设计。
+128-byte wire packet 在 115200 baud 上的纯传输时间大约是 11 ms；
+默认 250 ms 为 USB CDC buffering、MCU 调度抖动、单字节轮询 adapter、
+ACK 写回路径和短暂业务阻塞预留余量。
+
+默认 5 次重传意味着 reliable packet 在初次发送后还有 5 次机会；
+按 250 ms timeout 计算，缺失 ACK 大约在 1.5 s 后报告 send failure。
+这个默认值偏保守，适合商用设备先避免误判链路失败，同时不会把真实断链隐藏数十秒。
+
+默认 reassembly timeout 必须长于 reliable-send retry window，
+避免 late retransmit fragment 到达时接收端已经释放 incomplete message。
 
 该默认值已经在 freeze 审核中接受为 reference engine default。用户仍然可以通过 `EngineConfig::fragment_bytes` 调整。
 
