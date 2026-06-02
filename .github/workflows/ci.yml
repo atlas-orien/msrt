@@ -18,10 +18,10 @@ jobs:
       - name: Format
         run: cargo fmt --all -- --check
       - name: Check
-        run: cargo check --workspace
+        run: cargo check
       - name: Run tests
-        run: cargo test --workspace --verbose
+        run: cargo test --verbose
       - name: Smoke test
-        run: cargo run -p srt --bin srt-smoke
+        run: cargo run --bin srt-smoke
       - name: Clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --all-targets --all-features -- -D warnings

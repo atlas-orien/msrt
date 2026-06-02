@@ -336,45 +336,6 @@ name = "srt"
 version = "0.1.0"
 dependencies = [
  "criterion",
- "srt-core",
- "srt-engine",
- "srt-error",
- "srt-reliability",
- "srt-wire",
-]
-
-[[package]]
-name = "srt-core"
-version = "0.1.0"
-dependencies = [
- "srt-error",
-]
-
-[[package]]
-name = "srt-engine"
-version = "0.1.0"
-dependencies = [
- "srt-core",
- "srt-reliability",
- "srt-wire",
-]
-
-[[package]]
-name = "srt-error"
-version = "0.1.0"
-
-[[package]]
-name = "srt-reliability"
-version = "0.1.0"
-dependencies = [
- "srt-core",
-]
-
-[[package]]
-name = "srt-wire"
-version = "0.1.0"
-dependencies = [
- "srt-core",
 ]
 
 [[package]]

@@ -4,14 +4,14 @@ set -eu
 echo "Running cargo fmt --all -- --check"
 cargo fmt --all -- --check
 
-echo "Running cargo check --workspace"
-cargo check --workspace
+echo "Running cargo check"
+cargo check
 
-echo "Running cargo test --workspace"
-cargo test --workspace
+echo "Running cargo test"
+cargo test
 
-echo "Running cargo run -p srt --bin srt-smoke"
-cargo run -p srt --bin srt-smoke
+echo "Running cargo run --bin srt-smoke"
+cargo run --bin srt-smoke
 
-echo "Running cargo clippy --workspace --all-targets --all-features -- -D warnings"
-cargo clippy --workspace --all-targets --all-features -- -D warnings
+echo "Running cargo clippy --all-targets --all-features -- -D warnings"
+cargo clippy --all-targets --all-features -- -D warnings

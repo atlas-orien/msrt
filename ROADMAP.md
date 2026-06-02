@@ -6,14 +6,13 @@ This roadmap describes the current scaffold milestone and the next implementatio
 
 Status: foundation complete, hardening complete for current scope, v1 reliable transport not complete.
 
-The current workspace freezes the no-std protocol crate boundaries and contains a minimal working protocol engine:
+The current crate freezes the no-std protocol module boundaries and contains a minimal working protocol engine:
 
-- `srt`
-- `srt-core`
-- `srt-error`
-- `srt-reliability`
-- `srt-engine`
-- `srt-wire`
+- `srt::core`
+- `srt::error`
+- `srt::reliability`
+- `srt::engine`
+- `srt::wire`
 
 This milestone is not the final interoperable SRT protocol standard. It is the first working no-std engine foundation. It defines the protocol ownership model, public boundaries, basic tests, smoke simulation, CI, git hooks, and architecture documents.
 
