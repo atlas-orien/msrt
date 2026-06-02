@@ -14,7 +14,7 @@ pub enum DecodeOutcome<'a> {
     },
     /// A complete packet was decoded.
     Packet {
-        /// Decoded SRT packet.
+        /// Decoded MSRT packet.
         packet: Packet<'a>,
         /// Number of bytes consumed by the wire envelope.
         consumed: usize,
@@ -26,7 +26,7 @@ pub enum DecodeOutcome<'a> {
     },
 }
 
-/// Decodes wire envelope bytes into SRT packets.
+/// Decodes wire envelope bytes into MSRT packets.
 pub trait Decoder {
     /// Attempts to decode one packet from the provided bytes.
     fn decode<'a>(&mut self, bytes: &'a [u8]) -> Result<DecodeOutcome<'a>>;

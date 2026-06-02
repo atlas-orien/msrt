@@ -1,4 +1,4 @@
-#![doc = "Reliability boundaries for Serial Realtime Transport."]
+#![doc = "Reliability boundaries for MSRT."]
 
 pub mod message;
 pub mod packet;

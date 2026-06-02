@@ -33,7 +33,7 @@ pub const DEFAULT_REASSEMBLY_TIMEOUT_MS: u64 = 30;
 /// Protocol-level purpose associated with a channel.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ChannelProfile {
-    /// Normal application data. Business message dispatch belongs above SRT.
+    /// Normal application data. Business message dispatch belongs above MSRT.
     Data,
     /// Diagnostic log output.
     Log,

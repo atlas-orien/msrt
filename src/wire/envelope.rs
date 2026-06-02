@@ -13,7 +13,7 @@ pub use magic::EnvelopeMagic;
 pub struct WireEnvelope<'a> {
     /// Wire envelope header.
     pub header: EnvelopeHeader,
-    /// Encoded SRT packet bytes.
+    /// Encoded MSRT packet bytes.
     pub packet_bytes: &'a [u8],
     /// Checksum over the envelope bytes selected by the wire format.
     pub checksum: u16,

@@ -22,6 +22,6 @@ jobs:
       - name: Run tests
         run: cargo test --verbose
       - name: Smoke test
-        run: cargo run --bin srt-smoke
+        run: cargo run --bin msrt-smoke
       - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings

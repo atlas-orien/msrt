@@ -2,7 +2,7 @@
 
 /// Borrowed packet payload bytes.
 ///
-/// These bytes represent encoded SRT protocol frames.
+/// These bytes represent encoded MSRT protocol frames.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PacketPayload<'a> {
     bytes: &'a [u8],

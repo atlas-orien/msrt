@@ -14,7 +14,7 @@ pub enum StreamDecodeOutcome<'a> {
         /// Minimum number of additional bytes needed if known.
         additional: Option<usize>,
     },
-    /// A complete encoded SRT packet was decoded from the wire envelope.
+    /// A complete encoded MSRT packet was decoded from the wire envelope.
     Packet {
         /// Encoded packet bytes inside the accepted wire envelope.
         packet_bytes: &'a [u8],
@@ -198,19 +198,19 @@ impl<const N: usize> Default for StreamingDecoder<N> {
 
 fn find_magic(bytes: &[u8]) -> Option<usize> {
     bytes
-        .windows(EnvelopeMagic::SRT.bytes().len())
-        .position(|window| window == EnvelopeMagic::SRT.bytes())
+        .windows(EnvelopeMagic::MSRT.bytes().len())
+        .position(|window| window == EnvelopeMagic::MSRT.bytes())
 }
 
 fn header_from_bytes(bytes: &[u8]) -> Option<EnvelopeHeader> {
     let magic = [*bytes.first()?, *bytes.get(1)?];
 
-    if magic != EnvelopeMagic::SRT.bytes() {
+    if magic != EnvelopeMagic::MSRT.bytes() {
         return None;
     }
 
     Some(EnvelopeHeader {
-        magic: EnvelopeMagic::SRT,
+        magic: EnvelopeMagic::MSRT,
         version: *bytes.get(2)?,
         header_len: *bytes.get(3)?,
         packet_len: u16::from_le_bytes([*bytes.get(4)?, *bytes.get(5)?]),
@@ -339,7 +339,7 @@ mod tests {
         let total_len = header.total_len();
         let mut bytes = [0; 16];
 
-        bytes[..2].copy_from_slice(&EnvelopeMagic::SRT.bytes());
+        bytes[..2].copy_from_slice(&EnvelopeMagic::MSRT.bytes());
         bytes[2] = header.version;
         bytes[3] = header.header_len;
         bytes[4..6].copy_from_slice(&header.packet_len.to_le_bytes());

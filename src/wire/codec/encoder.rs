@@ -46,7 +46,7 @@ impl<'a> EncodeTarget<'a> {
     }
 }
 
-/// Encodes SRT packets into wire envelope bytes.
+/// Encodes MSRT packets into wire envelope bytes.
 pub trait Encoder {
     /// Encodes a packet into the provided target.
     fn encode_packet(&mut self, packet: Packet<'_>, target: &mut EncodeTarget<'_>) -> Result<()>;

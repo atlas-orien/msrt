@@ -1,6 +1,6 @@
 //! Deterministic long-run reliable transport simulation.
 
-use srt::{ChannelId, Config, Engine, Event, MAX_WIRE_BYTES, Receive, Write, core::PacketType};
+use msrt::{ChannelId, Config, Engine, Event, MAX_WIRE_BYTES, Receive, Write, core::PacketType};
 
 #[test]
 fn reliable_transport_survives_drops_corruption_reordering_and_duplex_load() {

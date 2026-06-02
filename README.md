@@ -1,10 +1,10 @@
-# SRT
+# MSRT
 
-SRT means Serial Realtime Transport.
+MSRT means MSRT.
 
-SRT is a common serial realtime transport protocol for MCU, robot, drone, and host-side systems. It is message-driven, channel-based, engine-friendly, and designed for realtime links with partial reliability.
+MSRT is a common serial realtime transport protocol for MCU, robot, drone, and host-side systems. It is message-driven, channel-based, engine-friendly, and designed for realtime links with partial reliability.
 
-This repository is currently in the protocol-standard stage. The `srt` crate defines the shared protocol boundary only. MCU `no_std` ports and host-side operating-system integrations are intentionally outside this repository for now.
+This repository is currently in the protocol-standard stage. The `msrt` crate defines the shared protocol boundary only. MCU `no_std` ports and host-side operating-system integrations are intentionally outside this repository for now.
 
 The same standard protocol should be usable from two future implementation environments:
 
@@ -18,7 +18,7 @@ See [ROADMAP.md](ROADMAP.md) for the current scaffold scope and next phases.
 
 ## Crate
 
-`srt` is a single no-std crate for the protocol standard. Internal protocol boundaries live as modules:
+`msrt` is a single no-std crate for the protocol standard. Internal protocol boundaries live as modules:
 
 - `core`: core protocol primitives.
 - `error`: shared protocol error types.
@@ -35,5 +35,5 @@ cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo check
 cargo test
-cargo run --bin srt-smoke
+cargo run --bin msrt-smoke
 ```

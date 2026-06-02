@@ -1,4 +1,4 @@
-#![doc = "Wire envelope boundaries for Serial Realtime Transport."]
+#![doc = "Wire envelope boundaries for MSRT."]
 
 pub mod checksum;
 pub mod codec;

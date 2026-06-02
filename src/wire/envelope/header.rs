@@ -17,7 +17,7 @@ pub struct EnvelopeHeader {
     pub version: u8,
     /// Wire envelope header length.
     pub header_len: u8,
-    /// Encoded SRT packet length.
+    /// Encoded MSRT packet length.
     pub packet_len: u16,
     /// Wire flags.
     pub flags: WireFlags,
@@ -33,7 +33,7 @@ impl EnvelopeHeader {
     #[must_use]
     pub const fn new(packet_len: u16, flags: WireFlags) -> Self {
         Self {
-            magic: EnvelopeMagic::SRT,
+            magic: EnvelopeMagic::MSRT,
             version: Self::VERSION,
             header_len: WIRE_HEADER_LEN as u8,
             packet_len,

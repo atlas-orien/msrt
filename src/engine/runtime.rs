@@ -21,7 +21,7 @@ use crate::engine::{
     },
 };
 
-/// Minimal non-blocking SRT protocol engine.
+/// Minimal non-blocking MSRT protocol engine.
 ///
 /// The engine owns protocol state. It splits outgoing messages into packet
 /// write events, accepts incoming wire bytes, and emits complete messages once
@@ -271,7 +271,7 @@ mod tests {
             ..EngineConfig::default()
         });
 
-        let message_id = engine.send(b"hello srt testing").unwrap();
+        let message_id = engine.send(b"hello msrt testing").unwrap();
         let mut writes = 0;
 
         while let Some(event) = engine.poll_event() {
@@ -296,7 +296,7 @@ mod tests {
         });
         let mut b = Engine::new(EngineConfig::default());
 
-        a.send(b"hello srt testing").unwrap();
+        a.send(b"hello msrt testing").unwrap();
 
         while let Some(event) = a.poll_event() {
             let EngineOutput::Write(write) = event else {
@@ -311,7 +311,7 @@ mod tests {
 
         while let Some(event) = b.poll_event() {
             if let EngineOutput::Message(message) = event {
-                assert_eq!(message.as_bytes(), b"hello srt testing");
+                assert_eq!(message.as_bytes(), b"hello msrt testing");
                 return;
             }
         }
@@ -569,7 +569,7 @@ mod tests {
         let mut bytes = [0; crate::engine::MAX_WIRE_BYTES * 4];
         let mut len = 0;
 
-        a.send(b"hello srt testing").unwrap();
+        a.send(b"hello msrt testing").unwrap();
 
         while let Some(event) = a.poll_event() {
             let EngineOutput::Write(write) = event else {
@@ -584,7 +584,7 @@ mod tests {
             b.receive(&bytes[..len]),
             ReceiveReport::Packet { .. }
         ));
-        assert_message(&mut b, b"hello srt testing");
+        assert_message(&mut b, b"hello msrt testing");
     }
 
     #[test]
@@ -647,7 +647,7 @@ mod tests {
         let write = next_write(&mut engine);
         let bytes = write.as_bytes();
 
-        assert_eq!(&bytes[..2], &crate::wire::EnvelopeMagic::SRT.bytes());
+        assert_eq!(&bytes[..2], &crate::wire::EnvelopeMagic::MSRT.bytes());
         assert_eq!(bytes[8], crate::core::PacketType::Data.code());
         assert_eq!(bytes[9], crate::core::Flags::ACK_ELICITING.bits());
         assert_eq!(
@@ -951,7 +951,7 @@ mod tests {
         let packet_len = crate::engine::layout::ACK_PACKET_LEN as u16;
         let total_len = crate::wire::WIRE_HEADER_LEN + usize::from(packet_len) + 2;
 
-        bytes[..2].copy_from_slice(&crate::wire::EnvelopeMagic::SRT.bytes());
+        bytes[..2].copy_from_slice(&crate::wire::EnvelopeMagic::MSRT.bytes());
         bytes[2] = 1;
         bytes[3] = crate::wire::WIRE_HEADER_LEN as u8;
         bytes[4..6].copy_from_slice(&packet_len.to_le_bytes());

@@ -1,6 +1,6 @@
-#![doc = "Shared protocol error types for Serial Realtime Transport."]
+#![doc = "Shared protocol error types for MSRT."]
 
-/// Broad error category for SRT protocol failures.
+/// Broad error category for MSRT protocol failures.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ErrorKind {
     /// The input was malformed.
@@ -19,7 +19,7 @@ pub enum ErrorKind {
     Unsupported,
 }
 
-/// Shared SRT protocol error.
+/// Shared MSRT protocol error.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Error {
     kind: ErrorKind,
@@ -57,5 +57,5 @@ impl Error {
     }
 }
 
-/// Shared result type for SRT protocol crates.
+/// Shared result type for MSRT protocol crates.
 pub type Result<T> = core::result::Result<T, Error>;

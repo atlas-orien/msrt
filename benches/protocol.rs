@@ -1,11 +1,11 @@
-//! Host-side protocol benchmarks for the SRT facade.
+//! Host-side protocol benchmarks for the MSRT facade.
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use srt::{Config, Engine, Event, MAX_WIRE_BYTES, Receive, Write};
+use msrt::{Config, Engine, Event, MAX_WIRE_BYTES, Receive, Write};
 
-const SMALL_MESSAGE: &[u8] = b"hello srt";
+const SMALL_MESSAGE: &[u8] = b"hello msrt";
 const MEDIUM_MESSAGE: &[u8] =
-    b"srt benchmark message split into several packets for host-side regression tracking";
+    b"msrt benchmark message split into several packets for host-side regression tracking";
 const LARGE_MESSAGE: &[u8] = &[0x55; 192];
 
 fn send_fragmentation(c: &mut Criterion) {

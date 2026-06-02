@@ -1,4 +1,4 @@
-#![doc = "Protocol engine boundaries for Serial Realtime Transport."]
+#![doc = "Protocol engine boundaries for MSRT."]
 
 pub mod config;
 pub mod event;

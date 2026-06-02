@@ -143,7 +143,7 @@ fn encode_message_fragment(
         return Err(Error::buffer_too_small());
     }
 
-    out[..2].copy_from_slice(&EnvelopeMagic::SRT.bytes());
+    out[..2].copy_from_slice(&EnvelopeMagic::MSRT.bytes());
     out[2] = envelope_header.version;
     out[3] = envelope_header.header_len;
     out[4..6].copy_from_slice(&envelope_header.packet_len.to_le_bytes());
@@ -184,7 +184,7 @@ fn encode_ack_packet(
         return Err(Error::buffer_too_small());
     }
 
-    out[..2].copy_from_slice(&EnvelopeMagic::SRT.bytes());
+    out[..2].copy_from_slice(&EnvelopeMagic::MSRT.bytes());
     out[2] = envelope_header.version;
     out[3] = envelope_header.header_len;
     out[4..6].copy_from_slice(&envelope_header.packet_len.to_le_bytes());

@@ -12,7 +12,7 @@ pub use ty::PacketType;
 
 /// Borrowed protocol packet.
 ///
-/// A packet is the protocol transport unit. Its payload contains encoded SRT
+/// A packet is the protocol transport unit. Its payload contains encoded MSRT
 /// protocol frames.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Packet<'a> {

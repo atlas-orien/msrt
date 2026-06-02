@@ -1,6 +1,6 @@
-# SRT Protocol Standard
+# MSRT Protocol Standard
 
-SRT, Serial Realtime Transport, is a protocol standard for message-oriented realtime serial links.
+MSRT, MSRT, is a protocol standard for message-oriented realtime serial links.
 
 This document is intentionally high level. The current goal is to keep protocol ownership and crate boundaries clear while the first no-std draft is hardened.
 
@@ -8,7 +8,7 @@ The current version is a v1 no-std protocol foundation. It is suitable for inter
 
 ## Scope
 
-The SRT standard owns:
+The MSRT standard owns:
 
 - core protocol primitive types
 - packet and protocol frame boundaries
@@ -19,7 +19,7 @@ The SRT standard owns:
 - protocol engine behavior for send, receive, response, and progress
 - error surfaces shared by all implementations
 
-The SRT standard does not own:
+The MSRT standard does not own:
 
 - UART drivers
 - DMA drivers
@@ -31,7 +31,7 @@ The SRT standard does not own:
 
 ## Implementation Model
 
-SRT is designed to be implemented in at least two implementation environments.
+MSRT is designed to be implemented in at least two implementation environments.
 
 MCU implementations are expected to use `no_std` and may avoid allocation entirely.
 
@@ -41,14 +41,14 @@ Both implementation environments must implement the same protocol. Environment-s
 
 ## Current Crates
 
-- `srt`: no_std facade crate for the protocol standard.
-- `srt::core`: shared primitive types and packet/frame boundaries.
-- `srt::error`: shared protocol error types and result alias.
-- `srt::reliability`: partial-reliability module boundaries.
-- `srt::engine`: protocol engine boundary that coordinates send, receive, response, and progress.
-- `srt::wire`: byte-stream wire envelope boundaries.
+- `msrt`: no_std facade crate for the protocol standard.
+- `msrt::core`: shared primitive types and packet/frame boundaries.
+- `msrt::error`: shared protocol error types and result alias.
+- `msrt::reliability`: partial-reliability module boundaries.
+- `msrt::engine`: protocol engine boundary that coordinates send, receive, response, and progress.
+- `msrt::wire`: byte-stream wire envelope boundaries.
 
 All current crates are protocol-standard crates. They are kept `no_std` so the standard remains portable to MCU environments.
 
-See [SRT v1 Stable Protocol Draft](architectures/v1/srt-stable-protocol-draft.md) for the current v1 draft wire and packet model.
-See [SRT v1 Reliable Transport Plan](architectures/v1/srt-reliable-transport-plan.md) for the remaining v1 reliability work.
+See [MSRT v1 Stable Protocol Draft](architectures/v1/srt-stable-protocol-draft.md) for the current v1 draft wire and packet model.
+See [MSRT v1 Reliable Transport Plan](architectures/v1/srt-reliable-transport-plan.md) for the remaining v1 reliability work.

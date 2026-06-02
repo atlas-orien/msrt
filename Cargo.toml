@@ -1,12 +1,12 @@
 [package]
-name = "srt"
+name = "msrt"
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
 authors = ["Atlas Orein <gamesworldcraft@gamil.com>"]
-repository = "https://github.com/atlas-orien/srt"
+repository = "https://github.com/atlas-orien/msrt"
 readme = "README.md"
-description = "No-std Serial Realtime Transport protocol implementation."
+description = "No-std MSRT protocol implementation."
 include = [
     "Cargo.toml",
     "LICENSE",

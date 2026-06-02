@@ -1,4 +1,4 @@
-#![doc = "Core protocol primitives for Serial Realtime Transport."]
+#![doc = "Core protocol primitives for MSRT."]
 
 pub mod frame;
 pub mod packet;

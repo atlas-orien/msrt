@@ -1,4 +1,4 @@
-# SRT Roadmap
+# MSRT Roadmap
 
 This roadmap describes the current scaffold milestone and the next implementation phases.
 
@@ -8,13 +8,13 @@ Status: foundation complete, hardening complete for current scope, v1 reliable t
 
 The current crate freezes the no-std protocol module boundaries and contains a minimal working protocol engine:
 
-- `srt::core`
-- `srt::error`
-- `srt::reliability`
-- `srt::engine`
-- `srt::wire`
+- `msrt::core`
+- `msrt::error`
+- `msrt::reliability`
+- `msrt::engine`
+- `msrt::wire`
 
-This milestone is not the final interoperable SRT protocol standard. It is the first working no-std engine foundation. It defines the protocol ownership model, public boundaries, basic tests, smoke simulation, CI, git hooks, and architecture documents.
+This milestone is not the final interoperable MSRT protocol standard. It is the first working no-std engine foundation. It defines the protocol ownership model, public boundaries, basic tests, smoke simulation, CI, git hooks, and architecture documents.
 
 The v1 MVP engine demonstrates:
 
@@ -63,7 +63,7 @@ Remaining work before v1 can be called complete:
 4. Partial reliability policy implementation.
 5. Heapless/no-alloc buffer strategy configuration.
 
-See [SRT v1 Reliable Transport Plan](architectures/v1/srt-reliable-transport-plan.md).
+See [MSRT v1 Reliable Transport Plan](architectures/v1/srt-reliable-transport-plan.md).
 
 Runtime adapters remain out of this repository.
 

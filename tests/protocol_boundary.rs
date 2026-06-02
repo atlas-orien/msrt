@@ -1,6 +1,6 @@
-//! Integration tests for the no_std SRT protocol facade.
+//! Integration tests for the no_std MSRT protocol facade.
 
-use srt::{
+use msrt::{
     Config, Engine, Event,
     core::{
         ChannelId, Flags, MessageFlags, MessageFrame, MessageId, Packet, PacketHeader,
@@ -26,7 +26,7 @@ fn facade_exposes_core_packet_and_wire_envelope() {
         EnvelopeHeader::new(packet.payload_len() as u16, WireFlags::CHECKSUM_PRESENT);
     let envelope = WireEnvelope::new(envelope_header, packet.payload.as_bytes(), 0x1234);
 
-    assert_eq!(EnvelopeMagic::SRT.bytes(), *b"SR");
+    assert_eq!(EnvelopeMagic::MSRT.bytes(), *b"MS");
     assert_eq!(envelope.packet_bytes, &payload);
     assert!(envelope.has_valid_len());
     assert_eq!(envelope.header.packet_len, 3);

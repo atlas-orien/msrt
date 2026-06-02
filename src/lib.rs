@@ -1,5 +1,5 @@
 #![no_std]
-#![doc = "No-std Serial Realtime Transport protocol implementation."]
+#![doc = "No-std MSRT protocol implementation."]
 
 /// Core protocol primitives.
 pub mod core;

@@ -5,8 +5,8 @@
 pub struct EnvelopeMagic(pub [u8; 2]);
 
 impl EnvelopeMagic {
-    /// Default SRT wire magic.
-    pub const SRT: Self = Self(*b"SR");
+    /// Default MSRT wire magic.
+    pub const MSRT: Self = Self(*b"MS");
 
     /// Creates magic from raw bytes.
     #[must_use]
@@ -33,7 +33,7 @@ mod tests {
 
     #[test]
     fn magic_matches_prefix() {
-        assert!(EnvelopeMagic::SRT.matches_prefix(b"SRT"));
-        assert!(!EnvelopeMagic::SRT.matches_prefix(b"RT"));
+        assert!(EnvelopeMagic::MSRT.matches_prefix(b"MSRT"));
+        assert!(!EnvelopeMagic::MSRT.matches_prefix(b"RT"));
     }
 }

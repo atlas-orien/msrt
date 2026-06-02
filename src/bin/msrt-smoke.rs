@@ -1,6 +1,6 @@
-//! Minimal Mac-to-MCU smoke demo for the SRT facade crate.
+//! Minimal Mac-to-MCU smoke demo for the MSRT facade crate.
 
-use srt::{Config, Engine, Event, Message, Receive, Write};
+use msrt::{Config, Engine, Event, Message, Receive, Write};
 
 fn main() {
     let mut mac = Engine::new(Config {
@@ -13,20 +13,20 @@ fn main() {
     });
 
     println!("mac: send hello");
-    mac.send(b"hello srt").expect("queue mac hello");
+    mac.send(b"hello msrt").expect("queue mac hello");
     pump_link("mac", &mut mac, "mcu", &mut mcu);
 
     let hello = drive_until_message("mcu", &mut mcu, "mac", &mut mac);
-    assert_eq!(hello.as_bytes(), b"hello srt");
+    assert_eq!(hello.as_bytes(), b"hello msrt");
 
     println!("mcu: send pong");
-    mcu.send(b"pong srt").expect("queue mcu pong");
+    mcu.send(b"pong msrt").expect("queue mcu pong");
     pump_link("mcu", &mut mcu, "mac", &mut mac);
 
     let pong = drive_until_message("mac", &mut mac, "mcu", &mut mcu);
-    assert_eq!(pong.as_bytes(), b"pong srt");
+    assert_eq!(pong.as_bytes(), b"pong msrt");
 
-    println!("srt smoke ok: hello/pong message exchange");
+    println!("msrt smoke ok: hello/pong message exchange");
 }
 
 fn pump_link(src_name: &str, src: &mut Engine, dst_name: &str, dst: &mut Engine) {
