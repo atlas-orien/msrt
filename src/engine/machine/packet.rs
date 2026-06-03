@@ -16,6 +16,10 @@ pub(crate) enum PacketDecode<'a> {
     Data(DecodedFragment<'a>),
     /// ACK packet.
     Ack(DecodedAck),
+    /// PING packet.
+    Ping(DecodedLiveness),
+    /// PONG packet.
+    Pong(DecodedLiveness),
     /// Malformed packet bytes.
     Malformed,
 }
@@ -24,6 +28,12 @@ pub(crate) enum PacketDecode<'a> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct DecodedAck {
     pub(crate) ack: Ack,
+}
+
+/// Decoded liveness packet.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct DecodedLiveness {
+    pub(crate) header: PacketHeader,
 }
 
 /// Decoded message fragment.
@@ -82,6 +92,12 @@ fn decode_packet_bytes(bytes: &[u8]) -> PacketDecode<'_> {
             .unwrap_or(PacketDecode::Malformed),
         PacketType::Ack => ack_from_packet_bytes(payload_bytes)
             .map(PacketDecode::Ack)
+            .unwrap_or(PacketDecode::Malformed),
+        PacketType::Ping => liveness_from_packet_bytes(header, payload_bytes)
+            .map(PacketDecode::Ping)
+            .unwrap_or(PacketDecode::Malformed),
+        PacketType::Pong => liveness_from_packet_bytes(header, payload_bytes)
+            .map(PacketDecode::Pong)
             .unwrap_or(PacketDecode::Malformed),
     }
 }
@@ -181,4 +197,17 @@ fn fragment_from_packet_bytes(header: PacketHeader, bytes: &[u8]) -> Option<Deco
         flags: header.fragment_flags.bits(),
         bytes: fragment,
     })
+}
+
+fn liveness_from_packet_bytes(header: PacketHeader, bytes: &[u8]) -> Option<DecodedLiveness> {
+    if !bytes.is_empty()
+        || !header.channel_id.is_liveness()
+        || header.message_len != 0
+        || header.fragment_offset != 0
+        || header.fragment_flags != MessageFlags::EMPTY
+    {
+        return None;
+    }
+
+    Some(DecodedLiveness { header })
 }

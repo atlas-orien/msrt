@@ -1,9 +1,10 @@
 //! Peer session slot shared by endpoint managers.
 
 use crate::core::{MessageId, Result};
-use crate::engine::{Engine, EngineConfig, EnginePoll, ReceiveReport};
+use crate::engine::{Engine, EngineConfig, EnginePoll, ReceiveReport, SendFailedEvent};
 
 const HELLO_MESSAGE: &[u8] = &[0];
+const DEFAULT_PING_INTERVAL_MS: u64 = 5_000;
 
 /// Endpoint-level peer connection state.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -46,6 +47,8 @@ pub struct PeerSlot {
     engine: Option<Engine>,
     state: PeerState,
     last_seen_ms: u64,
+    last_ping_ms: u64,
+    pending_ping: Option<MessageId>,
 }
 
 impl PeerSlot {
@@ -57,6 +60,8 @@ impl PeerSlot {
             engine: None,
             state: PeerState::Disconnected,
             last_seen_ms: 0,
+            last_ping_ms: 0,
+            pending_ping: None,
         }
     }
 
@@ -89,6 +94,8 @@ impl PeerSlot {
         self.engine = Some(Engine::new(self.config));
         self.state = PeerState::Connecting;
         self.last_seen_ms = now_ms;
+        self.last_ping_ms = now_ms;
+        self.pending_ping = None;
         self.engine
             .as_mut()
             .expect("engine was just inserted")
@@ -100,6 +107,8 @@ impl PeerSlot {
         self.engine = Some(Engine::new(self.config));
         self.state = PeerState::Connecting;
         self.last_seen_ms = now_ms;
+        self.last_ping_ms = now_ms;
+        self.pending_ping = None;
     }
 
     /// Drops the current peer engine.
@@ -107,6 +116,8 @@ impl PeerSlot {
         self.engine = None;
         self.state = PeerState::Disconnected;
         self.last_seen_ms = 0;
+        self.last_ping_ms = 0;
+        self.pending_ping = None;
     }
 
     /// Creates an engine if needed and returns the active engine.
@@ -155,9 +166,17 @@ impl PeerSlot {
             ReceiveReport::Packet { .. }
                 | ReceiveReport::Duplicate { .. }
                 | ReceiveReport::Ack { .. }
+                | ReceiveReport::Ping { .. }
+                | ReceiveReport::Pong { .. }
         ) {
             self.state = PeerState::Connected;
             self.last_seen_ms = now_ms;
+        }
+
+        if let ReceiveReport::Pong { message_id, .. } = report
+            && self.pending_ping == Some(message_id)
+        {
+            self.pending_ping = None;
         }
 
         report
@@ -165,6 +184,8 @@ impl PeerSlot {
 
     /// Polls the active engine and disconnects the peer on reliable send failure.
     pub fn poll<'a>(&mut self, now_ms: u64, tx_buf: &'a mut [u8]) -> Result<EndpointPoll<'a>> {
+        self.queue_ping_if_idle(now_ms)?;
+
         let Some(engine) = self.engine.as_mut() else {
             return Ok(EndpointPoll::Idle);
         };
@@ -179,7 +200,7 @@ impl PeerSlot {
                 Ok(EndpointPoll::Message(message))
             }
             EnginePoll::SendFailed(event) => {
-                self.disconnect();
+                self.disconnect_after_send_failed(event);
                 Ok(EndpointPoll::SendFailed(event))
             }
             EnginePoll::Idle => Ok(EndpointPoll::Idle),
@@ -196,6 +217,29 @@ impl PeerSlot {
         }
 
         false
+    }
+
+    fn queue_ping_if_idle(&mut self, now_ms: u64) -> Result<()> {
+        if !self.is_connected()
+            || self.pending_ping.is_some()
+            || now_ms.saturating_sub(self.last_seen_ms) < DEFAULT_PING_INTERVAL_MS
+            || now_ms.saturating_sub(self.last_ping_ms) < DEFAULT_PING_INTERVAL_MS
+        {
+            return Ok(());
+        }
+
+        let Some(engine) = self.engine.as_mut() else {
+            return Ok(());
+        };
+
+        let message_id = engine.send_ping()?;
+        self.last_ping_ms = now_ms;
+        self.pending_ping = Some(message_id);
+        Ok(())
+    }
+
+    fn disconnect_after_send_failed(&mut self, _event: SendFailedEvent) {
+        self.disconnect();
     }
 }
 

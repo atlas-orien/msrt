@@ -1,6 +1,6 @@
 //! Incoming wire byte handling.
 
-use crate::core::{Error, ErrorKind};
+use crate::core::{ChannelId, Error, ErrorKind};
 use crate::reliability::{Dedup, DedupDecision};
 use crate::wire::{Crc16, StreamDecodeOutcome};
 
@@ -102,6 +102,23 @@ impl Machine {
                 self.in_flight.apply_ack(ack.ack);
                 ReceiveReport::Ack {
                     packet_number: ack.ack.largest_acknowledged,
+                }
+            }
+            PacketDecode::Ping(ping) => {
+                let packet_number = ping.header.packet_number;
+                if self.queue_pong(ping.header.message_id).is_err() {
+                    return ReceiveReport::Error(Error::new(ErrorKind::Engine));
+                }
+                ReceiveReport::Ping {
+                    packet_number,
+                    message_id: ping.header.message_id,
+                }
+            }
+            PacketDecode::Pong(pong) => {
+                self.in_flight.remove_message(ChannelId::LIVENESS, pong.header.message_id);
+                ReceiveReport::Pong {
+                    packet_number: pong.header.packet_number,
+                    message_id: pong.header.message_id,
                 }
             }
             PacketDecode::Malformed => ReceiveReport::Error(Error::malformed()),

@@ -8,12 +8,16 @@ use crate::engine::config::MAX_ACK_TRACKED_PACKETS;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct AckRanges {
     packets: [Option<PacketNumber>; MAX_ACK_TRACKED_PACKETS],
+    next: usize,
+    len: usize,
 }
 
 impl AckRanges {
     pub(crate) const fn new() -> Self {
         Self {
             packets: [None; MAX_ACK_TRACKED_PACKETS],
+            next: 0,
+            len: 0,
         }
     }
 
@@ -27,49 +31,24 @@ impl AckRanges {
             return;
         }
 
-        if let Some(slot) = self.packets.iter_mut().find(|slot| slot.is_none()) {
-            *slot = Some(packet_number);
+        if MAX_ACK_TRACKED_PACKETS == 0 {
             return;
         }
 
-        if let Some(index) = self.oldest_packet_index()
-            && self.packets[index]
-                .map(|oldest| packet_number.get() > oldest.get())
-                .unwrap_or(false)
-        {
-            self.packets[index] = Some(packet_number);
-        }
+        self.packets[self.next] = Some(packet_number);
+        self.next = (self.next + 1) % MAX_ACK_TRACKED_PACKETS;
+        self.len = core::cmp::min(self.len + 1, MAX_ACK_TRACKED_PACKETS);
     }
 
     pub(crate) fn ack(&self) -> Ack {
         let mut numbers = [None; MAX_ACK_TRACKED_PACKETS];
-        let mut len = 0;
 
-        for packet_number in self.packets.iter().flatten() {
-            numbers[len] = Some(*packet_number);
-            len += 1;
+        for (index, packet_number) in self.packets.iter().flatten().enumerate() {
+            numbers[index] = Some(*packet_number);
         }
 
-        sort_packet_numbers(&mut numbers, len);
-        ranges_from_sorted_numbers(numbers, len)
-    }
-
-    fn oldest_packet_index(&self) -> Option<usize> {
-        let mut oldest_index = None;
-        let mut oldest = PacketNumber::new(u32::MAX);
-
-        for (index, packet_number) in self.packets.iter().enumerate() {
-            let Some(packet_number) = packet_number else {
-                continue;
-            };
-
-            if packet_number.get() < oldest.get() {
-                oldest = *packet_number;
-                oldest_index = Some(index);
-            }
-        }
-
-        oldest_index
+        sort_packet_numbers(&mut numbers, self.len);
+        ranges_from_sorted_numbers(numbers, self.len)
     }
 }
 
@@ -143,7 +122,7 @@ mod tests {
     use crate::engine::config::MAX_ACK_TRACKED_PACKETS;
 
     #[test]
-    fn ack_ranges_evict_oldest_packet_when_full() {
+    fn ack_ranges_evict_least_recent_packet_when_full() {
         let mut ranges = AckRanges::new();
 
         for packet_number in 0..MAX_ACK_TRACKED_PACKETS as u32 {
@@ -157,6 +136,23 @@ mod tests {
         assert!(!ack.acknowledges(PacketNumber::new(0)));
         assert!(ack.acknowledges(PacketNumber::new(1)));
         assert!(ack.acknowledges(PacketNumber::new(MAX_ACK_TRACKED_PACKETS as u32)));
+    }
+
+    #[test]
+    fn ack_ranges_keeps_recently_observed_retransmit_when_full() {
+        let mut ranges = AckRanges::new();
+
+        for packet_number in 10..10 + MAX_ACK_TRACKED_PACKETS as u32 {
+            ranges.observe(PacketNumber::new(packet_number));
+        }
+
+        let retransmit = PacketNumber::new(3);
+        ranges.observe(retransmit);
+
+        let ack = ranges.ack();
+
+        assert!(ack.acknowledges(retransmit));
+        assert!(!ack.acknowledges(PacketNumber::new(10)));
     }
 
     #[test]

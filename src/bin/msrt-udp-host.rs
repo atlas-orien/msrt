@@ -5,16 +5,29 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+mod support;
+
 use msrt::{
-    core::{MessageId, PacketNumber},
     Engine,
+    endpoint::{ClientEndpoint, EndpointPoll, PeerState},
     engine::{EngineConfig, EnginePoll, ReceiveReport},
+};
+
+use support::noise::{
+    NoiseConfig, NoiseLcg, NoiseStats, add_stats, make_noise_bytes, mutate_or_copy,
+    validate_percent,
 };
 
 const TX_BUF_BYTES: usize = 256;
 const RX_BUF_BYTES: usize = 2048;
 const CHAOS_NOISE_CHUNK_BYTES: usize = 512;
 const DEFAULT_STATS_INTERVAL: Duration = Duration::from_secs(5);
+const MAX_MESSAGE_BYTES: usize = 256;
+const DEFAULT_MESSAGE_BYTES: usize = 240;
+const TEST_FRAGMENT_BYTES: usize = 48;
+const DEFAULT_CORRUPT_PERCENT: u8 = 0;
+const DEFAULT_DROP_BYTE_PERCENT: u8 = 1;
+const DEFAULT_INSERT_BYTE_PERCENT: u8 = 0;
 
 #[derive(Clone, Debug)]
 struct Args {
@@ -23,10 +36,9 @@ struct Args {
     interval: Duration,
     message: Vec<u8>,
     count: Option<usize>,
-    duration: Option<Duration>,
     wire_chaos: bool,
     drop_tx: Duration,
-    noise_percent: u8,
+    noise: NoiseConfig,
 }
 
 impl Args {
@@ -35,13 +47,16 @@ impl Args {
         let mut parsed = Self {
             bind: "127.0.0.1:9001".parse().expect("valid default bind addr"),
             peer: "127.0.0.1:9002".parse().expect("valid default peer addr"),
-            interval: Duration::from_millis(1_000),
-            message: b"ping".to_vec(),
+            interval: Duration::from_millis(10),
+            message: make_message(DEFAULT_MESSAGE_BYTES),
             count: None,
-            duration: None,
             wire_chaos: false,
             drop_tx: Duration::ZERO,
-            noise_percent: 0,
+            noise: NoiseConfig {
+                corrupt_percent: DEFAULT_CORRUPT_PERCENT,
+                drop_byte_percent: DEFAULT_DROP_BYTE_PERCENT,
+                insert_byte_percent: DEFAULT_INSERT_BYTE_PERCENT,
+            },
         };
 
         while let Some(arg) = args.next() {
@@ -78,12 +93,6 @@ impl Args {
                             .map_err(|error| format!("invalid --count: {error}"))?,
                     );
                 }
-                "--duration-sec" => {
-                    let secs = next_value(&mut args, "--duration-sec")?
-                        .parse()
-                        .map_err(|error| format!("invalid --duration-sec: {error}"))?;
-                    parsed.duration = Some(Duration::from_secs(secs));
-                }
                 "--wire-chaos" => {
                     parsed.wire_chaos = true;
                 }
@@ -94,16 +103,31 @@ impl Args {
                     parsed.drop_tx = Duration::from_millis(millis);
                 }
                 "--noise-percent" => {
-                    parsed.noise_percent = next_value(&mut args, "--noise-percent")?
+                    parsed.noise.corrupt_percent = next_value(&mut args, "--noise-percent")?
                         .parse()
                         .map_err(|error| format!("invalid --noise-percent: {error}"))?;
-                    if parsed.noise_percent > 100 {
-                        return Err("--noise-percent must be <= 100".to_string());
-                    }
+                    validate_percent(parsed.noise.corrupt_percent, "--noise-percent")?;
+                }
+                "--drop-byte-percent" => {
+                    parsed.noise.drop_byte_percent = next_value(&mut args, "--drop-byte-percent")?
+                        .parse()
+                        .map_err(|error| format!("invalid --drop-byte-percent: {error}"))?;
+                    validate_percent(parsed.noise.drop_byte_percent, "--drop-byte-percent")?;
+                }
+                "--insert-byte-percent" => {
+                    parsed.noise.insert_byte_percent =
+                        next_value(&mut args, "--insert-byte-percent")?
+                            .parse()
+                            .map_err(|error| format!("invalid --insert-byte-percent: {error}"))?;
+                    validate_percent(parsed.noise.insert_byte_percent, "--insert-byte-percent")?;
                 }
                 "--help" | "-h" => return Err(usage()),
                 other => return Err(format!("unknown argument: {other}\n\n{}", usage())),
             }
+        }
+
+        if parsed.message.len() > MAX_MESSAGE_BYTES {
+            return Err(format!("message length must be <= {MAX_MESSAGE_BYTES}"));
         }
 
         Ok(parsed)
@@ -126,82 +150,93 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     println!(
-        "msrt udp host bind={} peer={} interval={:?} message_len={} noise_percent={}",
+        "msrt udp host bind={} peer={} interval={:?} message_len={} noise={} drop_byte={} insert_byte={}",
         args.bind,
         args.peer,
         args.interval,
         args.message.len(),
-        args.noise_percent,
+        args.noise.corrupt_percent,
+        args.noise.drop_byte_percent,
+        args.noise.insert_byte_percent,
     );
 
     let start = Instant::now();
-    let session_id = process_session_id();
-    let mut engine = Engine::new(EngineConfig {
-        initial_packet_number: PacketNumber::new(session_id),
-        initial_message_id: MessageId::new(session_id),
-        max_retransmit_attempts: u8::MAX,
-        ..EngineConfig::default()
-    });
+    let mut endpoint = ClientEndpoint::new(test_config());
+    if let Err(error) = endpoint.connect(0) {
+        eprintln!("host connect error: {error:?}");
+        std::process::exit(1);
+    }
+    println!("host connect state={:?}", endpoint.peer().state());
     let mut rx_buf = [0; RX_BUF_BYTES];
     let mut last_send = Instant::now() - args.interval;
     let mut last_stats = Instant::now();
     let mut sent_messages = 0;
-    let mut corrupted_packets = 0usize;
-    let mut send_done = false;
+    let mut noise_stats = NoiseStats::default();
     let mut noise_state = NoiseLcg::new();
+    let mut last_state = endpoint.peer().state();
+    let mut last_connect_attempt = Instant::now();
 
     loop {
         let now = elapsed_ms(start);
+        let apply_noise = endpoint.peer().is_connected();
 
-        if !send_done
-            && should_send(&args, sent_messages, last_send, start)
-            && engine.send(&args.message).is_ok()
-        {
-            sent_messages += 1;
-            last_send = Instant::now();
+        if !endpoint.peer().has_session() {
+            if last_connect_attempt.elapsed() >= args.interval {
+                if endpoint.connect(now).is_err() {
+                    std::process::exit(1);
+                }
+                last_connect_attempt = Instant::now();
+            }
         }
 
-        recv_udp(&socket, &mut engine, &mut rx_buf)?;
+        if endpoint.peer().is_connected() && should_send(&args, sent_messages, last_send) {
+            match endpoint.peer_mut().send(&args.message) {
+                Ok(Some(_)) => {
+                    sent_messages += 1;
+                    last_send = Instant::now();
+                }
+                Ok(None) => {}
+                Err(_) => {}
+            }
+        }
+
+        recv_udp_endpoint(&socket, &mut endpoint, now, &mut rx_buf)?;
         let link_connected = start.elapsed() >= args.drop_tx;
-        pump_engine(
+        let noise = if apply_noise {
+            args.noise
+        } else {
+            NoiseConfig::default()
+        };
+        pump_endpoint(
             &socket,
             &args.peer,
-            &mut engine,
+            &mut endpoint,
             now,
             link_connected,
-            args.noise_percent,
+            noise,
             &mut noise_state,
-            &mut corrupted_packets,
+            &mut noise_stats,
         )?;
-
-        if args
-            .duration
-            .is_some_and(|duration| start.elapsed() >= duration)
-        {
-            send_done = true;
-        }
+        log_state_change("host", &mut last_state, endpoint.peer().state());
 
         if let Some(count) = args.count
             && sent_messages >= count
         {
-            println!("host completed {count} message(s), corrupted_packets={corrupted_packets}");
-            return Ok(());
-        }
-
-        if send_done {
             println!(
-                "host completed duration test: sent={} corrupted_packets={}",
-                sent_messages, corrupted_packets
+                "host completed {count} message(s), corrupted={} dropped={} inserted={}",
+                noise_stats.corrupted, noise_stats.dropped, noise_stats.inserted
             );
             return Ok(());
         }
 
         if last_stats.elapsed() >= DEFAULT_STATS_INTERVAL {
             println!(
-                "host stats elapsed={}s sent={} corrupted_packets={}",
+                "host stats elapsed={}s sent={} corrupted={} dropped={} inserted={}",
                 start.elapsed().as_secs(),
                 sent_messages,
-                corrupted_packets
+                noise_stats.corrupted,
+                noise_stats.dropped,
+                noise_stats.inserted
             );
             last_stats = Instant::now();
         }
@@ -267,19 +302,40 @@ fn run_wire_chaos(socket: UdpSocket, args: Args) -> Result<(), Box<dyn std::erro
     Ok(())
 }
 
-fn should_send(args: &Args, sent_messages: usize, last_send: Instant, start: Instant) -> bool {
+fn should_send(args: &Args, sent_messages: usize, last_send: Instant) -> bool {
     if args.count.is_some_and(|count| sent_messages >= count) {
         return false;
     }
 
-    if args
-        .duration
-        .is_some_and(|duration| start.elapsed() >= duration)
-    {
-        return false;
-    }
-
     last_send.elapsed() >= args.interval
+}
+
+fn recv_udp_endpoint(
+    socket: &UdpSocket,
+    endpoint: &mut ClientEndpoint,
+    now_ms: u64,
+    rx_buf: &mut [u8],
+) -> io::Result<()> {
+    loop {
+        match socket.recv_from(rx_buf) {
+            Ok((len, _from)) => {
+                for byte in &rx_buf[..len] {
+                    let report = endpoint.receive(now_ms, std::slice::from_ref(byte));
+                    let _ = matches!(
+                        report,
+                        ReceiveReport::Packet { .. }
+                            | ReceiveReport::Duplicate { .. }
+                            | ReceiveReport::Ack { .. }
+                            | ReceiveReport::Ping { .. }
+                            | ReceiveReport::Pong { .. }
+                            | ReceiveReport::Incomplete { .. }
+                    );
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(()),
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 fn recv_udp(socket: &UdpSocket, engine: &mut Engine, rx_buf: &mut [u8]) -> io::Result<()> {
@@ -288,15 +344,15 @@ fn recv_udp(socket: &UdpSocket, engine: &mut Engine, rx_buf: &mut [u8]) -> io::R
             Ok((len, _from)) => {
                 for byte in &rx_buf[..len] {
                     let report = engine.receive(std::slice::from_ref(byte));
-                    if !matches!(
+                    let _ = matches!(
                         report,
                         ReceiveReport::Packet { .. }
                             | ReceiveReport::Duplicate { .. }
                             | ReceiveReport::Ack { .. }
+                            | ReceiveReport::Ping { .. }
+                            | ReceiveReport::Pong { .. }
                             | ReceiveReport::Incomplete { .. }
-                    ) {
-                        eprintln!("host receive error: {report:?}");
-                    }
+                    );
                 }
             }
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(()),
@@ -306,71 +362,44 @@ fn recv_udp(socket: &UdpSocket, engine: &mut Engine, rx_buf: &mut [u8]) -> io::R
 }
 
 #[allow(clippy::too_many_arguments)]
-fn pump_engine(
+fn pump_endpoint(
     socket: &UdpSocket,
     peer: &SocketAddr,
-    engine: &mut Engine,
+    endpoint: &mut ClientEndpoint,
     now_ms: u64,
     link_connected: bool,
-    noise_percent: u8,
+    noise: NoiseConfig,
     noise_state: &mut NoiseLcg,
-    corrupted_packets: &mut usize,
+    noise_stats: &mut NoiseStats,
 ) -> io::Result<()> {
     loop {
         let mut tx_buf = [0; TX_BUF_BYTES];
-        match engine.poll(now_ms, &mut tx_buf).expect("engine poll") {
-            EnginePoll::Transmit { bytes, attempts } => {
+        match endpoint.poll(now_ms, &mut tx_buf).expect("endpoint poll") {
+            EndpointPoll::Transmit { bytes, attempts: _ } => {
                 if link_connected {
-                    let mut packet = bytes.to_vec();
-                    if noise_state.should_corrupt(noise_percent) {
-                        let pos = noise_state.next_byte() as usize % packet.len();
-                        packet[pos] ^= noise_state.next_byte() | 1;
-                        *corrupted_packets += 1;
-                    }
-                    if attempts > 0 {
-                        eprintln!("host retransmit attempt={attempts} len={}", packet.len());
-                    }
+                    let (packet, stats) = mutate_or_copy(noise_state, bytes, noise);
+                    add_stats(noise_stats, stats);
                     socket.send_to(&packet, peer)?;
                 }
             }
-            EnginePoll::Message(_) => {}
-            EnginePoll::SendFailed(failed) => {
-                eprintln!("host send_failed: {failed:?}");
-            }
-            EnginePoll::Idle => return Ok(()),
+            EndpointPoll::Message(_) => {}
+            EndpointPoll::SendFailed(_) => {}
+            EndpointPoll::Idle => return Ok(()),
         }
     }
 }
 
-struct NoiseLcg {
-    state: u32,
-    tx_count: usize,
-}
-
-impl NoiseLcg {
-    fn new() -> Self {
-        Self {
-            state: 0x4d535254,
-            tx_count: 0,
-        }
+fn log_state_change(prefix: &str, last: &mut PeerState, current: PeerState) {
+    if *last == current {
+        return;
     }
 
-    fn next_byte(&mut self) -> u8 {
-        self.state = self
-            .state
-            .wrapping_mul(1_664_525)
-            .wrapping_add(1_013_904_223);
-        (self.state >> 24) as u8
+    match current {
+        PeerState::Disconnected => println!("{prefix} disconnect"),
+        PeerState::Connecting => println!("{prefix} connect state=Connecting"),
+        PeerState::Connected => println!("{prefix} connect state=Connected"),
     }
-
-    fn should_corrupt(&mut self, noise_percent: u8) -> bool {
-        if noise_percent == 0 {
-            return false;
-        }
-        self.tx_count += 1;
-        let every = 100 / usize::from(noise_percent);
-        every != 0 && self.tx_count.is_multiple_of(every)
-    }
+    *last = current;
 }
 
 fn next_transmit(engine: &mut Engine, now_ms: u64) -> Vec<u8> {
@@ -380,11 +409,6 @@ fn next_transmit(engine: &mut Engine, now_ms: u64) -> Vec<u8> {
         EnginePoll::Transmit { bytes, .. } => bytes.to_vec(),
         other => panic!("expected transmit packet in chaos fixture, got {other:?}"),
     }
-}
-
-fn make_noise_bytes(len: usize) -> Vec<u8> {
-    let mut lcg = NoiseLcg::new();
-    (0..len).map(|_| lcg.next_byte()).collect()
 }
 
 fn make_message(len: usize) -> Vec<u8> {
@@ -410,12 +434,22 @@ fn process_session_id() -> u32 {
     millis as u32
 }
 
+fn test_config() -> EngineConfig {
+    let session_id = process_session_id();
+    EngineConfig {
+        initial_packet_number: msrt::core::PacketNumber::new(session_id),
+        initial_message_id: msrt::core::MessageId::new(session_id),
+        fragment_bytes: TEST_FRAGMENT_BYTES,
+        ..EngineConfig::default()
+    }
+}
+
 fn next_value(args: &mut impl Iterator<Item = String>, name: &str) -> Result<String, String> {
     args.next()
         .ok_or_else(|| format!("{name} requires a value\n\n{}", usage()))
 }
 
 fn usage() -> String {
-    "usage: msrt-udp-host [--bind ADDR] [--peer ADDR] [--interval-ms N] [--message TEXT] [--message-size N] [--count N] [--duration-sec N] [--noise-percent N] [--wire-chaos] [--drop-tx-ms N]"
+    "usage: msrt-udp-host [--bind ADDR] [--peer ADDR] [--interval-ms N] [--message TEXT] [--message-size N] [--count N] [--noise-percent N] [--drop-byte-percent N] [--insert-byte-percent N] [--wire-chaos] [--drop-tx-ms N]"
         .to_string()
 }

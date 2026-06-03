@@ -33,10 +33,11 @@ match engine.poll(now_ms, tx_buf)? {
 
 ## 分层
 
-MSRT 当前分成四个协议部分：
+MSRT 当前分成五个协议部分：
 
 - [core](core.md)：协议对象和协议语言。
 - [engine](engine.md)：协议状态机入口和状态推进。
+- [endpoint](endpoint.md)：连接生命周期、单 peer 和多 peer 会话管理。
 - [reliability](reliability.md)：ACK、去重、重传、可靠性策略。
 - [wire](wire.md)：字节流边界、校验和重同步。
 
@@ -54,6 +55,9 @@ reliability
 
 engine
   组合以上能力，对外表现为一个可轮询状态机
+
+endpoint
+  在 engine 之上管理连接生命周期和 peer -> Engine 映射
 ```
 
 ## 实现文档

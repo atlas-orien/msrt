@@ -89,9 +89,38 @@ impl PacketHeader {
         }
     }
 
+    /// Creates a PING packet header.
+    #[must_use]
+    pub const fn ping(packet_number: PacketNumber, message_id: MessageId) -> Self {
+        Self::liveness(PacketType::Ping, packet_number, message_id)
+    }
+
+    /// Creates a PONG packet header.
+    #[must_use]
+    pub const fn pong(packet_number: PacketNumber, message_id: MessageId) -> Self {
+        Self::liveness(PacketType::Pong, packet_number, message_id)
+    }
+
     /// Returns whether this packet should elicit an acknowledgement.
     #[must_use]
     pub const fn is_ack_eliciting(self) -> bool {
         self.flags.contains(Flags::ACK_ELICITING)
+    }
+
+    const fn liveness(
+        packet_type: PacketType,
+        packet_number: PacketNumber,
+        message_id: MessageId,
+    ) -> Self {
+        Self {
+            packet_type,
+            packet_number,
+            flags: Flags::EMPTY,
+            channel_id: ChannelId::LIVENESS,
+            message_id,
+            message_len: 0,
+            fragment_offset: 0,
+            fragment_flags: MessageFlags::EMPTY,
+        }
     }
 }

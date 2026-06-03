@@ -5,20 +5,36 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+mod support;
+
 use msrt::{
-    core::{MessageId, PacketNumber},
-    Engine,
-    engine::{EngineConfig, EnginePoll, ReceiveReport},
+    endpoint::{EndpointPoll, PassiveEndpoint, PeerState},
+    engine::{EngineConfig, ReceiveReport},
+};
+
+use support::noise::{
+    NoiseConfig, NoiseLcg, NoiseStats, add_stats, mutate_or_copy, validate_percent,
 };
 
 const TX_BUF_BYTES: usize = 256;
 const RX_BUF_BYTES: usize = 2048;
+const DEFAULT_STATS_INTERVAL: Duration = Duration::from_secs(5);
+const MAX_MESSAGE_BYTES: usize = 256;
+const DEFAULT_MESSAGE_BYTES: usize = 240;
+const TEST_FRAGMENT_BYTES: usize = 48;
+const DEFAULT_CORRUPT_PERCENT: u8 = 0;
+const DEFAULT_DROP_BYTE_PERCENT: u8 = 0;
+const DEFAULT_INSERT_BYTE_PERCENT: u8 = 0;
 
 #[derive(Clone, Debug)]
 struct Args {
     bind: SocketAddr,
     peer: SocketAddr,
+    interval: Duration,
+    message: Vec<u8>,
     count: Option<usize>,
+    duration: Option<Duration>,
+    noise: NoiseConfig,
 }
 
 impl Args {
@@ -27,7 +43,15 @@ impl Args {
         let mut parsed = Self {
             bind: "127.0.0.1:9002".parse().expect("valid default bind addr"),
             peer: "127.0.0.1:9001".parse().expect("valid default peer addr"),
+            interval: Duration::from_millis(10),
+            message: make_message(DEFAULT_MESSAGE_BYTES),
             count: None,
+            duration: None,
+            noise: NoiseConfig {
+                corrupt_percent: DEFAULT_CORRUPT_PERCENT,
+                drop_byte_percent: DEFAULT_DROP_BYTE_PERCENT,
+                insert_byte_percent: DEFAULT_INSERT_BYTE_PERCENT,
+            },
         };
 
         while let Some(arg) = args.next() {
@@ -42,6 +66,21 @@ impl Args {
                         .parse()
                         .map_err(|error| format!("invalid --peer address: {error}"))?;
                 }
+                "--interval-ms" => {
+                    let millis = next_value(&mut args, "--interval-ms")?
+                        .parse()
+                        .map_err(|error| format!("invalid --interval-ms: {error}"))?;
+                    parsed.interval = Duration::from_millis(millis);
+                }
+                "--message" => {
+                    parsed.message = next_value(&mut args, "--message")?.into_bytes();
+                }
+                "--message-size" => {
+                    let len = next_value(&mut args, "--message-size")?
+                        .parse()
+                        .map_err(|error| format!("invalid --message-size: {error}"))?;
+                    parsed.message = make_message(len);
+                }
                 "--count" => {
                     parsed.count = Some(
                         next_value(&mut args, "--count")?
@@ -49,9 +88,38 @@ impl Args {
                             .map_err(|error| format!("invalid --count: {error}"))?,
                     );
                 }
+                "--duration-sec" => {
+                    let secs = next_value(&mut args, "--duration-sec")?
+                        .parse()
+                        .map_err(|error| format!("invalid --duration-sec: {error}"))?;
+                    parsed.duration = Some(Duration::from_secs(secs));
+                }
+                "--noise-percent" => {
+                    parsed.noise.corrupt_percent = next_value(&mut args, "--noise-percent")?
+                        .parse()
+                        .map_err(|error| format!("invalid --noise-percent: {error}"))?;
+                    validate_percent(parsed.noise.corrupt_percent, "--noise-percent")?;
+                }
+                "--drop-byte-percent" => {
+                    parsed.noise.drop_byte_percent = next_value(&mut args, "--drop-byte-percent")?
+                        .parse()
+                        .map_err(|error| format!("invalid --drop-byte-percent: {error}"))?;
+                    validate_percent(parsed.noise.drop_byte_percent, "--drop-byte-percent")?;
+                }
+                "--insert-byte-percent" => {
+                    parsed.noise.insert_byte_percent =
+                        next_value(&mut args, "--insert-byte-percent")?
+                            .parse()
+                            .map_err(|error| format!("invalid --insert-byte-percent: {error}"))?;
+                    validate_percent(parsed.noise.insert_byte_percent, "--insert-byte-percent")?;
+                }
                 "--help" | "-h" => return Err(usage()),
                 other => return Err(format!("unknown argument: {other}\n\n{}", usage())),
             }
+        }
+
+        if parsed.message.len() > MAX_MESSAGE_BYTES {
+            return Err(format!("message length must be <= {MAX_MESSAGE_BYTES}"));
         }
 
         Ok(parsed)
@@ -69,51 +137,119 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let socket = UdpSocket::bind(args.bind)?;
     socket.set_nonblocking(true)?;
 
-    println!("msrt udp mcu bind={} peer={}", args.bind, args.peer);
+    println!(
+        "msrt udp mcu bind={} peer={} interval={:?} message_len={} noise={} drop_byte={} insert_byte={}",
+        args.bind,
+        args.peer,
+        args.interval,
+        args.message.len(),
+        args.noise.corrupt_percent,
+        args.noise.drop_byte_percent,
+        args.noise.insert_byte_percent
+    );
 
     let start = Instant::now();
-    let session_id = process_session_id();
-    let mut engine = Engine::new(EngineConfig {
-        initial_packet_number: PacketNumber::new(session_id),
-        initial_message_id: MessageId::new(session_id),
-        max_retransmit_attempts: u8::MAX,
-        ..EngineConfig::default()
-    });
+    let mut endpoint = PassiveEndpoint::new(test_config());
     let mut rx_buf = [0; RX_BUF_BYTES];
     let mut received_messages = 0;
+    let sent_messages = 0;
+    let mut noise_stats = NoiseStats::default();
+    let mut receive_done = false;
+    let mut last_stats = Instant::now();
+    let mut noise_state = NoiseLcg::new();
+    let mut last_state = endpoint.peer().state();
 
     loop {
         let now = elapsed_ms(start);
+        let apply_noise = endpoint.peer().is_connected();
 
-        recv_udp(&socket, &mut engine, &mut rx_buf)?;
-        received_messages += pump_engine(&socket, &args.peer, &mut engine, now)?;
+        recv_udp(&socket, &mut endpoint, now, &mut rx_buf)?;
+        let noise = if apply_noise {
+            args.noise
+        } else {
+            NoiseConfig::default()
+        };
+        received_messages += pump_endpoint(
+            &socket,
+            &args.peer,
+            &mut endpoint,
+            now,
+            noise,
+            &mut noise_state,
+            &mut noise_stats,
+        )?;
+        log_state_change("mcu", &mut last_state, endpoint.peer().state());
 
         if let Some(count) = args.count
-            && received_messages >= count
+            && sent_messages >= count
         {
-            println!("mcu completed {count} received message(s)");
+            println!(
+                "mcu completed {count} message(s), sent={} received={} corrupted={} dropped={} inserted={}",
+                sent_messages,
+                received_messages,
+                noise_stats.corrupted,
+                noise_stats.dropped,
+                noise_stats.inserted
+            );
             return Ok(());
+        }
+
+        if args
+            .duration
+            .is_some_and(|duration| start.elapsed() >= duration)
+        {
+            receive_done = true;
+        }
+
+        if receive_done {
+            println!(
+                "mcu completed duration test: sent={} received={} corrupted={} dropped={} inserted={}",
+                sent_messages,
+                received_messages,
+                noise_stats.corrupted,
+                noise_stats.dropped,
+                noise_stats.inserted
+            );
+            return Ok(());
+        }
+
+        if last_stats.elapsed() >= DEFAULT_STATS_INTERVAL {
+            println!(
+                "mcu stats elapsed={}s sent={} received={} corrupted={} dropped={} inserted={}",
+                start.elapsed().as_secs(),
+                sent_messages,
+                received_messages,
+                noise_stats.corrupted,
+                noise_stats.dropped,
+                noise_stats.inserted
+            );
+            last_stats = Instant::now();
         }
 
         thread::sleep(Duration::from_millis(5));
     }
 }
 
-fn recv_udp(socket: &UdpSocket, engine: &mut Engine, rx_buf: &mut [u8]) -> io::Result<()> {
+fn recv_udp(
+    socket: &UdpSocket,
+    endpoint: &mut PassiveEndpoint,
+    now_ms: u64,
+    rx_buf: &mut [u8],
+) -> io::Result<()> {
     loop {
         match socket.recv_from(rx_buf) {
             Ok((len, _from)) => {
                 for byte in &rx_buf[..len] {
-                    let report = engine.receive(std::slice::from_ref(byte));
-                    if !matches!(
+                    let report = endpoint.receive(now_ms, std::slice::from_ref(byte));
+                    let _ = matches!(
                         report,
                         ReceiveReport::Packet { .. }
                             | ReceiveReport::Duplicate { .. }
                             | ReceiveReport::Ack { .. }
+                            | ReceiveReport::Ping { .. }
+                            | ReceiveReport::Pong { .. }
                             | ReceiveReport::Incomplete { .. }
-                    ) {
-                        eprintln!("mcu receive error: {report:?}");
-                    }
+                    );
                 }
             }
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(()),
@@ -122,29 +258,45 @@ fn recv_udp(socket: &UdpSocket, engine: &mut Engine, rx_buf: &mut [u8]) -> io::R
     }
 }
 
-fn pump_engine(
+fn pump_endpoint(
     socket: &UdpSocket,
     peer: &SocketAddr,
-    engine: &mut Engine,
+    endpoint: &mut PassiveEndpoint,
     now_ms: u64,
+    noise: NoiseConfig,
+    noise_state: &mut NoiseLcg,
+    noise_stats: &mut NoiseStats,
 ) -> io::Result<usize> {
     let mut delivered = 0;
 
     loop {
         let mut tx_buf = [0; TX_BUF_BYTES];
-        match engine.poll(now_ms, &mut tx_buf).expect("engine poll") {
-            EnginePoll::Transmit { bytes, .. } => {
-                socket.send_to(bytes, peer)?;
+        match endpoint.poll(now_ms, &mut tx_buf).expect("endpoint poll") {
+            EndpointPoll::Transmit { bytes, .. } => {
+                let (packet, stats) = mutate_or_copy(noise_state, bytes, noise);
+                add_stats(noise_stats, stats);
+                socket.send_to(&packet, peer)?;
             }
-            EnginePoll::Message(_message) => {
+            EndpointPoll::Message(_message) => {
                 delivered += 1;
             }
-            EnginePoll::SendFailed(failed) => {
-                eprintln!("mcu send_failed: {failed:?}");
-            }
-            EnginePoll::Idle => return Ok(delivered),
+            EndpointPoll::SendFailed(_) => {}
+            EndpointPoll::Idle => return Ok(delivered),
         }
     }
+}
+
+fn log_state_change(prefix: &str, last: &mut PeerState, current: PeerState) {
+    if *last == current {
+        return;
+    }
+
+    match current {
+        PeerState::Disconnected => println!("{prefix} disconnect"),
+        PeerState::Connecting => println!("{prefix} connect state=Connecting"),
+        PeerState::Connected => println!("{prefix} connect state=Connected"),
+    }
+    *last = current;
 }
 
 fn elapsed_ms(start: Instant) -> u64 {
@@ -160,11 +312,32 @@ fn process_session_id() -> u32 {
     millis as u32
 }
 
+fn test_config() -> EngineConfig {
+    let session_id = process_session_id();
+    EngineConfig {
+        initial_packet_number: msrt::core::PacketNumber::new(session_id),
+        initial_message_id: msrt::core::MessageId::new(session_id),
+        fragment_bytes: TEST_FRAGMENT_BYTES,
+        ..EngineConfig::default()
+    }
+}
+
+fn make_message(len: usize) -> Vec<u8> {
+    let mut message = Vec::with_capacity(len);
+
+    for index in 0..len {
+        message.push(b'a' + (index % 26) as u8);
+    }
+
+    message
+}
+
 fn next_value(args: &mut impl Iterator<Item = String>, name: &str) -> Result<String, String> {
     args.next()
         .ok_or_else(|| format!("{name} requires a value\n\n{}", usage()))
 }
 
 fn usage() -> String {
-    "usage: msrt-udp-mcu [--bind ADDR] [--peer ADDR] [--count N]".to_string()
+    "usage: msrt-udp-mcu [--bind ADDR] [--peer ADDR] [--interval-ms N] [--message TEXT] [--message-size N] [--count N] [--duration-sec N] [--noise-percent N] [--drop-byte-percent N] [--insert-byte-percent N]"
+        .to_string()
 }

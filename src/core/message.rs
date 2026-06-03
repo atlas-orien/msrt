@@ -19,6 +19,8 @@ impl ChannelId {
     pub const DEFAULT: Self = Self(0);
     /// Log channel reserved for diagnostic output.
     pub const LOG: Self = Self(1);
+    /// Liveness channel reserved for automatic Ping/Pong packets.
+    pub const LIVENESS: Self = Self(2);
     /// First channel available for application-defined routing.
     pub const FIRST_APPLICATION_DEFINED: Self = Self(16);
 
@@ -44,6 +46,12 @@ impl ChannelId {
     #[must_use]
     pub const fn is_log(self) -> bool {
         self.0 == Self::LOG.0
+    }
+
+    /// Returns whether this is the liveness channel.
+    #[must_use]
+    pub const fn is_liveness(self) -> bool {
+        self.0 == Self::LIVENESS.0
     }
 
     /// Returns whether this channel is application-defined.

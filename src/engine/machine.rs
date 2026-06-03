@@ -94,6 +94,10 @@ impl Machine {
         self.send_on_impl(config, channel_id, message)
     }
 
+    pub(crate) fn send_ping(&mut self) -> Result<MessageId> {
+        self.send_ping_impl()
+    }
+
     pub(crate) fn receive(&mut self, config: &EngineConfig, bytes: &[u8]) -> ReceiveReport {
         self.receive_ingress(config, bytes)
     }

@@ -122,4 +122,86 @@ mod tests {
         client.receive(3, ack_bytes);
         assert_eq!(client.peer().state(), PeerState::Connected);
     }
+
+    #[test]
+    fn idle_connected_endpoint_sends_ping_and_accepts_pong() {
+        let mut client = ClientEndpoint::default();
+        let mut passive = crate::endpoint::PassiveEndpoint::default();
+        let mut client_tx = [0; 128];
+        let mut passive_tx = [0; 128];
+
+        client.connect(1).unwrap();
+        let EndpointPoll::Transmit { bytes, .. } = client.poll(1, &mut client_tx).unwrap() else {
+            panic!("client should transmit hello");
+        };
+        passive.receive(2, bytes);
+        let EndpointPoll::Transmit { bytes, .. } = passive.poll(2, &mut passive_tx).unwrap() else {
+            panic!("passive endpoint should transmit ack");
+        };
+        client.receive(3, bytes);
+
+        assert_eq!(client.peer().state(), PeerState::Connected);
+
+        let EndpointPoll::Transmit {
+            bytes: ping_bytes, ..
+        } = client.poll(5_004, &mut client_tx).unwrap()
+        else {
+            panic!("client should transmit ping after idle interval");
+        };
+
+        assert!(matches!(
+            passive.receive(1_005, ping_bytes),
+            crate::engine::ReceiveReport::Ping { .. }
+        ));
+
+        let pong_bytes = loop {
+            match passive.poll(5_005, &mut passive_tx).unwrap() {
+                EndpointPoll::Transmit { bytes, .. } => break bytes,
+                EndpointPoll::Message(_) => {}
+                other => panic!("passive endpoint should transmit pong, got {other:?}"),
+            }
+        };
+
+        assert!(matches!(
+            client.receive(5_006, pong_bytes),
+            crate::engine::ReceiveReport::Pong { .. }
+        ));
+        assert_eq!(client.peer().state(), PeerState::Connected);
+    }
+
+    #[test]
+    fn missing_pong_disconnects_endpoint_after_retry_limit() {
+        let mut client = ClientEndpoint::new(crate::engine::EngineConfig {
+            retransmit_timeout_ms: 10,
+            max_retransmit_attempts: 1,
+            ..crate::engine::EngineConfig::default()
+        });
+        let mut passive = crate::endpoint::PassiveEndpoint::default();
+        let mut client_tx = [0; 128];
+        let mut passive_tx = [0; 128];
+
+        client.connect(1).unwrap();
+        let EndpointPoll::Transmit { bytes, .. } = client.poll(1, &mut client_tx).unwrap() else {
+            panic!("client should transmit hello");
+        };
+        passive.receive(2, bytes);
+        let EndpointPoll::Transmit { bytes, .. } = passive.poll(2, &mut passive_tx).unwrap() else {
+            panic!("passive endpoint should transmit ack");
+        };
+        client.receive(3, bytes);
+
+        assert!(matches!(
+            client.poll(5_004, &mut client_tx).unwrap(),
+            EndpointPoll::Transmit { .. }
+        ));
+        assert!(matches!(
+            client.poll(5_014, &mut client_tx).unwrap(),
+            EndpointPoll::Transmit { .. }
+        ));
+        assert!(matches!(
+            client.poll(5_024, &mut client_tx).unwrap(),
+            EndpointPoll::SendFailed(_)
+        ));
+        assert_eq!(client.peer().state(), PeerState::Disconnected);
+    }
 }

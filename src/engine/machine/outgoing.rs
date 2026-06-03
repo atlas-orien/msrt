@@ -21,6 +21,7 @@ use crate::engine::{
 };
 
 const ACK_PACKET_LEN: usize = PACKET_HEADER_LEN + ACK_LEN;
+const LIVENESS_PACKET_LEN: usize = PACKET_HEADER_LEN;
 
 impl Machine {
     pub(super) fn send_on_impl(
@@ -44,6 +45,57 @@ impl Machine {
         let packet_number = self.next_packet_number;
         let mut wire = [0; MAX_WIRE_BYTES];
         let written = encode_ack_packet(packet_number, ack, &mut wire, &Crc16)?;
+
+        self.events.push(EngineOutput::Write(WriteEvent {
+            packet_number,
+            bytes: wire,
+            len: written,
+            attempts: 0,
+        }))?;
+        self.next_packet_number = self.next_packet_number.next();
+
+        Ok(())
+    }
+
+    pub(super) fn send_ping_impl(&mut self) -> Result<MessageId> {
+        let message_id = self.next_message_id;
+        let packet_number = self.next_packet_number;
+        let mut wire = [0; MAX_WIRE_BYTES];
+        let written = encode_liveness_packet(
+            PacketHeader::ping(packet_number, message_id),
+            &mut wire,
+            &Crc16,
+        )?;
+
+        self.events.push(EngineOutput::Write(WriteEvent {
+            packet_number,
+            bytes: wire,
+            len: written,
+            attempts: 0,
+        }))?;
+        self.in_flight.track(InFlightPacket {
+            packet_number,
+            channel_id: ChannelId::LIVENESS,
+            message_id,
+            bytes: wire,
+            len: written,
+            attempts: 0,
+            last_sent_ms: self.now_ms,
+        })?;
+        self.next_packet_number = self.next_packet_number.next();
+        self.next_message_id = MessageId::new(self.next_message_id.get().wrapping_add(1));
+
+        Ok(message_id)
+    }
+
+    pub(super) fn queue_pong(&mut self, message_id: MessageId) -> Result<()> {
+        let packet_number = self.next_packet_number;
+        let mut wire = [0; MAX_WIRE_BYTES];
+        let written = encode_liveness_packet(
+            PacketHeader::pong(packet_number, message_id),
+            &mut wire,
+            &Crc16,
+        )?;
 
         self.events.push(EngineOutput::Write(WriteEvent {
             packet_number,
@@ -200,6 +252,39 @@ fn encode_ack_packet(
         offset += 8;
         index += 1;
     }
+
+    let checksum_value = checksum.calculate(&out[..total_len - CHECKSUM_LEN]);
+    out[total_len - CHECKSUM_LEN..total_len].copy_from_slice(&checksum_value.to_le_bytes());
+
+    Ok(total_len)
+}
+
+fn encode_liveness_packet(
+    header: PacketHeader,
+    out: &mut [u8],
+    checksum: &impl Checksum,
+) -> Result<usize> {
+    let packet_len =
+        u8::try_from(LIVENESS_PACKET_LEN).map_err(|_| Error::new(ErrorKind::Engine))?;
+    let envelope_header = EnvelopeHeader::new(packet_len);
+    let total_len = envelope_header.total_len();
+
+    if out.len() < total_len {
+        return Err(Error::buffer_too_small());
+    }
+
+    out[..WIRE_MAGIC_LEN].copy_from_slice(&EnvelopeMagic::MSRT.bytes());
+    out[WIRE_PACKET_LEN_OFFSET] = envelope_header.packet_len;
+    out[WIRE_HEADER_CRC_OFFSET] = envelope_header.header_crc;
+    let packet = &mut out[WIRE_HEADER_LEN..];
+    packet[0] = header.packet_type.code();
+    packet[1] = header.flags.bits();
+    packet[2..6].copy_from_slice(&header.packet_number.get().to_le_bytes());
+    packet[6] = header.channel_id.get();
+    packet[7..11].copy_from_slice(&header.message_id.get().to_le_bytes());
+    packet[11..13].copy_from_slice(&(header.message_len as u16).to_le_bytes());
+    packet[13..15].copy_from_slice(&(header.fragment_offset as u16).to_le_bytes());
+    packet[15] = header.fragment_flags.bits();
 
     let checksum_value = checksum.calculate(&out[..total_len - CHECKSUM_LEN]);
     out[total_len - CHECKSUM_LEN..total_len].copy_from_slice(&checksum_value.to_le_bytes());

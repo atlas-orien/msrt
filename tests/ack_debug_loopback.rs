@@ -127,7 +127,10 @@ fn poll_copies_transmit_bytes_into_external_buffer() {
 fn deliver_next_write(src: &mut Engine, dst: &mut Engine) {
     let write = next_write(src);
     match dst.receive(write.as_bytes()) {
-        ReceiveReport::Packet { .. } | ReceiveReport::Ack { .. } => {}
+        ReceiveReport::Packet { .. }
+        | ReceiveReport::Ack { .. }
+        | ReceiveReport::Ping { .. }
+        | ReceiveReport::Pong { .. } => {}
         other => panic!("unexpected receive report: {other:?}"),
     }
 }

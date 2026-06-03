@@ -266,7 +266,9 @@ fn receive_ok(dst: &mut Engine, bytes: &[u8]) {
     match dst.receive(bytes) {
         ReceiveReport::Packet { .. }
         | ReceiveReport::Duplicate { .. }
-        | ReceiveReport::Ack { .. } => {}
+        | ReceiveReport::Ack { .. }
+        | ReceiveReport::Ping { .. }
+        | ReceiveReport::Pong { .. } => {}
         other => panic!("unexpected receive report in simulation: {other:?}"),
     }
 }

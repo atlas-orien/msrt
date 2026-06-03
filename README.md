@@ -34,6 +34,7 @@ Internal protocol boundaries live as modules:
 - `error`: shared protocol error types.
 - `reliability`: reliability traits and modules.
 - `engine`: protocol engine boundary for send, receive, response, and progress.
+- `endpoint`: connection lifecycle helpers for client, passive single-peer, and multi-peer server use.
 - `wire`: wire envelope boundaries for byte stream transport.
 
 No MCU HAL, async executor, serial driver, operating-system adapter, simulator, CLI implementation, or separate channel/frame crate is included at this stage.

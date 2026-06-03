@@ -7,6 +7,10 @@ pub enum PacketType {
     Data,
     /// Packet carrying an ACK payload.
     Ack,
+    /// Packet asking the peer to prove liveness.
+    Ping,
+    /// Packet proving liveness in response to a PING.
+    Pong,
 }
 
 impl PacketType {
@@ -14,6 +18,10 @@ impl PacketType {
     pub const DATA_CODE: u8 = 0x00;
     /// Encoded ACK packet type.
     pub const ACK_CODE: u8 = 0x01;
+    /// Encoded PING packet type.
+    pub const PING_CODE: u8 = 0x02;
+    /// Encoded PONG packet type.
+    pub const PONG_CODE: u8 = 0x03;
 
     /// Returns the encoded packet type.
     #[must_use]
@@ -21,6 +29,8 @@ impl PacketType {
         match self {
             Self::Data => Self::DATA_CODE,
             Self::Ack => Self::ACK_CODE,
+            Self::Ping => Self::PING_CODE,
+            Self::Pong => Self::PONG_CODE,
         }
     }
 
@@ -30,6 +40,8 @@ impl PacketType {
         match code {
             Self::DATA_CODE => Some(Self::Data),
             Self::ACK_CODE => Some(Self::Ack),
+            Self::PING_CODE => Some(Self::Ping),
+            Self::PONG_CODE => Some(Self::Pong),
             _ => None,
         }
     }

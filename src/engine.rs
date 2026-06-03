@@ -52,6 +52,14 @@ impl Engine {
         self.machine.send_on(&self.config, channel_id, message)
     }
 
+    /// Queues a liveness ping packet.
+    ///
+    /// This packet is handled by the protocol and is never delivered as an
+    /// application message.
+    pub fn send_ping(&mut self) -> Result<MessageId> {
+        self.machine.send_ping()
+    }
+
     /// Feeds already-arrived wire bytes into the engine.
     ///
     /// This method never waits for more bytes. It handles the current input and
@@ -144,6 +152,20 @@ pub enum ReceiveReport {
     Ack {
         /// Packet number acknowledged by the peer.
         packet_number: PacketNumber,
+    },
+    /// A PING packet was accepted and a PONG was queued.
+    Ping {
+        /// Packet number decoded from the PING packet.
+        packet_number: PacketNumber,
+        /// Liveness message id carried by the PING packet.
+        message_id: MessageId,
+    },
+    /// A PONG packet was accepted.
+    Pong {
+        /// Packet number decoded from the PONG packet.
+        packet_number: PacketNumber,
+        /// Liveness message id carried by the PONG packet.
+        message_id: MessageId,
     },
     /// The input did not contain a valid magic prefix at offset zero.
     Noise {

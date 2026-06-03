@@ -255,7 +255,9 @@ fn receive_ok(engine: &mut Engine, bytes: &[u8]) {
     match engine.receive(bytes) {
         ReceiveReport::Packet { .. }
         | ReceiveReport::Duplicate { .. }
-        | ReceiveReport::Ack { .. } => {}
+        | ReceiveReport::Ack { .. }
+        | ReceiveReport::Ping { .. }
+        | ReceiveReport::Pong { .. } => {}
         other => panic!("unexpected receive report in benchmark fixture: {other:?}"),
     }
 }
