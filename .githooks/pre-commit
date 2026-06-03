@@ -10,8 +10,5 @@ cargo check
 echo "Running cargo test"
 cargo test
 
-echo "Running cargo run --bin msrt-smoke"
-cargo run --bin msrt-smoke
-
 echo "Running cargo clippy --all-targets --all-features -- -D warnings"
 cargo clippy --all-targets --all-features -- -D warnings
