@@ -14,20 +14,20 @@ use msrt::{
 };
 
 use support::noise::{
-    NoiseConfig, NoiseLcg, NoiseStats, add_stats, make_noise_bytes, mutate_or_copy,
-    validate_percent,
+    NoiseConfig, NoiseLcg, NoiseStats, add_stats, format_percent, make_noise_bytes, mutate_or_copy,
+    parse_percent_per_mille,
 };
 
 const TX_BUF_BYTES: usize = 256;
 const RX_BUF_BYTES: usize = 2048;
 const CHAOS_NOISE_CHUNK_BYTES: usize = 512;
-const DEFAULT_STATS_INTERVAL: Duration = Duration::from_secs(5);
+const DEFAULT_STATS_INTERVAL: Duration = Duration::from_secs(600);
 const MAX_MESSAGE_BYTES: usize = 256;
 const DEFAULT_MESSAGE_BYTES: usize = 240;
 const TEST_FRAGMENT_BYTES: usize = 48;
-const DEFAULT_CORRUPT_PERCENT: u8 = 1;
-const DEFAULT_DROP_BYTE_PERCENT: u8 = 1;
-const DEFAULT_INSERT_BYTE_PERCENT: u8 = 1;
+const DEFAULT_CORRUPT_PER_MILLE: u16 = 5;
+const DEFAULT_DROP_BYTE_PER_MILLE: u16 = 5;
+const DEFAULT_INSERT_BYTE_PER_MILLE: u16 = 5;
 
 #[derive(Clone, Debug)]
 struct Args {
@@ -53,9 +53,9 @@ impl Args {
             wire_chaos: false,
             drop_tx: Duration::ZERO,
             noise: NoiseConfig {
-                corrupt_percent: DEFAULT_CORRUPT_PERCENT,
-                drop_byte_percent: DEFAULT_DROP_BYTE_PERCENT,
-                insert_byte_percent: DEFAULT_INSERT_BYTE_PERCENT,
+                corrupt_per_mille: DEFAULT_CORRUPT_PER_MILLE,
+                drop_byte_per_mille: DEFAULT_DROP_BYTE_PER_MILLE,
+                insert_byte_per_mille: DEFAULT_INSERT_BYTE_PER_MILLE,
             },
         };
 
@@ -103,23 +103,22 @@ impl Args {
                     parsed.drop_tx = Duration::from_millis(millis);
                 }
                 "--noise-percent" => {
-                    parsed.noise.corrupt_percent = next_value(&mut args, "--noise-percent")?
-                        .parse()
-                        .map_err(|error| format!("invalid --noise-percent: {error}"))?;
-                    validate_percent(parsed.noise.corrupt_percent, "--noise-percent")?;
+                    parsed.noise.corrupt_per_mille = parse_percent_per_mille(
+                        next_value(&mut args, "--noise-percent")?,
+                        "--noise-percent",
+                    )?;
                 }
                 "--drop-byte-percent" => {
-                    parsed.noise.drop_byte_percent = next_value(&mut args, "--drop-byte-percent")?
-                        .parse()
-                        .map_err(|error| format!("invalid --drop-byte-percent: {error}"))?;
-                    validate_percent(parsed.noise.drop_byte_percent, "--drop-byte-percent")?;
+                    parsed.noise.drop_byte_per_mille = parse_percent_per_mille(
+                        next_value(&mut args, "--drop-byte-percent")?,
+                        "--drop-byte-percent",
+                    )?;
                 }
                 "--insert-byte-percent" => {
-                    parsed.noise.insert_byte_percent =
-                        next_value(&mut args, "--insert-byte-percent")?
-                            .parse()
-                            .map_err(|error| format!("invalid --insert-byte-percent: {error}"))?;
-                    validate_percent(parsed.noise.insert_byte_percent, "--insert-byte-percent")?;
+                    parsed.noise.insert_byte_per_mille = parse_percent_per_mille(
+                        next_value(&mut args, "--insert-byte-percent")?,
+                        "--insert-byte-percent",
+                    )?;
                 }
                 "--help" | "-h" => return Err(usage()),
                 other => return Err(format!("unknown argument: {other}\n\n{}", usage())),
@@ -155,9 +154,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.peer,
         args.interval,
         args.message.len(),
-        args.noise.corrupt_percent,
-        args.noise.drop_byte_percent,
-        args.noise.insert_byte_percent,
+        format_percent(args.noise.corrupt_per_mille),
+        format_percent(args.noise.drop_byte_per_mille),
+        format_percent(args.noise.insert_byte_per_mille),
     );
 
     let start = Instant::now();

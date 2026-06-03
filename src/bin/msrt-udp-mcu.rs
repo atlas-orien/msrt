@@ -13,18 +13,19 @@ use msrt::{
 };
 
 use support::noise::{
-    NoiseConfig, NoiseLcg, NoiseStats, add_stats, mutate_or_copy, validate_percent,
+    NoiseConfig, NoiseLcg, NoiseStats, add_stats, format_percent, mutate_or_copy,
+    parse_percent_per_mille,
 };
 
 const TX_BUF_BYTES: usize = 256;
 const RX_BUF_BYTES: usize = 2048;
-const DEFAULT_STATS_INTERVAL: Duration = Duration::from_secs(5);
+const DEFAULT_STATS_INTERVAL: Duration = Duration::from_secs(600);
 const MAX_MESSAGE_BYTES: usize = 256;
 const DEFAULT_MESSAGE_BYTES: usize = 240;
 const TEST_FRAGMENT_BYTES: usize = 48;
-const DEFAULT_CORRUPT_PERCENT: u8 = 0;
-const DEFAULT_DROP_BYTE_PERCENT: u8 = 0;
-const DEFAULT_INSERT_BYTE_PERCENT: u8 = 0;
+const DEFAULT_CORRUPT_PER_MILLE: u16 = 5;
+const DEFAULT_DROP_BYTE_PER_MILLE: u16 = 5;
+const DEFAULT_INSERT_BYTE_PER_MILLE: u16 = 5;
 
 #[derive(Clone, Debug)]
 struct Args {
@@ -48,9 +49,9 @@ impl Args {
             count: None,
             duration: None,
             noise: NoiseConfig {
-                corrupt_percent: DEFAULT_CORRUPT_PERCENT,
-                drop_byte_percent: DEFAULT_DROP_BYTE_PERCENT,
-                insert_byte_percent: DEFAULT_INSERT_BYTE_PERCENT,
+                corrupt_per_mille: DEFAULT_CORRUPT_PER_MILLE,
+                drop_byte_per_mille: DEFAULT_DROP_BYTE_PER_MILLE,
+                insert_byte_per_mille: DEFAULT_INSERT_BYTE_PER_MILLE,
             },
         };
 
@@ -95,23 +96,22 @@ impl Args {
                     parsed.duration = Some(Duration::from_secs(secs));
                 }
                 "--noise-percent" => {
-                    parsed.noise.corrupt_percent = next_value(&mut args, "--noise-percent")?
-                        .parse()
-                        .map_err(|error| format!("invalid --noise-percent: {error}"))?;
-                    validate_percent(parsed.noise.corrupt_percent, "--noise-percent")?;
+                    parsed.noise.corrupt_per_mille = parse_percent_per_mille(
+                        next_value(&mut args, "--noise-percent")?,
+                        "--noise-percent",
+                    )?;
                 }
                 "--drop-byte-percent" => {
-                    parsed.noise.drop_byte_percent = next_value(&mut args, "--drop-byte-percent")?
-                        .parse()
-                        .map_err(|error| format!("invalid --drop-byte-percent: {error}"))?;
-                    validate_percent(parsed.noise.drop_byte_percent, "--drop-byte-percent")?;
+                    parsed.noise.drop_byte_per_mille = parse_percent_per_mille(
+                        next_value(&mut args, "--drop-byte-percent")?,
+                        "--drop-byte-percent",
+                    )?;
                 }
                 "--insert-byte-percent" => {
-                    parsed.noise.insert_byte_percent =
-                        next_value(&mut args, "--insert-byte-percent")?
-                            .parse()
-                            .map_err(|error| format!("invalid --insert-byte-percent: {error}"))?;
-                    validate_percent(parsed.noise.insert_byte_percent, "--insert-byte-percent")?;
+                    parsed.noise.insert_byte_per_mille = parse_percent_per_mille(
+                        next_value(&mut args, "--insert-byte-percent")?,
+                        "--insert-byte-percent",
+                    )?;
                 }
                 "--help" | "-h" => return Err(usage()),
                 other => return Err(format!("unknown argument: {other}\n\n{}", usage())),
@@ -143,18 +143,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.peer,
         args.interval,
         args.message.len(),
-        args.noise.corrupt_percent,
-        args.noise.drop_byte_percent,
-        args.noise.insert_byte_percent
+        format_percent(args.noise.corrupt_per_mille),
+        format_percent(args.noise.drop_byte_per_mille),
+        format_percent(args.noise.insert_byte_per_mille)
     );
 
     let start = Instant::now();
     let mut endpoint = PassiveEndpoint::new(test_config());
     let mut rx_buf = [0; RX_BUF_BYTES];
     let mut received_messages = 0;
-    let sent_messages = 0;
+    let mut sent_messages = 0;
     let mut noise_stats = NoiseStats::default();
     let mut receive_done = false;
+    let mut last_send = Instant::now() - args.interval;
     let mut last_stats = Instant::now();
     let mut noise_state = NoiseLcg::new();
     let mut last_state = endpoint.peer().state();
@@ -162,6 +163,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         let now = elapsed_ms(start);
         let apply_noise = endpoint.peer().is_connected();
+
+        if endpoint.peer().is_connected() && should_send(&args, sent_messages, last_send, start) {
+            match endpoint.send(&args.message) {
+                Ok(Some(_)) => {
+                    sent_messages += 1;
+                    last_send = Instant::now();
+                }
+                Ok(None) => {}
+                Err(_) => {}
+            }
+        }
 
         recv_udp(&socket, &mut endpoint, now, &mut rx_buf)?;
         let noise = if apply_noise {
@@ -256,6 +268,21 @@ fn recv_udp(
             Err(error) => return Err(error),
         }
     }
+}
+
+fn should_send(args: &Args, sent_messages: usize, last_send: Instant, start: Instant) -> bool {
+    if args.count.is_some_and(|count| sent_messages >= count) {
+        return false;
+    }
+
+    if args
+        .duration
+        .is_some_and(|duration| start.elapsed() >= duration)
+    {
+        return false;
+    }
+
+    last_send.elapsed() >= args.interval
 }
 
 fn pump_endpoint(

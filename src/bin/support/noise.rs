@@ -5,9 +5,9 @@ pub(crate) struct NoiseLcg {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct NoiseConfig {
-    pub(crate) corrupt_percent: u8,
-    pub(crate) drop_byte_percent: u8,
-    pub(crate) insert_byte_percent: u8,
+    pub(crate) corrupt_per_mille: u16,
+    pub(crate) drop_byte_per_mille: u16,
+    pub(crate) insert_byte_per_mille: u16,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -28,6 +28,10 @@ impl NoiseLcg {
             .wrapping_mul(1_664_525)
             .wrapping_add(1_013_904_223);
         (self.state >> 24) as u8
+    }
+
+    fn next_u16(&mut self) -> u16 {
+        u16::from(self.next_byte()) << 8 | u16::from(self.next_byte())
     }
 
     pub(crate) fn mutate_bytes(
@@ -65,10 +69,10 @@ impl NoiseLcg {
     }
 
     fn choose_action(&mut self, config: NoiseConfig) -> NoiseAction {
-        let roll = self.next_byte() % 100;
-        let corrupt_end = config.corrupt_percent;
-        let drop_end = corrupt_end.saturating_add(config.drop_byte_percent);
-        let insert_end = drop_end.saturating_add(config.insert_byte_percent);
+        let roll = self.next_u16() % 1000;
+        let corrupt_end = config.corrupt_per_mille;
+        let drop_end = corrupt_end.saturating_add(config.drop_byte_per_mille);
+        let insert_end = drop_end.saturating_add(config.insert_byte_per_mille);
 
         if roll < corrupt_end {
             NoiseAction::Corrupt
@@ -90,12 +94,24 @@ enum NoiseAction {
     Insert,
 }
 
-pub(crate) fn validate_percent(percent: u8, name: &str) -> Result<(), String> {
-    if percent > 100 {
-        return Err(format!("{name} must be <= 100"));
+pub(crate) fn parse_percent_per_mille(value: String, name: &str) -> Result<u16, String> {
+    let percent = value
+        .parse::<f64>()
+        .map_err(|error| format!("invalid {name}: {error}"))?;
+
+    if !(0.0..=100.0).contains(&percent) {
+        return Err(format!("{name} must be between 0 and 100"));
     }
 
-    Ok(())
+    Ok((percent * 10.0).round() as u16)
+}
+
+pub(crate) fn format_percent(per_mille: u16) -> String {
+    if per_mille.is_multiple_of(10) {
+        (per_mille / 10).to_string()
+    } else {
+        format!("{}.{:01}", per_mille / 10, per_mille % 10)
+    }
 }
 
 pub(crate) fn add_stats(total: &mut NoiseStats, delta: NoiseStats) {
@@ -105,7 +121,9 @@ pub(crate) fn add_stats(total: &mut NoiseStats, delta: NoiseStats) {
 }
 
 pub(crate) fn has_noise(config: NoiseConfig) -> bool {
-    config.corrupt_percent != 0 || config.drop_byte_percent != 0 || config.insert_byte_percent != 0
+    config.corrupt_per_mille != 0
+        || config.drop_byte_per_mille != 0
+        || config.insert_byte_per_mille != 0
 }
 
 #[allow(dead_code)]
