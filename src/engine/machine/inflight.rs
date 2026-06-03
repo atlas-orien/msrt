@@ -2,7 +2,7 @@
 
 use crate::core::{AckFrame, ChannelId, Error, ErrorKind, MessageId, PacketNumber, Result};
 
-use crate::engine::{MAX_IN_FLIGHT_PACKETS, MAX_WIRE_BYTES};
+use crate::engine::config::{MAX_IN_FLIGHT_PACKETS, MAX_WIRE_BYTES};
 
 /// Encoded packet waiting for acknowledgement.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

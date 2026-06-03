@@ -3,7 +3,9 @@
 use crate::core::{ChannelId, Error, ErrorKind, MessageFlags, MessageId, Result};
 
 use crate::engine::{
-    MAX_MESSAGE_BYTES, MAX_REASSEMBLY_MESSAGES, MessageEvent, machine::packet::DecodedFragment,
+    MessageEvent,
+    config::{MAX_MESSAGE_BYTES, MAX_REASSEMBLY_MESSAGES},
+    machine::packet::DecodedFragment,
 };
 
 /// Fixed-capacity message reassembly table.
@@ -135,7 +137,7 @@ impl ReassemblySlot {
         if self.is_complete() {
             let message = MessageEvent {
                 channel_id: self.key.channel_id,
-                profile: crate::ChannelProfile::default_for(self.key.channel_id),
+                profile: crate::engine::ChannelProfile::default_for(self.key.channel_id),
                 message_id: self.key.message_id,
                 bytes: self.bytes,
                 len: self.expected_len,

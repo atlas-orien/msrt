@@ -1,11 +1,14 @@
 //! Integration tests for the no_std MSRT protocol facade.
 
+const TX_BUF_BYTES: usize = 128;
+
 use msrt::{
-    Config, Engine, Poll,
+    Engine,
     core::{
         ChannelId, Flags, MessageFlags, MessageFrame, MessageId, Packet, PacketHeader,
         PacketNumber, PacketType,
     },
+    engine::EnginePoll,
     reliability::{
         ChannelReliability, FragmentRange, MessageFragment, MessageKey, ReliabilityMode,
     },
@@ -55,13 +58,13 @@ fn facade_exposes_reliability_fragment_view() {
 
 #[test]
 fn facade_exposes_concrete_engine_api() {
-    let mut engine = Engine::new(Config::default());
-    let mut tx_buf = [0; msrt::MAX_WIRE_BYTES];
+    let mut engine = Engine::default();
+    let mut tx_buf = [0; TX_BUF_BYTES];
     let message_id = engine.send(b"hello").unwrap();
 
     assert_eq!(message_id, MessageId::ZERO);
 
-    let Poll::Transmit(bytes) = engine.poll(&mut tx_buf).unwrap() else {
+    let EnginePoll::Transmit(bytes) = engine.poll(0, &mut tx_buf).unwrap() else {
         panic!("engine should produce transmit bytes");
     };
 

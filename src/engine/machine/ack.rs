@@ -2,7 +2,7 @@
 
 use crate::core::{AckFrame, AckRange, MAX_ACK_RANGES, PacketNumber};
 
-use crate::engine::MAX_ACK_TRACKED_PACKETS;
+use crate::engine::config::MAX_ACK_TRACKED_PACKETS;
 
 /// Fixed-capacity observed packet set used to build ACK ranges.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -140,7 +140,7 @@ fn ranges_from_sorted_numbers(
 mod tests {
     use super::AckRanges;
     use crate::core::PacketNumber;
-    use crate::engine::MAX_ACK_TRACKED_PACKETS;
+    use crate::engine::config::MAX_ACK_TRACKED_PACKETS;
 
     #[test]
     fn ack_ranges_evict_oldest_packet_when_full() {

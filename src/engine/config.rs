@@ -4,39 +4,39 @@ use crate::core::{ChannelId, MessageId, PacketNumber};
 use crate::reliability::{ChannelReliability, ReliabilityMode};
 
 /// Maximum encoded wire bytes held by one MVP engine event.
-pub const MAX_WIRE_BYTES: usize = 128;
+pub(crate) const MAX_WIRE_BYTES: usize = 128;
 /// Maximum ingress bytes buffered by the engine streaming decoder.
-pub const MAX_INGRESS_BYTES: usize = MAX_WIRE_BYTES * MAX_EVENTS;
+pub(crate) const MAX_INGRESS_BYTES: usize = MAX_WIRE_BYTES * MAX_EVENTS;
 /// Maximum complete message bytes held by the MVP engine.
-pub const MAX_MESSAGE_BYTES: usize = 256;
+pub(crate) const MAX_MESSAGE_BYTES: usize = 256;
 /// Maximum pending engine events.
-pub const MAX_EVENTS: usize = 16;
+pub(crate) const MAX_EVENTS: usize = 16;
 /// Maximum in-flight packets tracked by the MVP engine.
-pub const MAX_IN_FLIGHT_PACKETS: usize = 16;
+pub(crate) const MAX_IN_FLIGHT_PACKETS: usize = 16;
 /// Maximum observed packets retained for ACK range generation.
-pub const MAX_ACK_TRACKED_PACKETS: usize = 16;
+pub(crate) const MAX_ACK_TRACKED_PACKETS: usize = 16;
 /// Maximum incomplete messages tracked by the reassembly table.
-pub const MAX_REASSEMBLY_MESSAGES: usize = 4;
+pub(crate) const MAX_REASSEMBLY_MESSAGES: usize = 4;
 /// Maximum channel reliability policies configured in the engine.
-pub const MAX_CHANNEL_POLICIES: usize = 4;
+pub(crate) const MAX_CHANNEL_POLICIES: usize = 4;
 /// Maximum channel specs configured in the engine.
-pub const MAX_CHANNEL_SPECS: usize = 4;
+pub(crate) const MAX_CHANNEL_SPECS: usize = 4;
 /// Default maximum message fragment bytes per packet.
-pub const DEFAULT_FRAGMENT_BYTES: usize = 32;
+pub(crate) const DEFAULT_FRAGMENT_BYTES: usize = 32;
 /// Default maximum retransmission attempts before a send fails.
 ///
 /// This gives a reliable packet one initial send plus five retransmission
 /// opportunities. With the default 250 ms timeout, a missing ACK is reported
 /// after roughly 1.5 s, which is conservative for UART-like MCU links without
 /// hiding disconnects for too long.
-pub const DEFAULT_MAX_RETRANSMIT_ATTEMPTS: u8 = 5;
+pub(crate) const DEFAULT_MAX_RETRANSMIT_ATTEMPTS: u8 = 5;
 /// Default retransmission timeout in engine ticks.
-pub const DEFAULT_RETRANSMIT_TIMEOUT_MS: u64 = 250;
+pub(crate) const DEFAULT_RETRANSMIT_TIMEOUT_MS: u64 = 250;
 /// Default incomplete message reassembly timeout in engine ticks.
 ///
 /// This must outlive the default reliable-send retry window so late
 /// retransmitted fragments can still complete an in-progress message.
-pub const DEFAULT_REASSEMBLY_TIMEOUT_MS: u64 = 2_000;
+pub(crate) const DEFAULT_REASSEMBLY_TIMEOUT_MS: u64 = 2_000;
 
 /// Protocol-level purpose associated with a channel.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -114,9 +114,9 @@ pub struct EngineConfig {
     /// Ticks after which incomplete reassembly slots are released.
     pub reassembly_timeout_ms: u64,
     /// Optional per-channel protocol specs.
-    pub channel_specs: [Option<ChannelSpec>; MAX_CHANNEL_SPECS],
+    pub channel_specs: [Option<ChannelSpec>; 4],
     /// Optional per-channel reliability policies.
-    pub channel_policies: [Option<ChannelReliability>; MAX_CHANNEL_POLICIES],
+    pub channel_policies: [Option<ChannelReliability>; 4],
 }
 
 impl Default for EngineConfig {

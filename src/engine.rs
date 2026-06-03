@@ -1,26 +1,10 @@
 #![doc = "Protocol engine boundaries for MSRT."]
 
-pub mod config;
-pub mod event;
+pub(crate) mod config;
 pub(crate) mod layout;
-pub mod link;
 pub(crate) mod machine;
-pub mod message;
-pub mod scheduler;
-pub mod time;
 
-pub use config::{
-    ChannelProfile, ChannelSpec, DEFAULT_FRAGMENT_BYTES, DEFAULT_MAX_RETRANSMIT_ATTEMPTS,
-    DEFAULT_REASSEMBLY_TIMEOUT_MS, DEFAULT_RETRANSMIT_TIMEOUT_MS, EngineConfig,
-    MAX_ACK_TRACKED_PACKETS, MAX_CHANNEL_POLICIES, MAX_CHANNEL_SPECS, MAX_EVENTS,
-    MAX_IN_FLIGHT_PACKETS, MAX_INGRESS_BYTES, MAX_MESSAGE_BYTES, MAX_REASSEMBLY_MESSAGES,
-    MAX_WIRE_BYTES,
-};
-pub use event::{EngineEvent, EngineEventKind};
-pub use link::{LinkIo, LinkRead, LinkWrite, RawLink};
-pub use message::{DeliveredMessage, MessageDelivery, Reassembly};
-pub use scheduler::{Schedule, Scheduler};
-pub use time::{Duration, Instant};
+pub use config::{ChannelProfile, ChannelSpec, EngineConfig};
 
 use crate::core::{ChannelId, Error, MessageId, PacketNumber, Result};
 use machine::Machine;
@@ -46,33 +30,12 @@ impl Engine {
         }
     }
 
-    /// Polls one queued engine output event.
-    #[cfg(test)]
-    pub(crate) fn poll_event(&mut self) -> Option<EngineOutput> {
-        self.machine.events.pop()
-    }
-
     /// Polls one high-level engine action.
     ///
     /// Write events are copied into `tx_buf` and returned as a borrowed byte
     /// slice so callers can pass the buffer directly to their link layer.
-    pub fn poll<'a>(&mut self, tx_buf: &'a mut [u8]) -> Result<EnginePoll<'a>> {
-        let Some(event) = self.machine.events.pop() else {
-            return Ok(EnginePoll::Idle);
-        };
-
-        match event {
-            EngineOutput::Write(write) => {
-                if tx_buf.len() < write.len {
-                    return Err(Error::buffer_too_small());
-                }
-
-                tx_buf[..write.len].copy_from_slice(write.as_bytes());
-                Ok(EnginePoll::Transmit(&tx_buf[..write.len]))
-            }
-            EngineOutput::Message(message) => Ok(EnginePoll::Message(message)),
-            EngineOutput::SendFailed(failed) => Ok(EnginePoll::SendFailed(failed)),
-        }
+    pub fn poll<'a>(&mut self, now_ms: u64, tx_buf: &'a mut [u8]) -> Result<EnginePoll<'a>> {
+        Machine::poll(self, now_ms, tx_buf)
     }
 
     /// Queues a complete message for non-blocking protocol transmission.
@@ -87,7 +50,7 @@ impl Engine {
     ///
     /// This is the channel-aware form of [`Engine::send`].
     pub fn send_on(&mut self, channel_id: ChannelId, message: &[u8]) -> Result<MessageId> {
-        machine::outgoing::send_on(self, channel_id, message)
+        Machine::send_on(self, channel_id, message)
     }
 
     /// Feeds already-arrived wire bytes into the engine.
@@ -95,24 +58,14 @@ impl Engine {
     /// This method never waits for more bytes. It handles the current input and
     /// queues events if a complete message becomes available.
     pub fn receive(&mut self, bytes: &[u8]) -> ReceiveReport {
-        machine::ingress::receive(self, bytes)
-    }
-
-    /// Advances time-driven protocol work.
-    pub fn tick(&mut self, now_ms: u64) {
-        machine::retransmit::tick(self, now_ms);
+        Machine::receive(self, bytes)
     }
 }
 
-/// Events produced by the minimal engine.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum EngineOutput {
-    /// Protocol bytes should be written to the serial link.
-    Write(WriteEvent),
-    /// A complete application message has been reassembled.
-    Message(MessageEvent),
-    /// A message could not be sent reliably.
-    SendFailed(SendFailedEvent),
+impl Default for Engine {
+    fn default() -> Self {
+        Self::new(EngineConfig::default())
+    }
 }
 
 /// High-level action returned by [`Engine::poll`].
@@ -128,25 +81,6 @@ pub enum EnginePoll<'a> {
     Idle,
 }
 
-/// A non-blocking write request produced by the engine.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct WriteEvent {
-    /// Packet number assigned to this write.
-    pub packet_number: PacketNumber,
-    /// Fixed storage containing encoded wire bytes.
-    pub bytes: [u8; MAX_WIRE_BYTES],
-    /// Number of valid bytes in `bytes`.
-    pub len: usize,
-}
-
-impl WriteEvent {
-    /// Returns the valid encoded wire bytes.
-    #[must_use]
-    pub const fn as_bytes(&self) -> &[u8] {
-        self.bytes.split_at(self.len).0
-    }
-}
-
 /// A complete message delivered by the engine.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MessageEvent {
@@ -157,7 +91,7 @@ pub struct MessageEvent {
     /// Message identifier scoped to this engine.
     pub message_id: MessageId,
     /// Fixed storage containing complete message bytes.
-    pub bytes: [u8; MAX_MESSAGE_BYTES],
+    pub bytes: [u8; 256],
     /// Number of valid message bytes in `bytes`.
     pub len: usize,
 }
@@ -224,9 +158,10 @@ pub enum ReceiveReport {
 
 #[cfg(test)]
 mod tests {
-    use super::{Engine, EngineConfig, EngineOutput, ReceiveReport};
+    use super::{Engine, EngineConfig, ReceiveReport};
+    use crate::engine::machine::{EngineOutput, Machine, WriteEvent};
+    use crate::engine::{ChannelProfile, ChannelSpec};
     use crate::reliability::ChannelReliability;
-    use crate::{ChannelProfile, ChannelSpec};
 
     #[test]
     fn engine_sends_one_message_as_multiple_write_events() {
@@ -238,7 +173,7 @@ mod tests {
         let message_id = engine.send(b"hello msrt testing").unwrap();
         let mut writes = 0;
 
-        while let Some(event) = engine.poll_event() {
+        while let Some(event) = Machine::poll_event(&mut engine) {
             match event {
                 EngineOutput::Write(_) => writes += 1,
                 EngineOutput::Message(_) => panic!("sender should not receive its own message"),
@@ -262,7 +197,7 @@ mod tests {
 
         a.send(b"hello msrt testing").unwrap();
 
-        while let Some(event) = a.poll_event() {
+        while let Some(event) = Machine::poll_event(&mut a) {
             let EngineOutput::Write(write) = event else {
                 continue;
             };
@@ -273,7 +208,7 @@ mod tests {
             ));
         }
 
-        while let Some(event) = b.poll_event() {
+        while let Some(event) = Machine::poll_event(&mut b) {
             if let EngineOutput::Message(message) = event {
                 assert_eq!(message.as_bytes(), b"hello msrt testing");
                 return;
@@ -296,7 +231,7 @@ mod tests {
         a.send(b"abcd").unwrap();
         a.send(b"wxyz").unwrap();
 
-        while let Some(event) = a.poll_event() {
+        while let Some(event) = Machine::poll_event(&mut a) {
             let EngineOutput::Write(write) = event else {
                 continue;
             };
@@ -327,7 +262,7 @@ mod tests {
         let mut b = Engine::new(EngineConfig::default());
         let writes = first_fragments_for_five_messages(&mut a);
 
-        for write in &writes[..crate::engine::MAX_REASSEMBLY_MESSAGES] {
+        for write in &writes[..crate::engine::config::MAX_REASSEMBLY_MESSAGES] {
             assert!(matches!(
                 b.receive(write.expect("fragment").as_bytes()),
                 ReceiveReport::Packet { .. }
@@ -336,7 +271,7 @@ mod tests {
 
         assert!(matches!(
             b.receive(
-                writes[crate::engine::MAX_REASSEMBLY_MESSAGES]
+                writes[crate::engine::config::MAX_REASSEMBLY_MESSAGES]
                     .expect("extra fragment")
                     .as_bytes()
             ),
@@ -356,18 +291,18 @@ mod tests {
         });
         let writes = first_fragments_for_five_messages(&mut a);
 
-        for write in &writes[..crate::engine::MAX_REASSEMBLY_MESSAGES] {
+        for write in &writes[..crate::engine::config::MAX_REASSEMBLY_MESSAGES] {
             assert!(matches!(
                 b.receive(write.expect("fragment").as_bytes()),
                 ReceiveReport::Packet { .. }
             ));
         }
 
-        b.tick(10);
+        let _ = next_polled_write(&mut b, 10);
 
         assert!(matches!(
             b.receive(
-                writes[crate::engine::MAX_REASSEMBLY_MESSAGES]
+                writes[crate::engine::config::MAX_REASSEMBLY_MESSAGES]
                     .expect("extra fragment")
                     .as_bytes()
             ),
@@ -409,7 +344,7 @@ mod tests {
 
         a.send(b"abcdef").unwrap();
 
-        while let Some(event) = a.poll_event() {
+        while let Some(event) = Machine::poll_event(&mut a) {
             let EngineOutput::Write(write) = event else {
                 continue;
             };
@@ -420,7 +355,7 @@ mod tests {
             ));
         }
 
-        while let Some(event) = b.poll_event() {
+        while let Some(event) = Machine::poll_event(&mut b) {
             let EngineOutput::Write(write) = event else {
                 continue;
             };
@@ -435,9 +370,7 @@ mod tests {
             ReceiveReport::Ack { .. }
         ));
 
-        a.tick(1);
-
-        assert!(a.poll_event().is_none());
+        poll_idle(&mut a, 1);
     }
 
     #[test]
@@ -473,10 +406,8 @@ mod tests {
             ReceiveReport::Ack { .. }
         ));
 
-        engine.tick(1);
-
-        assert_eq!(next_write(&mut engine).packet_number.get(), 1);
-        assert!(engine.poll_event().is_none());
+        assert_eq!(next_polled_write(&mut engine, 1).packet_number.get(), 1);
+        assert!(Machine::poll_event(&mut engine).is_none());
     }
 
     #[test]
@@ -489,17 +420,19 @@ mod tests {
         engine.send(b"hello").unwrap();
         let first = next_write(&mut engine);
 
-        engine.tick(9);
-        assert!(engine.poll_event().is_none());
+        poll_idle(&mut engine, 9);
 
-        engine.tick(10);
-        assert_eq!(next_write(&mut engine).packet_number, first.packet_number);
+        assert_eq!(
+            next_polled_write(&mut engine, 10).packet_number,
+            first.packet_number
+        );
 
-        engine.tick(19);
-        assert!(engine.poll_event().is_none());
+        poll_idle(&mut engine, 19);
 
-        engine.tick(20);
-        assert_eq!(next_write(&mut engine).packet_number, first.packet_number);
+        assert_eq!(
+            next_polled_write(&mut engine, 20).packet_number,
+            first.packet_number
+        );
     }
 
     #[test]
@@ -509,9 +442,7 @@ mod tests {
         engine.send(b"hello").unwrap();
         let _ = next_write(&mut engine);
 
-        engine.tick(1);
-
-        assert!(engine.poll_event().is_none());
+        poll_idle(&mut engine, 1);
     }
 
     #[test]
@@ -543,12 +474,12 @@ mod tests {
             ..EngineConfig::default()
         });
         let mut b = Engine::new(EngineConfig::default());
-        let mut bytes = [0; crate::engine::MAX_WIRE_BYTES * 4];
+        let mut bytes = [0; crate::engine::config::MAX_WIRE_BYTES * 4];
         let mut len = 0;
 
         a.send(b"hello msrt testing").unwrap();
 
-        while let Some(event) = a.poll_event() {
+        while let Some(event) = Machine::poll_event(&mut a) {
             let EngineOutput::Write(write) = event else {
                 continue;
             };
@@ -583,7 +514,7 @@ mod tests {
         ));
 
         let mut duplicate_messages = 0;
-        while let Some(event) = b.poll_event() {
+        while let Some(event) = Machine::poll_event(&mut b) {
             if matches!(event, EngineOutput::Message(_)) {
                 duplicate_messages += 1;
             }
@@ -603,7 +534,7 @@ mod tests {
 
         engine.send(b"hello world").unwrap();
 
-        while let Some(event) = engine.poll_event() {
+        while let Some(event) = Machine::poll_event(&mut engine) {
             let EngineOutput::Write(write) = event else {
                 continue;
             };
@@ -654,7 +585,7 @@ mod tests {
 
         engine.send_on(channel_id, b"hello best effort").unwrap();
 
-        while let Some(event) = engine.poll_event() {
+        while let Some(event) = Machine::poll_event(&mut engine) {
             let EngineOutput::Write(_) = event else {
                 panic!("best-effort send should only produce writes before tick");
             };
@@ -662,9 +593,7 @@ mod tests {
 
         assert_eq!(engine.machine.in_flight.packets().count(), 0);
 
-        engine.tick(1);
-
-        assert!(engine.poll_event().is_none());
+        poll_idle(&mut engine, 1);
     }
 
     #[test]
@@ -710,7 +639,7 @@ mod tests {
             ReceiveReport::Packet { .. }
         ));
 
-        let Some(event) = receiver.poll_event() else {
+        let Some(event) = Machine::poll_event(&mut receiver) else {
             panic!("receiver should emit the complete best-effort message");
         };
         let EngineOutput::Message(message) = event else {
@@ -720,7 +649,7 @@ mod tests {
         assert_eq!(message.channel_id, channel_id);
         assert_eq!(message.profile, ChannelProfile::Data);
         assert_eq!(message.as_bytes(), b"hello best effort");
-        assert!(receiver.poll_event().is_none());
+        assert!(Machine::poll_event(&mut receiver).is_none());
     }
 
     #[test]
@@ -759,7 +688,7 @@ mod tests {
         assert_eq!(message.channel_id, crate::core::ChannelId::LOG);
         assert_eq!(message.profile, ChannelProfile::Log);
         assert_eq!(message.as_bytes(), b"log line");
-        assert!(receiver.poll_event().is_none());
+        assert!(Machine::poll_event(&mut receiver).is_none());
     }
 
     #[test]
@@ -806,16 +735,11 @@ mod tests {
 
         assert_eq!(first.packet_number.get(), 0);
 
-        engine.tick(1);
-        let retry = next_write(&mut engine);
+        let retry = next_polled_write(&mut engine, 1);
 
         assert_eq!(retry.packet_number, first.packet_number);
 
-        engine.tick(2);
-
-        let Some(EngineOutput::SendFailed(failed)) = engine.poll_event() else {
-            panic!("engine should report send failure");
-        };
+        let failed = next_send_failed(&mut engine, 2);
 
         assert_eq!(failed.message_id, message_id);
         assert_eq!(failed.channel_id, crate::core::ChannelId::DEFAULT);
@@ -840,22 +764,20 @@ mod tests {
         assert_eq!(second.packet_number.get(), 1);
         assert_eq!(third.packet_number.get(), 2);
 
-        engine.tick(1);
-        assert_eq!(next_write(&mut engine).packet_number, first.packet_number);
+        assert_eq!(
+            next_polled_write(&mut engine, 1).packet_number,
+            first.packet_number
+        );
         assert_eq!(next_write(&mut engine).packet_number, second.packet_number);
         assert_eq!(next_write(&mut engine).packet_number, third.packet_number);
 
-        engine.tick(2);
-
-        let Some(EngineOutput::SendFailed(failed)) = engine.poll_event() else {
-            panic!("engine should report message failure");
-        };
+        let failed = next_send_failed(&mut engine, 2);
 
         assert_eq!(failed.message_id, message_id);
         assert_eq!(failed.channel_id, crate::core::ChannelId::DEFAULT);
         assert_eq!(failed.reason, super::SendFailureReason::RetryLimitReached);
         assert_eq!(engine.machine.in_flight.packets().count(), 0);
-        assert!(engine.poll_event().is_none());
+        assert!(Machine::poll_event(&mut engine).is_none());
     }
 
     #[test]
@@ -876,8 +798,10 @@ mod tests {
         assert_eq!(second.packet_number.get(), 1);
         assert_eq!(third.packet_number.get(), 2);
 
-        engine.tick(1);
-        assert_eq!(next_write(&mut engine).packet_number, first.packet_number);
+        assert_eq!(
+            next_polled_write(&mut engine, 1).packet_number,
+            first.packet_number
+        );
         assert_eq!(next_write(&mut engine).packet_number, second.packet_number);
         assert_eq!(next_write(&mut engine).packet_number, third.packet_number);
 
@@ -894,17 +818,13 @@ mod tests {
             ReceiveReport::Ack { .. }
         ));
 
-        engine.tick(2);
-
-        let Some(EngineOutput::SendFailed(failed)) = engine.poll_event() else {
-            panic!("engine should report message failure");
-        };
+        let failed = next_send_failed(&mut engine, 2);
 
         assert_eq!(failed.message_id, message_id);
         assert_eq!(failed.channel_id, crate::core::ChannelId::DEFAULT);
         assert_eq!(failed.reason, super::SendFailureReason::RetryLimitReached);
         assert_eq!(engine.machine.in_flight.packets().count(), 0);
-        assert!(engine.poll_event().is_none());
+        assert!(Machine::poll_event(&mut engine).is_none());
     }
 
     fn fragment_len_from_wire(bytes: &[u8]) -> usize {
@@ -915,19 +835,58 @@ mod tests {
             - crate::engine::layout::MESSAGE_FRAME_HEADER_LEN
     }
 
-    fn next_write(engine: &mut Engine) -> super::WriteEvent {
-        let Some(EngineOutput::Write(write)) = engine.poll_event() else {
+    fn next_write(engine: &mut Engine) -> WriteEvent {
+        let Some(EngineOutput::Write(write)) = Machine::poll_event(engine) else {
             panic!("engine should produce a write event");
         };
 
         write
     }
 
+    fn next_polled_write(engine: &mut Engine, now_ms: u64) -> WriteEvent {
+        let mut tx_buf = [0; crate::engine::config::MAX_WIRE_BYTES];
+
+        let super::EnginePoll::Transmit(bytes) = engine.poll(now_ms, &mut tx_buf).unwrap() else {
+            panic!("engine should produce transmit bytes");
+        };
+
+        let mut stored = [0; crate::engine::config::MAX_WIRE_BYTES];
+        stored[..bytes.len()].copy_from_slice(bytes);
+
+        WriteEvent {
+            packet_number: crate::core::PacketNumber::new(u32::from_le_bytes(
+                bytes[10..14].try_into().unwrap(),
+            )),
+            bytes: stored,
+            len: bytes.len(),
+        }
+    }
+
+    fn poll_idle(engine: &mut Engine, now_ms: u64) {
+        let mut tx_buf = [0; crate::engine::config::MAX_WIRE_BYTES];
+
+        assert_eq!(
+            engine.poll(now_ms, &mut tx_buf).unwrap(),
+            super::EnginePoll::Idle
+        );
+    }
+
+    fn next_send_failed(engine: &mut Engine, now_ms: u64) -> super::SendFailedEvent {
+        let mut tx_buf = [0; crate::engine::config::MAX_WIRE_BYTES];
+
+        let super::EnginePoll::SendFailed(failed) = engine.poll(now_ms, &mut tx_buf).unwrap()
+        else {
+            panic!("engine should report send failure");
+        };
+
+        failed
+    }
+
     fn ack_packet_for_ranges(
         ranges: &[(crate::core::PacketNumber, crate::core::PacketNumber)],
         packet_number: crate::core::PacketNumber,
-    ) -> super::WriteEvent {
-        let mut bytes = [0; crate::engine::MAX_WIRE_BYTES];
+    ) -> WriteEvent {
+        let mut bytes = [0; crate::engine::config::MAX_WIRE_BYTES];
         let packet_len = crate::engine::layout::ACK_PACKET_LEN as u16;
         let total_len = crate::wire::WIRE_HEADER_LEN + usize::from(packet_len) + 2;
 
@@ -955,14 +914,14 @@ mod tests {
             crate::wire::Checksum::calculate(&crate::wire::Crc16, &bytes[..total_len - 2]);
         bytes[total_len - 2..total_len].copy_from_slice(&checksum.to_le_bytes());
 
-        super::WriteEvent {
+        WriteEvent {
             packet_number,
             bytes,
             len: total_len,
         }
     }
 
-    fn first_fragments_for_five_messages(engine: &mut Engine) -> [Option<super::WriteEvent>; 5] {
+    fn first_fragments_for_five_messages(engine: &mut Engine) -> [Option<WriteEvent>; 5] {
         let mut fragments = [None; 5];
         let mut write_index = 0;
 
@@ -970,7 +929,7 @@ mod tests {
             engine.send(message).unwrap();
         }
 
-        while let Some(event) = engine.poll_event() {
+        while let Some(event) = Machine::poll_event(engine) {
             let EngineOutput::Write(write) = event else {
                 continue;
             };
@@ -991,7 +950,7 @@ mod tests {
     }
 
     fn next_message(engine: &mut Engine) -> super::MessageEvent {
-        while let Some(event) = engine.poll_event() {
+        while let Some(event) = Machine::poll_event(engine) {
             if let EngineOutput::Message(message) = event {
                 return message;
             }

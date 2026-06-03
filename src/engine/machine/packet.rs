@@ -6,7 +6,7 @@ use crate::core::{
 };
 
 use crate::engine::{
-    MAX_WIRE_BYTES,
+    config::MAX_WIRE_BYTES,
     layout::{ACK_FRAME_LEN, MESSAGE_FRAME_HEADER_LEN, PACKET_HEADER_LEN},
 };
 

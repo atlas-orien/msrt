@@ -5,8 +5,9 @@ use crate::reliability::{Dedup, DedupDecision};
 use crate::wire::{Crc16, StreamDecodeOutcome};
 
 use crate::engine::{
-    Engine, EngineOutput, ReceiveReport,
+    Engine, ReceiveReport,
     machine::{
+        EngineOutput,
         outgoing::queue_ack,
         packet::{PacketBytes, PacketDecode, decode_packet_bytes},
     },

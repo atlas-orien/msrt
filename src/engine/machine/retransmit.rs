@@ -1,7 +1,9 @@
 //! Tick-driven retransmission.
 
 use crate::engine::{
-    Engine, EngineOutput, MAX_IN_FLIGHT_PACKETS, SendFailedEvent, SendFailureReason, WriteEvent,
+    Engine, SendFailedEvent, SendFailureReason,
+    config::MAX_IN_FLIGHT_PACKETS,
+    machine::{EngineOutput, WriteEvent},
 };
 
 pub(crate) fn tick(engine: &mut Engine, now_ms: u64) {
