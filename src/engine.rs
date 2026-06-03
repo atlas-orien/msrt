@@ -69,6 +69,7 @@ impl Default for Engine {
 
 /// High-level action returned by [`Engine::poll`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 pub enum EnginePoll<'a> {
     /// Protocol bytes should be transmitted on the link.
     Transmit {

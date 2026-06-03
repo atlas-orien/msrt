@@ -184,6 +184,7 @@ impl Fixture {
 }
 
 #[derive(Clone, Copy, Debug)]
+#[allow(clippy::large_enum_variant)]
 enum BenchPoll {
     Transmit(BenchWrite),
     Message,
