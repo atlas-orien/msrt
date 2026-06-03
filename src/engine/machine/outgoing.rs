@@ -3,16 +3,21 @@
 use crate::core::{
     AckFrame, ChannelId, Error, ErrorKind, Flags, FrameKind, MAX_ACK_RANGES, MessageId,
     PacketNumber, PacketType, Result,
+    frame::{ack::ACK_FRAME_LEN, message::MESSAGE_FRAME_HEADER_LEN},
+    packet::header::PACKET_HEADER_LEN,
 };
 use crate::reliability::ReliabilityMode;
-use crate::wire::{Checksum, Crc16, EnvelopeHeader, EnvelopeMagic, WireFlags};
+use crate::wire::{
+    Checksum, Crc16, EnvelopeHeader, EnvelopeMagic, WireFlags, checksum::CHECKSUM_LEN,
+};
 
 use crate::engine::{
     Engine,
     config::{MAX_MESSAGE_BYTES, MAX_WIRE_BYTES},
-    layout::{ACK_PACKET_LEN, CHECKSUM_LEN, MESSAGE_FRAME_HEADER_LEN, PACKET_HEADER_LEN},
     machine::{EngineOutput, WriteEvent, inflight::InFlightPacket, packet::fragment_flags},
 };
+
+const ACK_PACKET_LEN: usize = PACKET_HEADER_LEN + ACK_FRAME_LEN;
 
 pub(crate) fn send_on(
     engine: &mut Engine,

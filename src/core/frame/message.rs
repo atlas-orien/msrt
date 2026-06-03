@@ -1,5 +1,25 @@
 //! MESSAGE frame primitives.
 
+/// Encoded frame type length in bytes.
+pub(crate) const FRAME_TYPE_LEN: usize = core::mem::size_of::<u8>();
+/// Encoded channel identifier length in bytes.
+pub(crate) const CHANNEL_ID_LEN: usize = core::mem::size_of::<u8>();
+/// Encoded message identifier length in bytes.
+pub(crate) const MESSAGE_ID_LEN: usize = core::mem::size_of::<u32>();
+/// Encoded complete message length field size in bytes.
+pub(crate) const MESSAGE_LEN_LEN: usize = core::mem::size_of::<u16>();
+/// Encoded fragment offset field size in bytes.
+pub(crate) const FRAGMENT_OFFSET_LEN: usize = core::mem::size_of::<u16>();
+/// Encoded fragment flags field size in bytes.
+pub(crate) const FRAGMENT_FLAGS_LEN: usize = core::mem::size_of::<u8>();
+/// Encoded MESSAGE frame header length in bytes.
+pub(crate) const MESSAGE_FRAME_HEADER_LEN: usize = FRAME_TYPE_LEN
+    + CHANNEL_ID_LEN
+    + MESSAGE_ID_LEN
+    + MESSAGE_LEN_LEN
+    + FRAGMENT_OFFSET_LEN
+    + FRAGMENT_FLAGS_LEN;
+
 /// A logical channel identifier.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ChannelId(pub u8);

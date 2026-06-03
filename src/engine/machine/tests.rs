@@ -673,8 +673,8 @@ fn fragment_len_from_wire(bytes: &[u8]) -> usize {
     let packet_len = u16::from_le_bytes([bytes[4], bytes[5]]) as usize;
 
     packet_len
-        - crate::engine::layout::PACKET_HEADER_LEN
-        - crate::engine::layout::MESSAGE_FRAME_HEADER_LEN
+        - crate::core::packet::header::PACKET_HEADER_LEN
+        - crate::core::frame::message::MESSAGE_FRAME_HEADER_LEN
 }
 
 fn next_write(engine: &mut Engine) -> WriteEvent {
@@ -725,7 +725,8 @@ fn ack_packet_for_ranges(
     packet_number: crate::core::PacketNumber,
 ) -> WriteEvent {
     let mut bytes = [0; crate::engine::config::MAX_WIRE_BYTES];
-    let packet_len = crate::engine::layout::ACK_PACKET_LEN as u16;
+    let packet_len = (crate::core::packet::header::PACKET_HEADER_LEN
+        + crate::core::frame::ack::ACK_FRAME_LEN) as u16;
     let total_len = crate::wire::WIRE_HEADER_LEN + usize::from(packet_len) + 2;
 
     bytes[..2].copy_from_slice(&crate::wire::EnvelopeMagic::MSRT.bytes());

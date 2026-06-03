@@ -3,12 +3,11 @@
 use crate::core::{
     AckFrame, AckRange, ChannelId, Error, Flags, FrameKind, MAX_ACK_RANGES, MessageFlags,
     MessageId, PacketNumber, PacketType, Result,
+    frame::{ack::ACK_FRAME_LEN, message::MESSAGE_FRAME_HEADER_LEN},
+    packet::header::PACKET_HEADER_LEN,
 };
 
-use crate::engine::{
-    config::MAX_WIRE_BYTES,
-    layout::{ACK_FRAME_LEN, MESSAGE_FRAME_HEADER_LEN, PACKET_HEADER_LEN},
-};
+use crate::engine::config::MAX_WIRE_BYTES;
 
 /// Decoded MVP packet.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -1,7 +1,6 @@
 #![doc = "Protocol engine boundaries for MSRT."]
 
 pub(crate) mod config;
-pub(crate) mod layout;
 pub(crate) mod machine;
 
 pub use config::{ChannelProfile, ChannelSpec, EngineConfig};

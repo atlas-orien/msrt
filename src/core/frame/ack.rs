@@ -1,9 +1,17 @@
 //! ACK frame primitives.
 
 use crate::core::PacketNumber;
+use crate::core::packet::header::PACKET_NUMBER_LEN;
 
 /// Maximum ACK ranges carried by the v1 fixed ACK frame.
 pub const MAX_ACK_RANGES: usize = 4;
+/// Encoded ACK range count length in bytes.
+pub(crate) const ACK_RANGE_COUNT_LEN: usize = core::mem::size_of::<u8>();
+/// Encoded ACK frame length in bytes.
+pub(crate) const ACK_FRAME_LEN: usize = crate::core::frame::message::FRAME_TYPE_LEN
+    + PACKET_NUMBER_LEN
+    + ACK_RANGE_COUNT_LEN
+    + MAX_ACK_RANGES * 2 * PACKET_NUMBER_LEN;
 
 /// Inclusive packet number range carried by an ACK frame.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
