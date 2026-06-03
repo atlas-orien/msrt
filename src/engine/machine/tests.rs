@@ -726,6 +726,7 @@ fn next_polled_write(engine: &mut Engine, now_ms: u64) -> WriteEvent {
         bytes: stored,
         len: bytes.len(),
         attempts,
+        priority: crate::engine::machine::WritePriority::NewData,
     }
 }
 
@@ -750,8 +751,8 @@ fn ack_packet_for_ranges(
     packet_number: crate::core::PacketNumber,
 ) -> WriteEvent {
     let mut bytes = [0; crate::engine::config::MAX_WIRE_BYTES];
-    let packet_len = (crate::core::packet::header::PACKET_HEADER_LEN
-        + crate::core::ack::ACK_LEN) as u8;
+    let packet_len =
+        (crate::core::packet::header::PACKET_HEADER_LEN + crate::core::ack::ACK_LEN) as u8;
     let total_len = crate::wire::WIRE_HEADER_LEN + usize::from(packet_len) + 2;
 
     bytes[..crate::wire::WIRE_MAGIC_LEN].copy_from_slice(&crate::wire::EnvelopeMagic::MSRT.bytes());
@@ -784,6 +785,7 @@ fn ack_packet_for_ranges(
         bytes,
         len: total_len,
         attempts: 0,
+        priority: crate::engine::machine::WritePriority::Control,
     }
 }
 

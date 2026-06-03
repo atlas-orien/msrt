@@ -43,6 +43,7 @@ impl Machine {
         }
 
         for packet in failures[..failure_len].iter().flatten() {
+            self.log_send_failed_snapshot(config, now_ms, packet);
             self.in_flight
                 .remove_message(packet.channel_id, packet.message_id);
             let _ = self.events.push(EngineOutput::SendFailed(SendFailedEvent {
@@ -68,7 +69,38 @@ impl Machine {
                 bytes: packet.bytes,
                 len: packet.len,
                 attempts: packet.attempts.saturating_add(1),
+                priority: crate::engine::machine::WritePriority::Retransmit,
             }));
         }
+    }
+
+    #[cfg(feature = "std")]
+    fn log_send_failed_snapshot(
+        &self,
+        config: &EngineConfig,
+        now_ms: u64,
+        failed: &crate::engine::machine::inflight::InFlightPacket,
+    ) {
+        eprintln!(
+            "msrt in_flight send_failed now={} len={} failed_channel={} failed_message={} failed_packet={} attempts={} age_ms={} retry_limit={} rto_ms={}",
+            now_ms,
+            self.in_flight.len(),
+            failed.channel_id.get(),
+            failed.message_id.get(),
+            failed.packet_number.get(),
+            failed.attempts,
+            now_ms.saturating_sub(failed.last_sent_ms),
+            config.max_retransmit_attempts,
+            config.retransmit_timeout_ms,
+        );
+    }
+
+    #[cfg(not(feature = "std"))]
+    fn log_send_failed_snapshot(
+        &self,
+        _config: &EngineConfig,
+        _now_ms: u64,
+        _failed: &crate::engine::machine::inflight::InFlightPacket,
+    ) {
     }
 }

@@ -1,8 +1,8 @@
 //! Outgoing message fragmentation and ACK encoding.
 
 use crate::core::{
-    Ack, ChannelId, Error, ErrorKind, Flags, MAX_ACK_RANGES, MessageId, MessageFlags,
-    PacketNumber, Result,
+    Ack, ChannelId, Error, ErrorKind, Flags, MAX_ACK_RANGES, MessageFlags, MessageId, PacketNumber,
+    Result,
     ack::ACK_LEN,
     packet::header::{PACKET_HEADER_LEN, PacketHeader},
 };
@@ -51,6 +51,7 @@ impl Machine {
             bytes: wire,
             len: written,
             attempts: 0,
+            priority: crate::engine::machine::WritePriority::Control,
         }))?;
         self.next_packet_number = self.next_packet_number.next();
 
@@ -72,6 +73,7 @@ impl Machine {
             bytes: wire,
             len: written,
             attempts: 0,
+            priority: crate::engine::machine::WritePriority::NewData,
         }))?;
         self.in_flight.track(InFlightPacket {
             packet_number,
@@ -102,6 +104,7 @@ impl Machine {
             bytes: wire,
             len: written,
             attempts: 0,
+            priority: crate::engine::machine::WritePriority::Control,
         }))?;
         self.next_packet_number = self.next_packet_number.next();
 
@@ -127,7 +130,8 @@ impl Machine {
             let fragment = &message[offset..end];
             let packet_number = self.next_packet_number;
             let mut wire = [0; MAX_WIRE_BYTES];
-            let fragment_flags = MessageFlags::from_bits(fragment_flags(offset, end, message.len()));
+            let fragment_flags =
+                MessageFlags::from_bits(fragment_flags(offset, end, message.len()));
             let header = PacketHeader::data(
                 packet_number,
                 if matches!(mode, ReliabilityMode::Reliable) {
@@ -148,6 +152,7 @@ impl Machine {
                 bytes: wire,
                 len: written,
                 attempts: 0,
+                priority: crate::engine::machine::WritePriority::NewData,
             }))?;
             if matches!(mode, ReliabilityMode::Reliable) {
                 self.in_flight.track(InFlightPacket {
@@ -183,8 +188,8 @@ fn encode_message_fragment(
     let packet_len = u8::try_from(packet_len).map_err(|_| Error::new(ErrorKind::Engine))?;
     let message_len =
         u16::try_from(header.message_len).map_err(|_| Error::new(ErrorKind::Engine))?;
-    let fragment_offset = u16::try_from(header.fragment_offset)
-        .map_err(|_| Error::new(ErrorKind::Engine))?;
+    let fragment_offset =
+        u16::try_from(header.fragment_offset).map_err(|_| Error::new(ErrorKind::Engine))?;
     let envelope_header = EnvelopeHeader::new(packet_len);
     let total_len = envelope_header.total_len();
 
@@ -247,8 +252,7 @@ fn encode_ack_packet(
 
     while index < MAX_ACK_RANGES {
         packet[offset..offset + 4].copy_from_slice(&ack.ranges[index].start.get().to_le_bytes());
-        packet[offset + 4..offset + 8]
-            .copy_from_slice(&ack.ranges[index].end.get().to_le_bytes());
+        packet[offset + 4..offset + 8].copy_from_slice(&ack.ranges[index].end.get().to_le_bytes());
         offset += 8;
         index += 1;
     }
@@ -293,8 +297,5 @@ fn encode_liveness_packet(
 }
 
 const fn max_fragment_bytes() -> usize {
-    MAX_WIRE_BYTES
-        - crate::wire::WIRE_HEADER_LEN
-        - PACKET_HEADER_LEN
-        - CHECKSUM_LEN
+    MAX_WIRE_BYTES - crate::wire::WIRE_HEADER_LEN - PACKET_HEADER_LEN - CHECKSUM_LEN
 }

@@ -14,14 +14,12 @@ use msrt::{
 };
 
 use support::noise::{
-    NoiseConfig, NoiseLcg, NoiseStats, add_stats, format_percent, make_noise_bytes, mutate_or_copy,
-    parse_percent_per_mille,
+    NoiseConfig, NoiseLcg, make_noise_bytes, mutate_or_copy, parse_percent_per_mille,
 };
 
 const TX_BUF_BYTES: usize = 256;
 const RX_BUF_BYTES: usize = 2048;
 const CHAOS_NOISE_CHUNK_BYTES: usize = 512;
-const DEFAULT_STATS_INTERVAL: Duration = Duration::from_secs(600);
 const MAX_MESSAGE_BYTES: usize = 256;
 const DEFAULT_MESSAGE_BYTES: usize = 240;
 const TEST_FRAGMENT_BYTES: usize = 48;
@@ -47,7 +45,7 @@ impl Args {
         let mut parsed = Self {
             bind: "127.0.0.1:9001".parse().expect("valid default bind addr"),
             peer: "127.0.0.1:9002".parse().expect("valid default peer addr"),
-            interval: Duration::from_millis(10),
+            interval: Duration::from_millis(20),
             message: make_message(DEFAULT_MESSAGE_BYTES),
             count: None,
             wire_chaos: false,
@@ -148,31 +146,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return run_wire_chaos(socket, args);
     }
 
-    println!(
-        "msrt udp host bind={} peer={} interval={:?} message_len={} noise={} drop_byte={} insert_byte={}",
-        args.bind,
-        args.peer,
-        args.interval,
-        args.message.len(),
-        format_percent(args.noise.corrupt_per_mille),
-        format_percent(args.noise.drop_byte_per_mille),
-        format_percent(args.noise.insert_byte_per_mille),
-    );
-
     let start = Instant::now();
     let mut endpoint = ClientEndpoint::new(test_config());
+    let mut last_state = PeerState::Disconnected;
     if let Err(error) = endpoint.connect(0) {
         eprintln!("host connect error: {error:?}");
         std::process::exit(1);
     }
-    println!("host connect state={:?}", endpoint.peer().state());
+    log_state_change("host", &mut last_state, endpoint.peer().state());
     let mut rx_buf = [0; RX_BUF_BYTES];
     let mut last_send = Instant::now() - args.interval;
-    let mut last_stats = Instant::now();
     let mut sent_messages = 0;
-    let mut noise_stats = NoiseStats::default();
     let mut noise_state = NoiseLcg::new();
-    let mut last_state = endpoint.peer().state();
     let mut last_connect_attempt = Instant::now();
 
     loop {
@@ -214,30 +199,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             link_connected,
             noise,
             &mut noise_state,
-            &mut noise_stats,
         )?;
         log_state_change("host", &mut last_state, endpoint.peer().state());
 
         if let Some(count) = args.count
             && sent_messages >= count
         {
-            println!(
-                "host completed {count} message(s), corrupted={} dropped={} inserted={}",
-                noise_stats.corrupted, noise_stats.dropped, noise_stats.inserted
-            );
             return Ok(());
-        }
-
-        if last_stats.elapsed() >= DEFAULT_STATS_INTERVAL {
-            println!(
-                "host stats elapsed={}s sent={} corrupted={} dropped={} inserted={}",
-                start.elapsed().as_secs(),
-                sent_messages,
-                noise_stats.corrupted,
-                noise_stats.dropped,
-                noise_stats.inserted
-            );
-            last_stats = Instant::now();
         }
 
         thread::sleep(Duration::from_millis(5));
@@ -369,15 +337,13 @@ fn pump_endpoint(
     link_connected: bool,
     noise: NoiseConfig,
     noise_state: &mut NoiseLcg,
-    noise_stats: &mut NoiseStats,
 ) -> io::Result<()> {
     loop {
         let mut tx_buf = [0; TX_BUF_BYTES];
         match endpoint.poll(now_ms, &mut tx_buf).expect("endpoint poll") {
             EndpointPoll::Transmit { bytes, attempts: _ } => {
                 if link_connected {
-                    let (packet, stats) = mutate_or_copy(noise_state, bytes, noise);
-                    add_stats(noise_stats, stats);
+                    let (packet, _) = mutate_or_copy(noise_state, bytes, noise);
                     socket.send_to(&packet, peer)?;
                 }
             }

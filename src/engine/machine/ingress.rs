@@ -13,11 +13,7 @@ use crate::engine::{
 };
 
 impl Machine {
-    pub(super) fn receive_ingress(
-        &mut self,
-        config: &EngineConfig,
-        bytes: &[u8],
-    ) -> ReceiveReport {
+    pub(super) fn receive_ingress(&mut self, config: &EngineConfig, bytes: &[u8]) -> ReceiveReport {
         self.receive_bytes(config, bytes)
     }
 
@@ -115,7 +111,8 @@ impl Machine {
                 }
             }
             PacketDecode::Pong(pong) => {
-                self.in_flight.remove_message(ChannelId::LIVENESS, pong.header.message_id);
+                self.in_flight
+                    .remove_message(ChannelId::LIVENESS, pong.header.message_id);
                 ReceiveReport::Pong {
                     packet_number: pong.header.packet_number,
                     message_id: pong.header.message_id,

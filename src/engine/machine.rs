@@ -130,6 +130,8 @@ pub(crate) struct WriteEvent {
     pub len: usize,
     /// Send attempt count: 0 = first send, ≥1 = retransmit.
     pub attempts: u8,
+    /// Internal transmit priority used by the engine event queue.
+    pub priority: WritePriority,
 }
 
 impl WriteEvent {
@@ -138,4 +140,11 @@ impl WriteEvent {
     pub const fn as_bytes(&self) -> &[u8] {
         self.bytes.split_at(self.len).0
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) enum WritePriority {
+    Control,
+    Retransmit,
+    NewData,
 }

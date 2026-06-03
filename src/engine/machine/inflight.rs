@@ -70,6 +70,11 @@ impl InFlightPackets {
         self.packets.iter().flatten()
     }
 
+    #[cfg_attr(not(feature = "std"), allow(dead_code))]
+    pub(crate) const fn len(&self) -> usize {
+        self.len
+    }
+
     pub(crate) fn remove_message(&mut self, channel_id: ChannelId, message_id: MessageId) {
         for slot in &mut self.packets {
             if slot

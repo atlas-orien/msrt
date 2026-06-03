@@ -106,20 +106,6 @@ pub(crate) fn parse_percent_per_mille(value: String, name: &str) -> Result<u16, 
     Ok((percent * 10.0).round() as u16)
 }
 
-pub(crate) fn format_percent(per_mille: u16) -> String {
-    if per_mille.is_multiple_of(10) {
-        (per_mille / 10).to_string()
-    } else {
-        format!("{}.{:01}", per_mille / 10, per_mille % 10)
-    }
-}
-
-pub(crate) fn add_stats(total: &mut NoiseStats, delta: NoiseStats) {
-    total.corrupted += delta.corrupted;
-    total.dropped += delta.dropped;
-    total.inserted += delta.inserted;
-}
-
 pub(crate) fn has_noise(config: NoiseConfig) -> bool {
     config.corrupt_per_mille != 0
         || config.drop_byte_per_mille != 0

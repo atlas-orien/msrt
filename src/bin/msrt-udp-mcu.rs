@@ -12,14 +12,10 @@ use msrt::{
     engine::{EngineConfig, ReceiveReport},
 };
 
-use support::noise::{
-    NoiseConfig, NoiseLcg, NoiseStats, add_stats, format_percent, mutate_or_copy,
-    parse_percent_per_mille,
-};
+use support::noise::{NoiseConfig, NoiseLcg, mutate_or_copy, parse_percent_per_mille};
 
 const TX_BUF_BYTES: usize = 256;
 const RX_BUF_BYTES: usize = 2048;
-const DEFAULT_STATS_INTERVAL: Duration = Duration::from_secs(600);
 const MAX_MESSAGE_BYTES: usize = 256;
 const DEFAULT_MESSAGE_BYTES: usize = 240;
 const TEST_FRAGMENT_BYTES: usize = 48;
@@ -44,7 +40,7 @@ impl Args {
         let mut parsed = Self {
             bind: "127.0.0.1:9002".parse().expect("valid default bind addr"),
             peer: "127.0.0.1:9001".parse().expect("valid default peer addr"),
-            interval: Duration::from_millis(10),
+            interval: Duration::from_millis(20),
             message: make_message(DEFAULT_MESSAGE_BYTES),
             count: None,
             duration: None,
@@ -137,28 +133,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let socket = UdpSocket::bind(args.bind)?;
     socket.set_nonblocking(true)?;
 
-    println!(
-        "msrt udp mcu bind={} peer={} interval={:?} message_len={} noise={} drop_byte={} insert_byte={}",
-        args.bind,
-        args.peer,
-        args.interval,
-        args.message.len(),
-        format_percent(args.noise.corrupt_per_mille),
-        format_percent(args.noise.drop_byte_per_mille),
-        format_percent(args.noise.insert_byte_per_mille)
-    );
-
     let start = Instant::now();
     let mut endpoint = PassiveEndpoint::new(test_config());
     let mut rx_buf = [0; RX_BUF_BYTES];
-    let mut received_messages = 0;
     let mut sent_messages = 0;
-    let mut noise_stats = NoiseStats::default();
     let mut receive_done = false;
     let mut last_send = Instant::now() - args.interval;
-    let mut last_stats = Instant::now();
     let mut noise_state = NoiseLcg::new();
-    let mut last_state = endpoint.peer().state();
+    let mut last_state = PeerState::Disconnected;
 
     loop {
         let now = elapsed_ms(start);
@@ -181,28 +163,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             NoiseConfig::default()
         };
-        received_messages += pump_endpoint(
+        pump_endpoint(
             &socket,
             &args.peer,
             &mut endpoint,
             now,
             noise,
             &mut noise_state,
-            &mut noise_stats,
         )?;
         log_state_change("mcu", &mut last_state, endpoint.peer().state());
 
         if let Some(count) = args.count
             && sent_messages >= count
         {
-            println!(
-                "mcu completed {count} message(s), sent={} received={} corrupted={} dropped={} inserted={}",
-                sent_messages,
-                received_messages,
-                noise_stats.corrupted,
-                noise_stats.dropped,
-                noise_stats.inserted
-            );
             return Ok(());
         }
 
@@ -214,28 +187,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         if receive_done {
-            println!(
-                "mcu completed duration test: sent={} received={} corrupted={} dropped={} inserted={}",
-                sent_messages,
-                received_messages,
-                noise_stats.corrupted,
-                noise_stats.dropped,
-                noise_stats.inserted
-            );
             return Ok(());
-        }
-
-        if last_stats.elapsed() >= DEFAULT_STATS_INTERVAL {
-            println!(
-                "mcu stats elapsed={}s sent={} received={} corrupted={} dropped={} inserted={}",
-                start.elapsed().as_secs(),
-                sent_messages,
-                received_messages,
-                noise_stats.corrupted,
-                noise_stats.dropped,
-                noise_stats.inserted
-            );
-            last_stats = Instant::now();
         }
 
         thread::sleep(Duration::from_millis(5));
@@ -292,23 +244,17 @@ fn pump_endpoint(
     now_ms: u64,
     noise: NoiseConfig,
     noise_state: &mut NoiseLcg,
-    noise_stats: &mut NoiseStats,
-) -> io::Result<usize> {
-    let mut delivered = 0;
-
+) -> io::Result<()> {
     loop {
         let mut tx_buf = [0; TX_BUF_BYTES];
         match endpoint.poll(now_ms, &mut tx_buf).expect("endpoint poll") {
             EndpointPoll::Transmit { bytes, .. } => {
-                let (packet, stats) = mutate_or_copy(noise_state, bytes, noise);
-                add_stats(noise_stats, stats);
+                let (packet, _) = mutate_or_copy(noise_state, bytes, noise);
                 socket.send_to(&packet, peer)?;
             }
-            EndpointPoll::Message(_message) => {
-                delivered += 1;
-            }
+            EndpointPoll::Message(_) => {}
             EndpointPoll::SendFailed(_) => {}
-            EndpointPoll::Idle => return Ok(delivered),
+            EndpointPoll::Idle => return Ok(()),
         }
     }
 }
