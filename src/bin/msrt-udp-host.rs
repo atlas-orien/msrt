@@ -25,9 +25,9 @@ const DEFAULT_STATS_INTERVAL: Duration = Duration::from_secs(5);
 const MAX_MESSAGE_BYTES: usize = 256;
 const DEFAULT_MESSAGE_BYTES: usize = 240;
 const TEST_FRAGMENT_BYTES: usize = 48;
-const DEFAULT_CORRUPT_PERCENT: u8 = 0;
+const DEFAULT_CORRUPT_PERCENT: u8 = 1;
 const DEFAULT_DROP_BYTE_PERCENT: u8 = 1;
-const DEFAULT_INSERT_BYTE_PERCENT: u8 = 0;
+const DEFAULT_INSERT_BYTE_PERCENT: u8 = 1;
 
 #[derive(Clone, Debug)]
 struct Args {
