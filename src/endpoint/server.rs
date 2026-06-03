@@ -1,13 +1,16 @@
 //! Server-side endpoint manager.
 
-use crate::endpoint::PeerSlot;
-use crate::engine::{Engine, EngineConfig};
+use crate::endpoint::{EndpointPoll, PeerSlot};
+use crate::core::Error;
+use crate::engine::{Engine, EngineConfig, ReceiveReport};
 
 /// Error returned when a server endpoint cannot accept a peer.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AcceptError {
     /// All peer slots are occupied.
     Full,
+    /// The peer engine failed to queue the endpoint hello message.
+    Engine(Error),
 }
 
 /// One accepted server-side peer session.
@@ -64,9 +67,13 @@ where
     ///
     /// Use this when the adapter has decided that the remote side started a new
     /// logical connection and old protocol state must be dropped.
-    pub fn accept(&mut self, peer_id: P, now_ms: u64) -> core::result::Result<&mut Engine, AcceptError> {
+    pub fn accept(
+        &mut self,
+        peer_id: P,
+        now_ms: u64,
+    ) -> core::result::Result<&mut Engine, AcceptError> {
         if let Some(index) = self.find_index(peer_id) {
-            return Ok(self.reconnect_at(index, now_ms));
+            return self.reconnect_at(index, now_ms);
         }
 
         let index = self.vacant_index().ok_or(AcceptError::Full)?;
@@ -75,7 +82,7 @@ where
             slot: PeerSlot::new(self.config),
         });
 
-        Ok(self.reconnect_at(index, now_ms))
+        self.reconnect_at(index, now_ms)
     }
 
     /// Returns the peer engine, accepting the peer if it is not already known.
@@ -89,7 +96,7 @@ where
     ) -> core::result::Result<&mut Engine, AcceptError> {
         if let Some(index) = self.find_index(peer_id) {
             let entry = self.peers[index].as_mut().expect("peer index exists");
-            return Ok(entry.slot.engine_or_connect(now_ms));
+            return entry.slot.engine_or_connect(now_ms).map_err(AcceptError::Engine);
         }
 
         self.accept(peer_id, now_ms)
@@ -109,6 +116,23 @@ where
     pub fn engine_mut(&mut self, peer_id: P) -> Option<&mut Engine> {
         let index = self.find_index(peer_id)?;
         self.peers[index].as_mut()?.slot.engine_mut()
+    }
+
+    /// Feeds received bytes into the engine for `peer_id`.
+    pub fn receive(&mut self, peer_id: P, now_ms: u64, bytes: &[u8]) -> Option<ReceiveReport> {
+        let index = self.find_index(peer_id)?;
+        Some(self.peers[index].as_mut()?.slot.receive(now_ms, bytes))
+    }
+
+    /// Polls one endpoint action for `peer_id`.
+    pub fn poll<'a>(
+        &mut self,
+        peer_id: P,
+        now_ms: u64,
+        tx_buf: &'a mut [u8],
+    ) -> Option<crate::core::Result<EndpointPoll<'a>>> {
+        let index = self.find_index(peer_id)?;
+        Some(self.peers[index].as_mut()?.slot.poll(now_ms, tx_buf))
     }
 
     /// Returns the peer slot for `peer_id` if the peer is known.
@@ -140,9 +164,14 @@ where
         self.peers.iter().filter_map(Option::as_ref)
     }
 
-    fn reconnect_at(&mut self, index: usize, now_ms: u64) -> &mut Engine {
+    fn reconnect_at(
+        &mut self,
+        index: usize,
+        now_ms: u64,
+    ) -> core::result::Result<&mut Engine, AcceptError> {
         let entry = self.peers[index].as_mut().expect("peer index exists");
-        entry.slot.connect(now_ms)
+        entry.slot.connect(now_ms).map_err(AcceptError::Engine)?;
+        Ok(entry.slot.engine_mut().expect("engine was just inserted"))
     }
 
     fn find_index(&self, peer_id: P) -> Option<usize> {
@@ -176,8 +205,8 @@ mod tests {
         endpoint.engine_or_accept(1, 10).unwrap();
         endpoint.engine_or_accept(2, 20).unwrap();
 
-        assert!(endpoint.peer_mut(1).unwrap().is_connected());
-        assert!(endpoint.peer_mut(2).unwrap().is_connected());
+        assert!(endpoint.peer_mut(1).unwrap().has_session());
+        assert!(endpoint.peer_mut(2).unwrap().has_session());
         assert_eq!(endpoint.peers().count(), 2);
     }
 
@@ -194,10 +223,14 @@ mod tests {
     fn accept_replaces_existing_peer_engine() {
         let mut endpoint = ServerEndpoint::<u8, 1>::default();
 
-        endpoint.engine_or_accept(1, 1).unwrap().send(b"hello").unwrap();
+        endpoint
+            .engine_or_accept(1, 1)
+            .unwrap()
+            .send(b"hello")
+            .unwrap();
         let engine = endpoint.accept(1, 2).unwrap();
 
-        assert_eq!(engine.send(b"hello").unwrap().get(), 0);
+        assert_eq!(engine.send(b"hello").unwrap().get(), 1);
     }
 
     #[test]

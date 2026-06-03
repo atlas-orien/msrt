@@ -1,7 +1,8 @@
 //! Client-side endpoint manager.
 
-use crate::endpoint::PeerSlot;
-use crate::engine::{Engine, EngineConfig};
+use crate::endpoint::{EndpointPoll, PeerSlot};
+use crate::core::{MessageId, Result};
+use crate::engine::{Engine, EngineConfig, ReceiveReport};
 
 /// Client-side endpoint with at most one active peer session.
 ///
@@ -34,7 +35,7 @@ impl ClientEndpoint {
     }
 
     /// Starts a fresh session and returns its engine.
-    pub fn connect(&mut self, now_ms: u64) -> &mut Engine {
+    pub fn connect(&mut self, now_ms: u64) -> Result<MessageId> {
         self.peer.connect(now_ms)
     }
 
@@ -44,13 +45,23 @@ impl ClientEndpoint {
     }
 
     /// Returns the active engine, creating a fresh session if needed.
-    pub fn engine_or_connect(&mut self, now_ms: u64) -> &mut Engine {
+    pub fn engine_or_connect(&mut self, now_ms: u64) -> Result<&mut Engine> {
         self.peer.engine_or_connect(now_ms)
     }
 
     /// Returns the active engine if the client is connected.
     pub fn engine_mut(&mut self) -> Option<&mut Engine> {
         self.peer.engine_mut()
+    }
+
+    /// Feeds received bytes into the active peer engine.
+    pub fn receive(&mut self, now_ms: u64, bytes: &[u8]) -> ReceiveReport {
+        self.peer.receive(now_ms, bytes)
+    }
+
+    /// Polls one endpoint action from the active peer engine.
+    pub fn poll<'a>(&mut self, now_ms: u64, tx_buf: &'a mut [u8]) -> Result<EndpointPoll<'a>> {
+        self.peer.poll(now_ms, tx_buf)
     }
 
     /// Drops the active session if it has been idle for at least `timeout_ms`.
@@ -61,16 +72,54 @@ impl ClientEndpoint {
 
 #[cfg(test)]
 mod tests {
+    use crate::endpoint::{EndpointPoll, PeerState, ServerEndpoint};
+
     use super::ClientEndpoint;
 
     #[test]
     fn client_reconnect_creates_fresh_engine() {
         let mut endpoint = ClientEndpoint::default();
 
-        endpoint.engine_or_connect(1).send(b"hello").unwrap();
+        endpoint
+            .engine_or_connect(1)
+            .unwrap()
+            .send(b"hello")
+            .unwrap();
         endpoint.disconnect();
-        let engine = endpoint.engine_or_connect(2);
+        let engine = endpoint.engine_or_connect(2).unwrap();
 
-        assert_eq!(engine.send(b"hello").unwrap().get(), 0);
+        assert_eq!(engine.send(b"hello").unwrap().get(), 1);
+    }
+
+    #[test]
+    fn hello_ack_marks_both_endpoints_connected() {
+        let mut client = ClientEndpoint::default();
+        let mut server = ServerEndpoint::<u8, 1>::default();
+        let mut client_tx = [0; 128];
+        let mut server_tx = [0; 128];
+
+        client.connect(1).unwrap();
+        let EndpointPoll::Transmit {
+            bytes: hello_bytes, ..
+        } = client.poll(1, &mut client_tx).unwrap()
+        else {
+            panic!("client should transmit hello");
+        };
+
+        server.engine_or_accept(7, 1).unwrap();
+        server.receive(7, 2, hello_bytes).unwrap();
+        assert_eq!(
+            server.peer_mut(7).unwrap().state(),
+            PeerState::Connected
+        );
+
+        let EndpointPoll::Transmit { bytes: ack_bytes, .. } =
+            server.poll(7, 2, &mut server_tx).unwrap().unwrap()
+        else {
+            panic!("server should transmit ack");
+        };
+
+        client.receive(3, ack_bytes);
+        assert_eq!(client.peer().state(), PeerState::Connected);
     }
 }
