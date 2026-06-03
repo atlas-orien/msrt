@@ -133,3 +133,50 @@ impl Default for EngineConfig {
         }
     }
 }
+
+impl EngineConfig {
+    pub(crate) fn reliability_mode(&self, channel_id: ChannelId) -> ReliabilityMode {
+        let mut spec_index = 0;
+
+        while spec_index < MAX_CHANNEL_SPECS {
+            if let Some(spec) = self.channel_specs[spec_index]
+                && spec.channel_id.get() == channel_id.get()
+            {
+                return spec.reliability_mode;
+            }
+            spec_index += 1;
+        }
+
+        if channel_id.is_log() {
+            return ReliabilityMode::BestEffort;
+        }
+
+        let mut index = 0;
+
+        while index < MAX_CHANNEL_POLICIES {
+            if let Some(policy) = self.channel_policies[index]
+                && policy.channel_id.get() == channel_id.get()
+            {
+                return policy.mode;
+            }
+            index += 1;
+        }
+
+        ReliabilityMode::Reliable
+    }
+
+    pub(crate) fn channel_profile(&self, channel_id: ChannelId) -> ChannelProfile {
+        let mut index = 0;
+
+        while index < MAX_CHANNEL_SPECS {
+            if let Some(spec) = self.channel_specs[index]
+                && spec.channel_id.get() == channel_id.get()
+            {
+                return spec.profile;
+            }
+            index += 1;
+        }
+
+        ChannelProfile::default_for(channel_id)
+    }
+}

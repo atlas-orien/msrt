@@ -21,7 +21,7 @@ fn receive_bytes(engine: &mut Engine, bytes: &[u8]) -> ReceiveReport {
     let mut report = ReceiveReport::Incomplete { needed: None };
 
     loop {
-        let outcome = match engine.ingress.feed(input, &Crc16) {
+        let outcome = match engine.machine.ingress.feed(input, &Crc16) {
             Ok(outcome) => outcome,
             Err(error) => return ReceiveReport::Error(error),
         };
@@ -73,14 +73,23 @@ fn receive_complete_packet(engine: &mut Engine, bytes: &[u8]) -> ReceiveReport {
                 return ReceiveReport::Error(Error::new(ErrorKind::Engine));
             }
 
-            if engine.dedup.observe(packet_number) == DedupDecision::Duplicate {
+            if engine.machine.dedup.observe(packet_number) == DedupDecision::Duplicate {
                 return ReceiveReport::Duplicate { packet_number };
             }
 
-            match engine.reassembly.observe(fragment, engine.now_ms) {
+            match engine
+                .machine
+                .reassembly
+                .observe(fragment, engine.machine.now_ms)
+            {
                 Ok(Some(mut message)) => {
-                    message.profile = engine.channel_profile(message.channel_id);
-                    if engine.events.push(EngineOutput::Message(message)).is_err() {
+                    message.profile = engine.config.channel_profile(message.channel_id);
+                    if engine
+                        .machine
+                        .events
+                        .push(EngineOutput::Message(message))
+                        .is_err()
+                    {
                         return ReceiveReport::Error(Error::new(ErrorKind::Engine));
                     }
                     ReceiveReport::Packet { packet_number }
@@ -90,7 +99,7 @@ fn receive_complete_packet(engine: &mut Engine, bytes: &[u8]) -> ReceiveReport {
             }
         }
         PacketDecode::Ack(ack) => {
-            engine.in_flight.ack_frame(ack.frame);
+            engine.machine.in_flight.ack_frame(ack.frame);
             ReceiveReport::Ack {
                 packet_number: ack.frame.largest_acknowledged,
             }

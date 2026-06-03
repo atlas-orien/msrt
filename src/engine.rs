@@ -23,12 +23,7 @@ pub use scheduler::{Schedule, Scheduler};
 pub use time::{Duration, Instant};
 
 use crate::core::{ChannelId, Error, MessageId, PacketNumber, Result};
-use crate::reliability::{ChannelReliability, PacketDedup, ReliabilityMode};
-use crate::wire::StreamingDecoder;
-
-use machine::{
-    ack::AckRanges, inflight::InFlightPackets, queue::EventQueue, reassembly::ReassemblyBuffer,
-};
+use machine::Machine;
 
 /// Minimal non-blocking MSRT protocol engine.
 ///
@@ -37,21 +32,8 @@ use machine::{
 /// reassembly succeeds.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Engine {
-    pub(crate) next_packet_number: PacketNumber,
-    pub(crate) next_message_id: MessageId,
-    pub(crate) fragment_bytes: usize,
-    pub(crate) max_retransmit_attempts: u8,
-    pub(crate) retransmit_timeout_ms: u64,
-    pub(crate) reassembly_timeout_ms: u64,
-    pub(crate) channel_specs: [Option<ChannelSpec>; MAX_CHANNEL_SPECS],
-    pub(crate) channel_policies: [Option<ChannelReliability>; MAX_CHANNEL_POLICIES],
-    pub(crate) now_ms: u64,
-    pub(crate) events: EventQueue,
-    pub(crate) in_flight: InFlightPackets,
-    pub(crate) ack_ranges: AckRanges,
-    pub(crate) ingress: StreamingDecoder<MAX_INGRESS_BYTES>,
-    pub(crate) dedup: PacketDedup<MAX_IN_FLIGHT_PACKETS>,
-    pub(crate) reassembly: ReassemblyBuffer,
+    pub(crate) config: EngineConfig,
+    pub(crate) machine: Machine,
 }
 
 impl Engine {
@@ -59,28 +41,15 @@ impl Engine {
     #[must_use]
     pub const fn new(config: EngineConfig) -> Self {
         Self {
-            next_packet_number: config.initial_packet_number,
-            next_message_id: config.initial_message_id,
-            fragment_bytes: config.fragment_bytes,
-            max_retransmit_attempts: config.max_retransmit_attempts,
-            retransmit_timeout_ms: config.retransmit_timeout_ms,
-            reassembly_timeout_ms: config.reassembly_timeout_ms,
-            channel_specs: config.channel_specs,
-            channel_policies: config.channel_policies,
-            now_ms: 0,
-            events: EventQueue::new(),
-            in_flight: InFlightPackets::new(),
-            ack_ranges: AckRanges::new(),
-            ingress: StreamingDecoder::new(),
-            dedup: PacketDedup::new(),
-            reassembly: ReassemblyBuffer::new(),
+            config,
+            machine: Machine::new(config.initial_packet_number, config.initial_message_id),
         }
     }
 
     /// Polls one queued engine output event.
     #[cfg(test)]
     pub(crate) fn poll_event(&mut self) -> Option<EngineOutput> {
-        self.events.pop()
+        self.machine.events.pop()
     }
 
     /// Polls one high-level engine action.
@@ -88,7 +57,7 @@ impl Engine {
     /// Write events are copied into `tx_buf` and returned as a borrowed byte
     /// slice so callers can pass the buffer directly to their link layer.
     pub fn poll<'a>(&mut self, tx_buf: &'a mut [u8]) -> Result<EnginePoll<'a>> {
-        let Some(event) = self.events.pop() else {
+        let Some(event) = self.machine.events.pop() else {
             return Ok(EnginePoll::Idle);
         };
 
@@ -132,57 +101,6 @@ impl Engine {
     /// Advances time-driven protocol work.
     pub fn tick(&mut self, now_ms: u64) {
         machine::retransmit::tick(self, now_ms);
-    }
-
-    /// Returns the next packet number that will be assigned.
-    #[must_use]
-    pub const fn next_packet_number(&self) -> PacketNumber {
-        self.next_packet_number
-    }
-
-    pub(crate) fn reliability_mode(&self, channel_id: ChannelId) -> ReliabilityMode {
-        let mut spec_index = 0;
-
-        while spec_index < MAX_CHANNEL_SPECS {
-            if let Some(spec) = self.channel_specs[spec_index]
-                && spec.channel_id.get() == channel_id.get()
-            {
-                return spec.reliability_mode;
-            }
-            spec_index += 1;
-        }
-
-        if channel_id.is_log() {
-            return ReliabilityMode::BestEffort;
-        }
-
-        let mut index = 0;
-
-        while index < MAX_CHANNEL_POLICIES {
-            if let Some(policy) = self.channel_policies[index]
-                && policy.channel_id.get() == channel_id.get()
-            {
-                return policy.mode;
-            }
-            index += 1;
-        }
-
-        ReliabilityMode::Reliable
-    }
-
-    pub(crate) fn channel_profile(&self, channel_id: ChannelId) -> ChannelProfile {
-        let mut index = 0;
-
-        while index < MAX_CHANNEL_SPECS {
-            if let Some(spec) = self.channel_specs[index]
-                && spec.channel_id.get() == channel_id.get()
-            {
-                return spec.profile;
-            }
-            index += 1;
-        }
-
-        ChannelProfile::default_for(channel_id)
     }
 }
 
@@ -742,7 +660,7 @@ mod tests {
             };
         }
 
-        assert_eq!(engine.in_flight.packets().count(), 0);
+        assert_eq!(engine.machine.in_flight.packets().count(), 0);
 
         engine.tick(1);
 
@@ -829,7 +747,7 @@ mod tests {
         let write = next_write(&mut sender);
 
         assert_eq!(write.as_bytes()[9], crate::core::Flags::EMPTY.bits());
-        assert_eq!(sender.in_flight.packets().count(), 0);
+        assert_eq!(sender.machine.in_flight.packets().count(), 0);
 
         assert!(matches!(
             receiver.receive(write.as_bytes()),
@@ -861,7 +779,7 @@ mod tests {
         let write = next_write(&mut sender);
 
         assert_eq!(write.as_bytes()[9], crate::core::Flags::EMPTY.bits());
-        assert_eq!(sender.in_flight.packets().count(), 0);
+        assert_eq!(sender.machine.in_flight.packets().count(), 0);
 
         assert!(matches!(
             receiver.receive(write.as_bytes()),
@@ -936,7 +854,7 @@ mod tests {
         assert_eq!(failed.message_id, message_id);
         assert_eq!(failed.channel_id, crate::core::ChannelId::DEFAULT);
         assert_eq!(failed.reason, super::SendFailureReason::RetryLimitReached);
-        assert_eq!(engine.in_flight.packets().count(), 0);
+        assert_eq!(engine.machine.in_flight.packets().count(), 0);
         assert!(engine.poll_event().is_none());
     }
 
@@ -985,7 +903,7 @@ mod tests {
         assert_eq!(failed.message_id, message_id);
         assert_eq!(failed.channel_id, crate::core::ChannelId::DEFAULT);
         assert_eq!(failed.reason, super::SendFailureReason::RetryLimitReached);
-        assert_eq!(engine.in_flight.packets().count(), 0);
+        assert_eq!(engine.machine.in_flight.packets().count(), 0);
         assert!(engine.poll_event().is_none());
     }
 

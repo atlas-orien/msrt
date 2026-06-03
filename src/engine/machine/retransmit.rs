@@ -5,10 +5,11 @@ use crate::engine::{
 };
 
 pub(crate) fn tick(engine: &mut Engine, now_ms: u64) {
-    engine.now_ms = now_ms;
+    engine.machine.now_ms = now_ms;
     engine
+        .machine
         .reassembly
-        .expire(now_ms, engine.reassembly_timeout_ms);
+        .expire(now_ms, engine.config.reassembly_timeout_ms);
 
     let mut retransmits = [None; MAX_IN_FLIGHT_PACKETS];
     let mut retransmit_len = 0;
@@ -17,12 +18,12 @@ pub(crate) fn tick(engine: &mut Engine, now_ms: u64) {
     let mut failed_messages = [None; MAX_IN_FLIGHT_PACKETS];
     let mut failed_message_len = 0;
 
-    for packet in engine.in_flight.packets() {
-        if now_ms.saturating_sub(packet.last_sent_ms) < engine.retransmit_timeout_ms {
+    for packet in engine.machine.in_flight.packets() {
+        if now_ms.saturating_sub(packet.last_sent_ms) < engine.config.retransmit_timeout_ms {
             continue;
         }
 
-        if packet.attempts >= engine.max_retransmit_attempts {
+        if packet.attempts >= engine.config.max_retransmit_attempts {
             let already_failed = failed_messages[..failed_message_len]
                 .iter()
                 .flatten()
@@ -42,9 +43,11 @@ pub(crate) fn tick(engine: &mut Engine, now_ms: u64) {
 
     for packet in failures[..failure_len].iter().flatten() {
         engine
+            .machine
             .in_flight
             .remove_message(packet.channel_id, packet.message_id);
         let _ = engine
+            .machine
             .events
             .push(EngineOutput::SendFailed(SendFailedEvent {
                 channel_id: packet.channel_id,
@@ -64,9 +67,10 @@ pub(crate) fn tick(engine: &mut Engine, now_ms: u64) {
         }
 
         engine
+            .machine
             .in_flight
             .note_retransmit(packet.packet_number, now_ms);
-        let _ = engine.events.push(EngineOutput::Write(WriteEvent {
+        let _ = engine.machine.events.push(EngineOutput::Write(WriteEvent {
             packet_number: packet.packet_number,
             bytes: packet.bytes,
             len: packet.len,

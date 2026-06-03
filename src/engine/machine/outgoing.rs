@@ -18,9 +18,9 @@ pub(crate) fn send_on(
     channel_id: ChannelId,
     message: &[u8],
 ) -> Result<MessageId> {
-    let fragment_bytes = engine.fragment_bytes.clamp(1, max_fragment_bytes());
-    let message_id = engine.next_message_id;
-    let mode = engine.reliability_mode(channel_id);
+    let fragment_bytes = engine.config.fragment_bytes.clamp(1, max_fragment_bytes());
+    let message_id = engine.machine.next_message_id;
+    let mode = engine.config.reliability_mode(channel_id);
     send_message_fragments(
         engine,
         channel_id,
@@ -29,24 +29,25 @@ pub(crate) fn send_on(
         fragment_bytes,
         mode,
     )?;
-    engine.next_message_id = MessageId::new(engine.next_message_id.get().wrapping_add(1));
+    engine.machine.next_message_id =
+        MessageId::new(engine.machine.next_message_id.get().wrapping_add(1));
 
     Ok(message_id)
 }
 
 pub(crate) fn queue_ack(engine: &mut Engine, acknowledged: PacketNumber) -> Result<()> {
-    engine.ack_ranges.observe(acknowledged);
-    let frame = engine.ack_ranges.frame();
-    let packet_number = engine.next_packet_number;
+    engine.machine.ack_ranges.observe(acknowledged);
+    let frame = engine.machine.ack_ranges.frame();
+    let packet_number = engine.machine.next_packet_number;
     let mut wire = [0; MAX_WIRE_BYTES];
     let written = encode_ack_packet(packet_number, frame, &mut wire, &Crc16)?;
 
-    engine.events.push(EngineOutput::Write(WriteEvent {
+    engine.machine.events.push(EngineOutput::Write(WriteEvent {
         packet_number,
         bytes: wire,
         len: written,
     }))?;
-    engine.next_packet_number = engine.next_packet_number.next();
+    engine.machine.next_packet_number = engine.machine.next_packet_number.next();
 
     Ok(())
 }
@@ -68,7 +69,7 @@ fn send_message_fragments(
     while offset < message.len() || (message.is_empty() && offset == 0) {
         let end = core::cmp::min(offset + fragment_bytes, message.len());
         let fragment = &message[offset..end];
-        let packet_number = engine.next_packet_number;
+        let packet_number = engine.machine.next_packet_number;
         let mut wire = [0; MAX_WIRE_BYTES];
         let flags = fragment_flags(offset, end, message.len());
         let encoded = FragmentToEncode {
@@ -83,13 +84,13 @@ fn send_message_fragments(
         };
         let written = encode_message_fragment(encoded, &mut wire, &Crc16)?;
 
-        engine.events.push(EngineOutput::Write(WriteEvent {
+        engine.machine.events.push(EngineOutput::Write(WriteEvent {
             packet_number,
             bytes: wire,
             len: written,
         }))?;
         if matches!(mode, ReliabilityMode::Reliable) {
-            engine.in_flight.track(InFlightPacket {
+            engine.machine.in_flight.track(InFlightPacket {
                 packet_number,
                 channel_id,
                 message_id,
@@ -99,7 +100,7 @@ fn send_message_fragments(
                 last_sent_ms: 0,
             })?;
         }
-        engine.next_packet_number = engine.next_packet_number.next();
+        engine.machine.next_packet_number = engine.machine.next_packet_number.next();
 
         if message.is_empty() {
             break;
