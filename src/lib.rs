@@ -12,6 +12,8 @@
 pub mod core;
 /// Protocol engine boundaries.
 pub mod engine;
+/// Endpoint session lifecycle helpers.
+pub mod endpoint;
 /// Shared protocol errors.
 pub mod error;
 /// Reliability policy boundaries.
