@@ -67,6 +67,108 @@ loop:
 
 `poll` 每次返回一个动作，而不是一次性清空所有状态。这样 adapter 可以自然地控制写出节奏。
 
+## Send 模型
+
+`send(message)` 是 outgoing message 进入协议状态机的入口。调用方提交的是一个完整 application message，不需要自己拆 packet，也不需要关心 wire envelope。
+
+当前 send 链路是：
+
+```text
+Engine::send(message)
+  -> Engine::send_on(default_channel, message)
+    -> Machine::send_on(config, channel_id, message)
+      -> 分配 message_id
+      -> 根据 channel 选择 reliability mode
+      -> 按 fragment_bytes 拆分 message
+      -> 每个 fragment 编码成 packet
+      -> 每个 packet 包进 wire envelope
+      -> 将 envelope 作为 Write event 放入事件队列
+      -> reliable packet 同时保存到 in-flight table
+```
+
+所以 `send` 做的是“生成待发送动作”，不是直接写链路。外部真正拿到 bytes 是通过后续 `poll()`：
+
+```text
+send(message)
+  -> queue Write(packet 0)
+  -> queue Write(packet 1)
+  -> queue Write(packet 2)
+
+poll(now_ms, tx_buf)
+  -> EnginePoll::Transmit(packet 0 bytes)
+
+poll(now_ms, tx_buf)
+  -> EnginePoll::Transmit(packet 1 bytes)
+
+poll(now_ms, tx_buf)
+  -> EnginePoll::Transmit(packet 2 bytes)
+```
+
+`poll` 一次只返回一个动作。这样 engine 不需要知道 UART FIFO、DMA、USB CDC、UDP socket 或测试 adapter 一次能写多少 bytes。adapter 如果想尽快清空队列，可以在自己的主循环里反复调用 `poll`，直到返回 `Idle`。
+
+## Send 和可靠性
+
+reliable channel 和 best-effort channel 在 `send` 后的保存策略不同。
+
+best-effort packet：
+
+```text
+send
+  -> encode envelope
+  -> queue Write event
+  -> poll returns Transmit
+  -> 不进入 in-flight
+  -> 不等待 ACK
+  -> 不重传
+```
+
+reliable packet：
+
+```text
+send
+  -> encode envelope
+  -> queue Write event
+  -> copy envelope into in-flight table
+  -> poll returns Transmit
+  -> 等待 peer ACK
+```
+
+收到 ACK 后：
+
+```text
+receive(ack packet)
+  -> update in-flight table
+  -> remove acknowledged packet
+```
+
+如果超过重传时间还没有 ACK：
+
+```text
+poll(now_ms, tx_buf)
+  -> tick_retransmit
+  -> inspect in-flight table
+  -> queue retransmit Write event
+  -> pop one event
+  -> EnginePoll::Transmit(retransmit bytes)
+```
+
+如果重传次数达到上限：
+
+```text
+poll(now_ms, tx_buf)
+  -> tick_retransmit
+  -> remove failed message packets from in-flight
+  -> queue SendFailed event
+  -> EnginePoll::SendFailed
+```
+
+因此 reliable send 的核心状态是两份数据：
+
+- event queue 保存“等待外部执行的动作”。
+- in-flight table 保存“已经发送或即将发送、仍然需要 ACK 的 packet 副本”。
+
+这两份状态不能合并。event queue 是动作队列，`poll` 会不断弹出；in-flight table 是可靠性状态，ACK 到达或重传失败之前必须保留。
+
 ## Receive 模型
 
 `receive(bytes)` 是 incoming byte stream 进入协议状态机的入口。它不等待更多输入，也不假设这次传入的 `bytes` 刚好是一包。
