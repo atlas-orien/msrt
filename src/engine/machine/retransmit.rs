@@ -7,7 +7,7 @@ use crate::engine::{
 };
 
 impl Machine {
-    pub(crate) fn tick_retransmit(&mut self, config: &EngineConfig, now_ms: u64) {
+    pub(super) fn tick_retransmit(&mut self, config: &EngineConfig, now_ms: u64) {
         self.now_ms = now_ms;
         self.reassembly.expire(now_ms, config.reassembly_timeout_ms);
 

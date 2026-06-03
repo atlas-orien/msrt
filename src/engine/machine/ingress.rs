@@ -8,12 +8,16 @@ use crate::engine::{
     EngineConfig, ReceiveReport,
     machine::{
         EngineOutput, Machine,
-        packet::{PacketBytes, PacketDecode, decode_packet_bytes},
+        packet::{PacketBytes, PacketDecode},
     },
 };
 
 impl Machine {
-    pub(crate) fn receive(&mut self, config: &EngineConfig, bytes: &[u8]) -> ReceiveReport {
+    pub(super) fn receive_ingress(
+        &mut self,
+        config: &EngineConfig,
+        bytes: &[u8],
+    ) -> ReceiveReport {
         self.receive_bytes(config, bytes)
     }
 
@@ -37,7 +41,7 @@ impl Machine {
                         Ok(packet) => packet,
                         Err(error) => return ReceiveReport::Error(error),
                     };
-                    report = self.receive_complete_packet(config, packet.as_bytes());
+                    report = self.receive_complete_packet(config, &packet);
 
                     if matches!(report, ReceiveReport::Error(_)) {
                         return report;
@@ -64,8 +68,12 @@ impl Machine {
         }
     }
 
-    fn receive_complete_packet(&mut self, config: &EngineConfig, bytes: &[u8]) -> ReceiveReport {
-        match decode_packet_bytes(bytes) {
+    fn receive_complete_packet(
+        &mut self,
+        config: &EngineConfig,
+        packet: &PacketBytes,
+    ) -> ReceiveReport {
+        match packet.decode() {
             PacketDecode::Data(fragment) => {
                 let packet_number = fragment.packet_number;
                 let ack_eliciting = fragment.ack_eliciting;

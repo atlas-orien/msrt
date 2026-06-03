@@ -2,7 +2,7 @@
 
 use crate::core::{Error, MessageId, PacketNumber, Result};
 use crate::engine::{
-    EngineConfig, EnginePoll, MessageEvent, SendFailedEvent,
+    EngineConfig, EnginePoll, MessageEvent, ReceiveReport, SendFailedEvent,
     config::{MAX_IN_FLIGHT_PACKETS, MAX_INGRESS_BYTES, MAX_WIRE_BYTES},
 };
 use crate::reliability::PacketDedup;
@@ -61,7 +61,7 @@ impl Machine {
         now_ms: u64,
         tx_buf: &'a mut [u8],
     ) -> Result<EnginePoll<'a>> {
-        self.tick(config, now_ms);
+        self.tick_retransmit(config, now_ms);
 
         let Some(event) = self.events.pop() else {
             return Ok(EnginePoll::Idle);
@@ -94,8 +94,8 @@ impl Machine {
         self.send_on_impl(config, channel_id, message)
     }
 
-    fn tick(&mut self, config: &EngineConfig, now_ms: u64) {
-        self.tick_retransmit(config, now_ms);
+    pub(crate) fn receive(&mut self, config: &EngineConfig, bytes: &[u8]) -> ReceiveReport {
+        self.receive_ingress(config, bytes)
     }
 
     #[cfg(test)]

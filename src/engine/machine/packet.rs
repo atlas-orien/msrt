@@ -64,9 +64,13 @@ impl PacketBytes {
     pub(crate) const fn as_bytes(&self) -> &[u8] {
         self.bytes.split_at(self.len).0
     }
+
+    pub(crate) fn decode(&self) -> PacketDecode<'_> {
+        decode_packet_bytes(self.as_bytes())
+    }
 }
 
-pub(crate) fn decode_packet_bytes(bytes: &[u8]) -> PacketDecode<'_> {
+fn decode_packet_bytes(bytes: &[u8]) -> PacketDecode<'_> {
     let Some(header) = packet_header_from_bytes(bytes) else {
         return PacketDecode::Malformed;
     };

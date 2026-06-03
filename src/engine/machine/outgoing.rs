@@ -23,7 +23,7 @@ use crate::engine::{
 const ACK_PACKET_LEN: usize = PACKET_HEADER_LEN + ACK_FRAME_LEN;
 
 impl Machine {
-    pub(crate) fn send_on_impl(
+    pub(super) fn send_on_impl(
         &mut self,
         config: &EngineConfig,
         channel_id: ChannelId,
@@ -38,7 +38,7 @@ impl Machine {
         Ok(message_id)
     }
 
-    pub(crate) fn queue_ack(&mut self, acknowledged: PacketNumber) -> Result<()> {
+    pub(super) fn queue_ack(&mut self, acknowledged: PacketNumber) -> Result<()> {
         self.ack_ranges.observe(acknowledged);
         let frame = self.ack_ranges.frame();
         let packet_number = self.next_packet_number;
