@@ -22,7 +22,7 @@ pub(crate) const MAX_CHANNEL_POLICIES: usize = 4;
 /// Maximum channel specs configured in the engine.
 pub(crate) const MAX_CHANNEL_SPECS: usize = 4;
 /// Default maximum message fragment bytes per packet.
-pub(crate) const DEFAULT_FRAGMENT_BYTES: usize = 32;
+pub(crate) const DEFAULT_FRAGMENT_BYTES: usize = 64;
 /// Default maximum retransmission attempts before a send fails.
 ///
 /// This gives a reliable packet one initial send plus five retransmission

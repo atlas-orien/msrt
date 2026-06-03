@@ -163,7 +163,7 @@ fn engine_send_on_uses_channel_id() {
     let write = next_write(&mut a);
     let bytes = write.as_bytes();
 
-    assert_eq!(bytes[15], channel_id.get());
+    assert_eq!(bytes[crate::wire::WIRE_HEADER_LEN + 7], channel_id.get());
     assert!(matches!(
         b.receive(write.as_bytes()),
         ReceiveReport::Packet { .. }
@@ -294,7 +294,7 @@ fn engine_receives_half_packet() {
 
     a.send(b"hello").unwrap();
     let write = next_write(&mut a);
-    let split = 3;
+    let split = crate::wire::WIRE_MAGIC_LEN + 1;
 
     assert_eq!(
         b.receive(&write.as_bytes()[..split]),
@@ -397,17 +397,22 @@ fn engine_encodes_v1_draft_packet_and_frame_headers() {
     let write = next_write(&mut engine);
     let bytes = write.as_bytes();
 
-    assert_eq!(&bytes[..2], &crate::wire::EnvelopeMagic::MSRT.bytes());
-    assert_eq!(bytes[8], crate::core::PacketType::Data.code());
-    assert_eq!(bytes[9], crate::core::Flags::ACK_ELICITING.bits());
+    let packet = &bytes[crate::wire::WIRE_HEADER_LEN..];
+
     assert_eq!(
-        u32::from_le_bytes(bytes[10..14].try_into().unwrap()),
+        &bytes[..crate::wire::WIRE_MAGIC_LEN],
+        &crate::wire::EnvelopeMagic::MSRT.bytes()
+    );
+    assert_eq!(packet[0], crate::core::PacketType::Data.code());
+    assert_eq!(packet[1], crate::core::Flags::ACK_ELICITING.bits());
+    assert_eq!(
+        u32::from_le_bytes(packet[2..6].try_into().unwrap()),
         write.packet_number.get()
     );
-    assert_eq!(bytes[14], crate::core::FrameKind::Message.code());
-    assert_eq!(bytes[15], crate::core::ChannelId::DEFAULT.get());
+    assert_eq!(packet[6], crate::core::FrameKind::Message.code());
+    assert_eq!(packet[7], crate::core::ChannelId::DEFAULT.get());
     assert_eq!(
-        bytes[24],
+        packet[16],
         crate::core::MessageFlags::FIRST.bits() | crate::core::MessageFlags::LAST.bits()
     );
 }
@@ -503,7 +508,10 @@ fn engine_send_uses_default_application_channel() {
     let write = next_write(&mut engine);
     let bytes = write.as_bytes();
 
-    assert_eq!(bytes[15], crate::core::ChannelId::DEFAULT.get());
+    assert_eq!(
+        bytes[crate::wire::WIRE_HEADER_LEN + 7],
+        crate::core::ChannelId::DEFAULT.get()
+    );
 }
 
 #[test]
@@ -670,7 +678,7 @@ fn engine_send_failed_suppresses_same_tick_message_retransmits() {
 }
 
 fn fragment_len_from_wire(bytes: &[u8]) -> usize {
-    let packet_len = u16::from_le_bytes([bytes[4], bytes[5]]) as usize;
+    let packet_len = bytes[crate::wire::WIRE_PACKET_LEN_OFFSET] as usize;
 
     packet_len
         - crate::core::packet::header::PACKET_HEADER_LEN
@@ -697,7 +705,9 @@ fn next_polled_write(engine: &mut Engine, now_ms: u64) -> WriteEvent {
 
     WriteEvent {
         packet_number: crate::core::PacketNumber::new(u32::from_le_bytes(
-            bytes[10..14].try_into().unwrap(),
+            bytes[crate::wire::WIRE_HEADER_LEN + 2..crate::wire::WIRE_HEADER_LEN + 6]
+                .try_into()
+                .unwrap(),
         )),
         bytes: stored,
         len: bytes.len(),
@@ -727,26 +737,25 @@ fn ack_packet_for_ranges(
 ) -> WriteEvent {
     let mut bytes = [0; crate::engine::config::MAX_WIRE_BYTES];
     let packet_len = (crate::core::packet::header::PACKET_HEADER_LEN
-        + crate::core::frame::ack::ACK_FRAME_LEN) as u16;
+        + crate::core::frame::ack::ACK_FRAME_LEN) as u8;
     let total_len = crate::wire::WIRE_HEADER_LEN + usize::from(packet_len) + 2;
 
-    bytes[..2].copy_from_slice(&crate::wire::EnvelopeMagic::MSRT.bytes());
-    bytes[2] = 1;
-    bytes[3] = crate::wire::WIRE_HEADER_LEN as u8;
-    bytes[4..6].copy_from_slice(&packet_len.to_le_bytes());
-    bytes[6] = crate::wire::WireFlags::CHECKSUM_PRESENT.bits();
-    bytes[7] = 0;
-    bytes[8] = crate::core::PacketType::Ack.code();
-    bytes[9] = 0;
-    bytes[10..14].copy_from_slice(&packet_number.get().to_le_bytes());
-    bytes[14] = crate::core::FrameKind::Ack.code();
-    bytes[15..19].copy_from_slice(&ranges[ranges.len() - 1].1.get().to_le_bytes());
-    bytes[19] = ranges.len() as u8;
+    bytes[..crate::wire::WIRE_MAGIC_LEN].copy_from_slice(&crate::wire::EnvelopeMagic::MSRT.bytes());
+    bytes[crate::wire::WIRE_PACKET_LEN_OFFSET] = packet_len;
+    bytes[crate::wire::WIRE_HEADER_CRC_OFFSET] =
+        crate::wire::header_crc(crate::wire::EnvelopeMagic::MSRT, packet_len);
+    let packet = &mut bytes[crate::wire::WIRE_HEADER_LEN..];
+    packet[0] = crate::core::PacketType::Ack.code();
+    packet[1] = 0;
+    packet[2..6].copy_from_slice(&packet_number.get().to_le_bytes());
+    packet[6] = crate::core::FrameKind::Ack.code();
+    packet[7..11].copy_from_slice(&ranges[ranges.len() - 1].1.get().to_le_bytes());
+    packet[11] = ranges.len() as u8;
 
-    let mut offset = 20;
+    let mut offset = 12;
     for (start, end) in ranges {
-        bytes[offset..offset + 4].copy_from_slice(&start.get().to_le_bytes());
-        bytes[offset + 4..offset + 8].copy_from_slice(&end.get().to_le_bytes());
+        packet[offset..offset + 4].copy_from_slice(&start.get().to_le_bytes());
+        packet[offset + 4..offset + 8].copy_from_slice(&end.get().to_le_bytes());
         offset += 8;
     }
 

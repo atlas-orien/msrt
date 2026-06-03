@@ -12,7 +12,7 @@ use msrt::{
     reliability::{
         ChannelReliability, FragmentRange, MessageFragment, MessageKey, ReliabilityMode,
     },
-    wire::{EnvelopeHeader, EnvelopeMagic, WireEnvelope, WireFlags},
+    wire::{EnvelopeHeader, EnvelopeMagic, WireEnvelope},
 };
 
 #[test]
@@ -25,13 +25,13 @@ fn facade_exposes_core_packet_and_wire_envelope() {
     );
     let packet = Packet::new(header, &payload);
 
-    let envelope_header =
-        EnvelopeHeader::new(packet.payload_len() as u16, WireFlags::CHECKSUM_PRESENT);
+    let envelope_header = EnvelopeHeader::new(packet.payload_len() as u8);
     let envelope = WireEnvelope::new(envelope_header, packet.payload.as_bytes(), 0x1234);
 
-    assert_eq!(EnvelopeMagic::MSRT.bytes(), *b"MS");
+    assert_eq!(EnvelopeMagic::MSRT.bytes(), [0xA5]);
     assert_eq!(envelope.packet_bytes, &payload);
     assert!(envelope.has_valid_len());
+    assert!(envelope.header.has_valid_header_crc());
     assert_eq!(envelope.header.packet_len, 3);
 }
 
@@ -69,7 +69,11 @@ fn facade_exposes_concrete_engine_api() {
     };
 
     assert_eq!(
-        PacketNumber::new(u32::from_le_bytes(bytes[10..14].try_into().unwrap())),
+        PacketNumber::new(u32::from_le_bytes(
+            bytes[msrt::wire::WIRE_HEADER_LEN + 2..msrt::wire::WIRE_HEADER_LEN + 6]
+                .try_into()
+                .unwrap()
+        )),
         PacketNumber::ZERO
     );
     assert!(!bytes.is_empty());

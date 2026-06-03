@@ -276,7 +276,11 @@ fn is_data(write: SimWrite) -> bool {
 }
 
 fn packet_number(bytes: &[u8]) -> u32 {
-    u32::from_le_bytes(bytes[10..14].try_into().expect("packet number bytes"))
+    u32::from_le_bytes(
+        bytes[msrt::wire::WIRE_HEADER_LEN + 2..msrt::wire::WIRE_HEADER_LEN + 6]
+            .try_into()
+            .expect("packet number bytes"),
+    )
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

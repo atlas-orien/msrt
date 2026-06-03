@@ -2,7 +2,7 @@
 
 use crate::core::{Error, Packet, Result};
 
-use crate::wire::{EnvelopeHeader, WireEnvelope, WireFlags};
+use crate::wire::{EnvelopeHeader, WireEnvelope};
 
 /// Mutable output target for wire encoding.
 pub struct EncodeTarget<'a> {
@@ -53,13 +53,13 @@ pub trait Encoder {
 
     /// Returns the number of bytes needed for a packet envelope.
     fn encoded_len(&self, packet: Packet<'_>) -> usize {
-        EnvelopeHeader::new(packet.payload_len() as u16, WireFlags::CHECKSUM_PRESENT).total_len()
+        EnvelopeHeader::new(packet.payload_len() as u8).total_len()
     }
 
     /// Builds a borrowed wire envelope descriptor for a packet payload.
     fn envelope_for<'a>(&self, packet: Packet<'a>, checksum: u16) -> WireEnvelope<'a> {
         WireEnvelope::new(
-            EnvelopeHeader::new(packet.payload_len() as u16, WireFlags::CHECKSUM_PRESENT),
+            EnvelopeHeader::new(packet.payload_len() as u8),
             packet.payload.as_bytes(),
             checksum,
         )

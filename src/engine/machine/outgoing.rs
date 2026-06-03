@@ -8,7 +8,8 @@ use crate::core::{
 };
 use crate::reliability::ReliabilityMode;
 use crate::wire::{
-    Checksum, Crc16, EnvelopeHeader, EnvelopeMagic, WireFlags, checksum::CHECKSUM_LEN,
+    Checksum, Crc16, EnvelopeHeader, EnvelopeMagic, WIRE_HEADER_CRC_OFFSET, WIRE_HEADER_LEN,
+    WIRE_MAGIC_LEN, WIRE_PACKET_LEN_OFFSET, checksum::CHECKSUM_LEN,
 };
 
 use crate::engine::{
@@ -139,39 +140,37 @@ fn encode_message_fragment(
 ) -> Result<usize> {
     let packet_len =
         PACKET_HEADER_LEN + MESSAGE_FRAME_HEADER_LEN + fragment_to_encode.fragment.len();
-    let packet_len = u16::try_from(packet_len).map_err(|_| Error::new(ErrorKind::Engine))?;
+    let packet_len = u8::try_from(packet_len).map_err(|_| Error::new(ErrorKind::Engine))?;
     let channel_id = fragment_to_encode.channel_id.get();
     let message_len =
         u16::try_from(fragment_to_encode.message_len).map_err(|_| Error::new(ErrorKind::Engine))?;
     let fragment_offset = u16::try_from(fragment_to_encode.fragment_offset)
         .map_err(|_| Error::new(ErrorKind::Engine))?;
-    let envelope_header = EnvelopeHeader::new(packet_len, WireFlags::CHECKSUM_PRESENT);
+    let envelope_header = EnvelopeHeader::new(packet_len);
     let total_len = envelope_header.total_len();
 
     if out.len() < total_len {
         return Err(Error::buffer_too_small());
     }
 
-    out[..2].copy_from_slice(&EnvelopeMagic::MSRT.bytes());
-    out[2] = envelope_header.version;
-    out[3] = envelope_header.header_len;
-    out[4..6].copy_from_slice(&envelope_header.packet_len.to_le_bytes());
-    out[6] = envelope_header.flags.bits();
-    out[7] = envelope_header.reserved;
-    out[8] = PacketType::Data.code();
-    out[9] = if fragment_to_encode.ack_eliciting {
+    out[..WIRE_MAGIC_LEN].copy_from_slice(&EnvelopeMagic::MSRT.bytes());
+    out[WIRE_PACKET_LEN_OFFSET] = envelope_header.packet_len;
+    out[WIRE_HEADER_CRC_OFFSET] = envelope_header.header_crc;
+    let packet = &mut out[WIRE_HEADER_LEN..];
+    packet[0] = PacketType::Data.code();
+    packet[1] = if fragment_to_encode.ack_eliciting {
         Flags::ACK_ELICITING.bits()
     } else {
         Flags::EMPTY.bits()
     };
-    out[10..14].copy_from_slice(&fragment_to_encode.packet_number.get().to_le_bytes());
-    out[14] = FrameKind::Message.code();
-    out[15] = channel_id;
-    out[16..20].copy_from_slice(&fragment_to_encode.message_id.get().to_le_bytes());
-    out[20..22].copy_from_slice(&message_len.to_le_bytes());
-    out[22..24].copy_from_slice(&fragment_offset.to_le_bytes());
-    out[24] = fragment_to_encode.flags;
-    out[25..25 + fragment_to_encode.fragment.len()].copy_from_slice(fragment_to_encode.fragment);
+    packet[2..6].copy_from_slice(&fragment_to_encode.packet_number.get().to_le_bytes());
+    packet[6] = FrameKind::Message.code();
+    packet[7] = channel_id;
+    packet[8..12].copy_from_slice(&fragment_to_encode.message_id.get().to_le_bytes());
+    packet[12..14].copy_from_slice(&message_len.to_le_bytes());
+    packet[14..16].copy_from_slice(&fragment_offset.to_le_bytes());
+    packet[16] = fragment_to_encode.flags;
+    packet[17..17 + fragment_to_encode.fragment.len()].copy_from_slice(fragment_to_encode.fragment);
 
     let checksum_value = checksum.calculate(&out[..total_len - CHECKSUM_LEN]);
     out[total_len - CHECKSUM_LEN..total_len].copy_from_slice(&checksum_value.to_le_bytes());
@@ -185,33 +184,32 @@ fn encode_ack_packet(
     out: &mut [u8],
     checksum: &impl Checksum,
 ) -> Result<usize> {
-    let packet_len = u16::try_from(ACK_PACKET_LEN).map_err(|_| Error::new(ErrorKind::Engine))?;
-    let envelope_header = EnvelopeHeader::new(packet_len, WireFlags::CHECKSUM_PRESENT);
+    let packet_len = u8::try_from(ACK_PACKET_LEN).map_err(|_| Error::new(ErrorKind::Engine))?;
+    let envelope_header = EnvelopeHeader::new(packet_len);
     let total_len = envelope_header.total_len();
 
     if out.len() < total_len {
         return Err(Error::buffer_too_small());
     }
 
-    out[..2].copy_from_slice(&EnvelopeMagic::MSRT.bytes());
-    out[2] = envelope_header.version;
-    out[3] = envelope_header.header_len;
-    out[4..6].copy_from_slice(&envelope_header.packet_len.to_le_bytes());
-    out[6] = envelope_header.flags.bits();
-    out[7] = envelope_header.reserved;
-    out[8] = PacketType::Ack.code();
-    out[9] = 0;
-    out[10..14].copy_from_slice(&packet_number.get().to_le_bytes());
-    out[14] = FrameKind::Ack.code();
-    out[15..19].copy_from_slice(&frame.largest_acknowledged.get().to_le_bytes());
-    out[19] = frame.range_count;
+    out[..WIRE_MAGIC_LEN].copy_from_slice(&EnvelopeMagic::MSRT.bytes());
+    out[WIRE_PACKET_LEN_OFFSET] = envelope_header.packet_len;
+    out[WIRE_HEADER_CRC_OFFSET] = envelope_header.header_crc;
+    let packet = &mut out[WIRE_HEADER_LEN..];
+    packet[0] = PacketType::Ack.code();
+    packet[1] = 0;
+    packet[2..6].copy_from_slice(&packet_number.get().to_le_bytes());
+    packet[6] = FrameKind::Ack.code();
+    packet[7..11].copy_from_slice(&frame.largest_acknowledged.get().to_le_bytes());
+    packet[11] = frame.range_count;
 
-    let mut offset = 20;
+    let mut offset = 12;
     let mut index = 0;
 
     while index < MAX_ACK_RANGES {
-        out[offset..offset + 4].copy_from_slice(&frame.ranges[index].start.get().to_le_bytes());
-        out[offset + 4..offset + 8].copy_from_slice(&frame.ranges[index].end.get().to_le_bytes());
+        packet[offset..offset + 4].copy_from_slice(&frame.ranges[index].start.get().to_le_bytes());
+        packet[offset + 4..offset + 8]
+            .copy_from_slice(&frame.ranges[index].end.get().to_le_bytes());
         offset += 8;
         index += 1;
     }

@@ -5,7 +5,10 @@ pub mod header;
 pub mod magic;
 
 pub use flags::WireFlags;
-pub use header::{CHECKSUM_LEN, EnvelopeHeader, WIRE_HEADER_LEN};
+pub use header::{
+    CHECKSUM_LEN, EnvelopeHeader, WIRE_HEADER_CRC_OFFSET, WIRE_HEADER_LEN, WIRE_MAGIC_LEN,
+    WIRE_PACKET_LEN_OFFSET, header_crc,
+};
 pub use magic::EnvelopeMagic;
 
 /// Borrowed wire envelope.

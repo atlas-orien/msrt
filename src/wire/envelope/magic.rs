@@ -2,21 +2,21 @@
 
 /// Magic bytes used to find wire envelope boundaries.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct EnvelopeMagic(pub [u8; 2]);
+pub struct EnvelopeMagic(pub [u8; 1]);
 
 impl EnvelopeMagic {
     /// Default MSRT wire magic.
-    pub const MSRT: Self = Self(*b"MS");
+    pub const MSRT: Self = Self([0xA5]);
 
     /// Creates magic from raw bytes.
     #[must_use]
-    pub const fn new(bytes: [u8; 2]) -> Self {
+    pub const fn new(bytes: [u8; 1]) -> Self {
         Self(bytes)
     }
 
     /// Returns raw magic bytes.
     #[must_use]
-    pub const fn bytes(self) -> [u8; 2] {
+    pub const fn bytes(self) -> [u8; 1] {
         self.0
     }
 
@@ -33,7 +33,7 @@ mod tests {
 
     #[test]
     fn magic_matches_prefix() {
-        assert!(EnvelopeMagic::MSRT.matches_prefix(b"MSRT"));
-        assert!(!EnvelopeMagic::MSRT.matches_prefix(b"RT"));
+        assert!(EnvelopeMagic::MSRT.matches_prefix(&[0xA5, 0x01]));
+        assert!(!EnvelopeMagic::MSRT.matches_prefix(&[0x5A]));
     }
 }

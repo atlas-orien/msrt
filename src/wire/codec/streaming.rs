@@ -3,7 +3,8 @@
 use crate::core::{Error, Result};
 
 use crate::wire::{
-    CHECKSUM_LEN, Checksum, EnvelopeHeader, EnvelopeMagic, WIRE_HEADER_LEN, WireFlags,
+    CHECKSUM_LEN, Checksum, EnvelopeHeader, EnvelopeMagic, WIRE_HEADER_CRC_OFFSET, WIRE_HEADER_LEN,
+    WIRE_MAGIC_LEN, WIRE_PACKET_LEN_OFFSET,
 };
 
 /// Result of feeding bytes into a streaming wire decoder.
@@ -140,10 +141,7 @@ impl<const N: usize> StreamingDecoder<N> {
             return Ok(StreamDecodeOutcome::Resync { skipped: 1 });
         };
 
-        if !header.is_supported_version()
-            || !header.has_supported_header_len()
-            || !header.flags.contains(WireFlags::CHECKSUM_PRESENT)
-        {
+        if !header.has_valid_header_crc() {
             self.consume(1);
             return Ok(StreamDecodeOutcome::Resync { skipped: 1 });
         }
@@ -226,7 +224,7 @@ fn magic_prefix_len(bytes: &[u8]) -> usize {
 }
 
 fn header_from_bytes(bytes: &[u8]) -> Option<EnvelopeHeader> {
-    let magic = [*bytes.first()?, *bytes.get(1)?];
+    let magic: [u8; WIRE_MAGIC_LEN] = bytes.get(..WIRE_MAGIC_LEN)?.try_into().ok()?;
 
     if magic != EnvelopeMagic::MSRT.bytes() {
         return None;
@@ -234,18 +232,18 @@ fn header_from_bytes(bytes: &[u8]) -> Option<EnvelopeHeader> {
 
     Some(EnvelopeHeader {
         magic: EnvelopeMagic::MSRT,
-        version: *bytes.get(2)?,
-        header_len: *bytes.get(3)?,
-        packet_len: u16::from_le_bytes([*bytes.get(4)?, *bytes.get(5)?]),
-        flags: WireFlags::from_bits(*bytes.get(6)?),
-        reserved: *bytes.get(7)?,
+        packet_len: *bytes.get(WIRE_PACKET_LEN_OFFSET)?,
+        header_crc: *bytes.get(WIRE_HEADER_CRC_OFFSET)?,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::{StreamDecodeOutcome, StreamingDecoder};
-    use crate::wire::{Checksum, Crc16, EnvelopeHeader, EnvelopeMagic, WireFlags};
+    use crate::wire::{
+        Checksum, Crc16, EnvelopeHeader, EnvelopeMagic, WIRE_HEADER_CRC_OFFSET, WIRE_HEADER_LEN,
+        WIRE_MAGIC_LEN, WIRE_PACKET_LEN_OFFSET,
+    };
 
     const BUFFER_BYTES: usize = 64;
 
@@ -253,7 +251,7 @@ mod tests {
     fn decoder_waits_for_half_packet() {
         let mut decoder = StreamingDecoder::<BUFFER_BYTES>::new();
         let packet = wire_packet(b"hello");
-        let split = 4;
+        let split = WIRE_MAGIC_LEN + 1;
 
         assert_eq!(
             decoder.feed(&packet.as_bytes()[..split], &Crc16).unwrap(),
@@ -348,7 +346,7 @@ mod tests {
         let mut first = wire_packet(b"bad");
         let second = wire_packet(b"good");
         let mut sticky = [0; BUFFER_BYTES];
-        first.bytes[9] ^= 0xAA;
+        first.bytes[WIRE_HEADER_LEN] ^= 0xAA;
         sticky[..first.len].copy_from_slice(first.as_bytes());
         sticky[first.len..first.len + second.len].copy_from_slice(second.as_bytes());
 
@@ -370,7 +368,7 @@ mod tests {
     }
 
     struct TestWirePacket {
-        bytes: [u8; 16],
+        bytes: [u8; 32],
         len: usize,
     }
 
@@ -381,17 +379,14 @@ mod tests {
     }
 
     fn wire_packet(payload: &[u8]) -> TestWirePacket {
-        let header = EnvelopeHeader::new(payload.len() as u16, WireFlags::CHECKSUM_PRESENT);
+        let header = EnvelopeHeader::new(payload.len() as u8);
         let total_len = header.total_len();
-        let mut bytes = [0; 16];
+        let mut bytes = [0; 32];
 
-        bytes[..2].copy_from_slice(&EnvelopeMagic::MSRT.bytes());
-        bytes[2] = header.version;
-        bytes[3] = header.header_len;
-        bytes[4..6].copy_from_slice(&header.packet_len.to_le_bytes());
-        bytes[6] = header.flags.bits();
-        bytes[7] = header.reserved;
-        bytes[8..8 + payload.len()].copy_from_slice(payload);
+        bytes[..WIRE_MAGIC_LEN].copy_from_slice(&EnvelopeMagic::MSRT.bytes());
+        bytes[WIRE_PACKET_LEN_OFFSET] = header.packet_len;
+        bytes[WIRE_HEADER_CRC_OFFSET] = header.header_crc;
+        bytes[WIRE_HEADER_LEN..WIRE_HEADER_LEN + payload.len()].copy_from_slice(payload);
 
         let checksum = Crc16.calculate(&bytes[..total_len - 2]);
         bytes[total_len - 2..total_len].copy_from_slice(&checksum.to_le_bytes());
