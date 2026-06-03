@@ -6,8 +6,10 @@ use crate::wire::{Crc16, StreamDecodeOutcome};
 
 use crate::engine::{
     Engine, EngineOutput, ReceiveReport,
-    outgoing::queue_ack,
-    packet::{PacketBytes, PacketDecode, decode_packet_bytes},
+    machine::{
+        outgoing::queue_ack,
+        packet::{PacketBytes, PacketDecode, decode_packet_bytes},
+    },
 };
 
 pub(crate) fn receive(engine: &mut Engine, bytes: &[u8]) -> ReceiveReport {

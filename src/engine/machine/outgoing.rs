@@ -9,9 +9,8 @@ use crate::wire::{Checksum, Crc16, EnvelopeHeader, EnvelopeMagic, WireFlags};
 
 use crate::engine::{
     Engine, EngineOutput, MAX_MESSAGE_BYTES, MAX_WIRE_BYTES, WriteEvent,
-    inflight::InFlightPacket,
     layout::{ACK_PACKET_LEN, CHECKSUM_LEN, MESSAGE_FRAME_HEADER_LEN, PACKET_HEADER_LEN},
-    packet::fragment_flags,
+    machine::{inflight::InFlightPacket, packet::fragment_flags},
 };
 
 pub(crate) fn send_on(

@@ -4,6 +4,7 @@ pub mod config;
 pub mod event;
 pub(crate) mod layout;
 pub mod link;
+pub(crate) mod machine;
 pub mod message;
 pub mod scheduler;
 pub mod time;
@@ -21,23 +22,13 @@ pub use message::{DeliveredMessage, MessageDelivery, Reassembly};
 pub use scheduler::{Schedule, Scheduler};
 pub use time::{Duration, Instant};
 
-pub(crate) mod ack;
-pub(crate) mod inflight;
-pub(crate) mod ingress;
-pub(crate) mod outgoing;
-pub(crate) mod packet;
-pub(crate) mod queue;
-pub(crate) mod reassembly;
-pub(crate) mod retransmit;
-
 use crate::core::{ChannelId, Error, MessageId, PacketNumber, Result};
 use crate::reliability::{ChannelReliability, PacketDedup, ReliabilityMode};
 use crate::wire::StreamingDecoder;
 
-use ack::AckRanges;
-use inflight::InFlightPackets;
-use queue::EventQueue;
-use reassembly::ReassemblyBuffer;
+use machine::{
+    ack::AckRanges, inflight::InFlightPackets, queue::EventQueue, reassembly::ReassemblyBuffer,
+};
 
 /// Minimal non-blocking MSRT protocol engine.
 ///
@@ -127,7 +118,7 @@ impl Engine {
     ///
     /// This is the channel-aware form of [`Engine::send`].
     pub fn send_on(&mut self, channel_id: ChannelId, message: &[u8]) -> Result<MessageId> {
-        outgoing::send_on(self, channel_id, message)
+        machine::outgoing::send_on(self, channel_id, message)
     }
 
     /// Feeds already-arrived wire bytes into the engine.
@@ -135,12 +126,12 @@ impl Engine {
     /// This method never waits for more bytes. It handles the current input and
     /// queues events if a complete message becomes available.
     pub fn receive(&mut self, bytes: &[u8]) -> ReceiveReport {
-        ingress::receive(self, bytes)
+        machine::ingress::receive(self, bytes)
     }
 
     /// Advances time-driven protocol work.
     pub fn tick(&mut self, now_ms: u64) {
-        retransmit::tick(self, now_ms);
+        machine::retransmit::tick(self, now_ms);
     }
 
     /// Returns the next packet number that will be assigned.
