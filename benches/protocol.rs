@@ -241,7 +241,7 @@ fn poll_owned(engine: &mut Engine, now_ms: u64) -> BenchPoll {
     let mut tx_buf = [0; TX_BUF_BYTES];
 
     match engine.poll(now_ms, &mut tx_buf).expect("poll engine") {
-        EnginePoll::Transmit(bytes) => BenchPoll::Transmit(BenchWrite::new(bytes)),
+        EnginePoll::Transmit { bytes, .. } => BenchPoll::Transmit(BenchWrite::new(bytes)),
         EnginePoll::Message(_) => BenchPoll::Message,
         EnginePoll::SendFailed(failed) => {
             panic!("benchmark should not fail sends: {failed:?}");

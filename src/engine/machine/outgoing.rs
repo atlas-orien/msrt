@@ -52,6 +52,7 @@ pub(crate) fn queue_ack(engine: &mut Engine, acknowledged: PacketNumber) -> Resu
         packet_number,
         bytes: wire,
         len: written,
+        attempts: 0,
     }))?;
     engine.machine.next_packet_number = engine.machine.next_packet_number.next();
 
@@ -94,6 +95,7 @@ fn send_message_fragments(
             packet_number,
             bytes: wire,
             len: written,
+            attempts: 0,
         }))?;
         if matches!(mode, ReliabilityMode::Reliable) {
             engine.machine.in_flight.track(InFlightPacket {
@@ -103,7 +105,7 @@ fn send_message_fragments(
                 bytes: wire,
                 len: written,
                 attempts: 0,
-                last_sent_ms: 0,
+                last_sent_ms: engine.machine.now_ms,
             })?;
         }
         engine.machine.next_packet_number = engine.machine.next_packet_number.next();

@@ -76,6 +76,7 @@ pub(crate) fn tick(engine: &mut Engine, now_ms: u64) {
             packet_number: packet.packet_number,
             bytes: packet.bytes,
             len: packet.len,
+            attempts: packet.attempts.saturating_add(1),
         }));
     }
 }

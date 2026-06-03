@@ -71,7 +71,12 @@ impl Default for Engine {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum EnginePoll<'a> {
     /// Protocol bytes should be transmitted on the link.
-    Transmit(&'a [u8]),
+    Transmit {
+        /// Encoded protocol bytes to write to the link.
+        bytes: &'a [u8],
+        /// Send attempt count: 0 for a first send and greater than 0 for retransmits.
+        attempts: u8,
+    },
     /// A complete application message has been reassembled.
     Message(MessageEvent),
     /// A message could not be sent reliably.

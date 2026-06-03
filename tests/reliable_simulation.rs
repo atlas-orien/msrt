@@ -104,7 +104,7 @@ fn pump_one(
     let mut tx_buf = [0; TX_BUF_BYTES];
 
     match src.poll(0, &mut tx_buf).expect("poll engine") {
-        EnginePoll::Transmit(bytes) => {
+        EnginePoll::Transmit { bytes, .. } => {
             let write = SimWrite::from_bytes(bytes);
             direction.deliver(dst, write);
             true
@@ -125,7 +125,7 @@ fn assert_no_unexpected_events(engine: &mut Engine) {
 
     loop {
         match engine.poll(0, &mut tx_buf).expect("poll engine") {
-            EnginePoll::Transmit(_) | EnginePoll::Message(_) => {}
+            EnginePoll::Transmit { .. } | EnginePoll::Message(_) => {}
             EnginePoll::SendFailed(failed) => {
                 panic!("simulation completed but found send failure: {failed:?}");
             }

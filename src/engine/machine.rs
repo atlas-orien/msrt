@@ -72,8 +72,15 @@ impl Machine {
                     return Err(Error::buffer_too_small());
                 }
 
+                engine
+                    .machine
+                    .in_flight
+                    .note_sent(write.packet_number, now_ms);
                 tx_buf[..write.len].copy_from_slice(write.as_bytes());
-                Ok(EnginePoll::Transmit(&tx_buf[..write.len]))
+                Ok(EnginePoll::Transmit {
+                    bytes: &tx_buf[..write.len],
+                    attempts: write.attempts,
+                })
             }
             EngineOutput::Message(message) => Ok(EnginePoll::Message(message)),
             EngineOutput::SendFailed(failed) => Ok(EnginePoll::SendFailed(failed)),
@@ -122,6 +129,8 @@ pub(crate) struct WriteEvent {
     pub bytes: [u8; MAX_WIRE_BYTES],
     /// Number of valid bytes in `bytes`.
     pub len: usize,
+    /// Send attempt count: 0 = first send, ≥1 = retransmit.
+    pub attempts: u8,
 }
 
 impl WriteEvent {

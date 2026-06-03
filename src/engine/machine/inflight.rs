@@ -91,4 +91,13 @@ impl InFlightPackets {
             }
         }
     }
+
+    pub(crate) fn note_sent(&mut self, packet_number: PacketNumber, now_ms: u64) {
+        for packet in self.packets.iter_mut().flatten() {
+            if packet.packet_number == packet_number {
+                packet.last_sent_ms = now_ms;
+                return;
+            }
+        }
+    }
 }

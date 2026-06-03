@@ -688,7 +688,7 @@ fn next_write(engine: &mut Engine) -> WriteEvent {
 fn next_polled_write(engine: &mut Engine, now_ms: u64) -> WriteEvent {
     let mut tx_buf = [0; crate::engine::config::MAX_WIRE_BYTES];
 
-    let EnginePoll::Transmit(bytes) = engine.poll(now_ms, &mut tx_buf).unwrap() else {
+    let EnginePoll::Transmit { bytes, attempts } = engine.poll(now_ms, &mut tx_buf).unwrap() else {
         panic!("engine should produce transmit bytes");
     };
 
@@ -701,6 +701,7 @@ fn next_polled_write(engine: &mut Engine, now_ms: u64) -> WriteEvent {
         )),
         bytes: stored,
         len: bytes.len(),
+        attempts,
     }
 }
 
@@ -756,6 +757,7 @@ fn ack_packet_for_ranges(
         packet_number,
         bytes,
         len: total_len,
+        attempts: 0,
     }
 }
 

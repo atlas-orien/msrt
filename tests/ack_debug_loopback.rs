@@ -150,14 +150,14 @@ fn assert_no_send_failed(engine: &mut Engine) {
         match engine.poll(0, &mut tx_buf).expect("poll engine") {
             EnginePoll::SendFailed(failed) => panic!("unexpected send failure: {failed:?}"),
             EnginePoll::Idle => break,
-            EnginePoll::Transmit(_) | EnginePoll::Message(_) => {}
+            EnginePoll::Transmit { .. } | EnginePoll::Message(_) => {}
         }
     }
 }
 
 fn next_transmit<'a>(engine: &mut Engine, tx_buf: &'a mut [u8]) -> &'a [u8] {
     match engine.poll(0, tx_buf).expect("poll engine") {
-        EnginePoll::Transmit(bytes) => bytes,
+        EnginePoll::Transmit { bytes, .. } => bytes,
         other => panic!("engine should produce transmit bytes, got {other:?}"),
     }
 }
@@ -166,7 +166,7 @@ fn next_polled_message(engine: &mut Engine, tx_buf: &mut [u8]) -> MessageEvent {
     loop {
         match engine.poll(0, tx_buf).expect("poll engine") {
             EnginePoll::Message(message) => return message,
-            EnginePoll::Transmit(_) => {}
+            EnginePoll::Transmit { .. } => {}
             EnginePoll::SendFailed(failed) => panic!("unexpected send failure: {failed:?}"),
             EnginePoll::Idle => panic!("engine should produce a message event"),
         }
