@@ -75,8 +75,8 @@ impl Machine {
     ) -> ReceiveReport {
         match packet.decode() {
             PacketDecode::Data(fragment) => {
-                let packet_number = fragment.packet_number;
-                let ack_eliciting = fragment.ack_eliciting;
+                let packet_number = fragment.header.packet_number;
+                let ack_eliciting = fragment.header.is_ack_eliciting();
 
                 if ack_eliciting && self.queue_ack(packet_number).is_err() {
                     return ReceiveReport::Error(Error::new(ErrorKind::Engine));

@@ -163,7 +163,7 @@ fn engine_send_on_uses_channel_id() {
     let write = next_write(&mut a);
     let bytes = write.as_bytes();
 
-    assert_eq!(bytes[crate::wire::WIRE_HEADER_LEN + 7], channel_id.get());
+    assert_eq!(channel_id_from_wire(bytes), channel_id.get());
     assert!(matches!(
         b.receive(write.as_bytes()),
         ReceiveReport::Packet { .. }
@@ -409,10 +409,9 @@ fn engine_encodes_v1_draft_packet_and_frame_headers() {
         u32::from_le_bytes(packet[2..6].try_into().unwrap()),
         write.packet_number.get()
     );
-    assert_eq!(packet[6], crate::core::FrameKind::Message.code());
-    assert_eq!(packet[7], crate::core::ChannelId::DEFAULT.get());
+    assert_eq!(packet[6], crate::core::ChannelId::DEFAULT.get());
     assert_eq!(
-        packet[16],
+        packet[15],
         crate::core::MessageFlags::FIRST.bits() | crate::core::MessageFlags::LAST.bits()
     );
 }
@@ -460,7 +459,10 @@ fn engine_best_effort_packet_is_not_ack_eliciting() {
 
     let write = next_write(&mut engine);
 
-    assert_eq!(write.as_bytes()[9], crate::core::Flags::EMPTY.bits());
+    assert_eq!(
+        packet_flags_from_wire(write.as_bytes()),
+        crate::core::Flags::EMPTY.bits()
+    );
 }
 
 #[test]
@@ -509,7 +511,7 @@ fn engine_send_uses_default_application_channel() {
     let bytes = write.as_bytes();
 
     assert_eq!(
-        bytes[crate::wire::WIRE_HEADER_LEN + 7],
+        channel_id_from_wire(bytes),
         crate::core::ChannelId::DEFAULT.get()
     );
 }
@@ -525,7 +527,10 @@ fn engine_log_channel_defaults_to_best_effort_and_log_profile() {
 
     let write = next_write(&mut sender);
 
-    assert_eq!(write.as_bytes()[9], crate::core::Flags::EMPTY.bits());
+    assert_eq!(
+        packet_flags_from_wire(write.as_bytes()),
+        crate::core::Flags::EMPTY.bits()
+    );
     assert_eq!(sender.machine.in_flight.packets().count(), 0);
 
     assert!(matches!(
@@ -557,7 +562,10 @@ fn engine_channel_spec_overrides_profile_and_reliability() {
 
     let write = next_write(&mut sender);
 
-    assert_eq!(write.as_bytes()[9], crate::core::Flags::EMPTY.bits());
+    assert_eq!(
+        packet_flags_from_wire(write.as_bytes()),
+        crate::core::Flags::EMPTY.bits()
+    );
     assert_eq!(sender.machine.in_flight.packets().count(), 0);
 
     assert!(matches!(
@@ -680,9 +688,15 @@ fn engine_send_failed_suppresses_same_tick_message_retransmits() {
 fn fragment_len_from_wire(bytes: &[u8]) -> usize {
     let packet_len = bytes[crate::wire::WIRE_PACKET_LEN_OFFSET] as usize;
 
-    packet_len
-        - crate::core::packet::header::PACKET_HEADER_LEN
-        - crate::core::frame::message::MESSAGE_FRAME_HEADER_LEN
+    packet_len - crate::core::packet::header::PACKET_HEADER_LEN
+}
+
+fn packet_flags_from_wire(bytes: &[u8]) -> u8 {
+    bytes[crate::wire::WIRE_HEADER_LEN + 1]
+}
+
+fn channel_id_from_wire(bytes: &[u8]) -> u8 {
+    bytes[crate::wire::WIRE_HEADER_LEN + 6]
 }
 
 fn next_write(engine: &mut Engine) -> WriteEvent {
@@ -747,11 +761,16 @@ fn ack_packet_for_ranges(
     packet[0] = crate::core::PacketType::Ack.code();
     packet[1] = 0;
     packet[2..6].copy_from_slice(&packet_number.get().to_le_bytes());
-    packet[6] = crate::core::FrameKind::Ack.code();
-    packet[7..11].copy_from_slice(&ranges[ranges.len() - 1].1.get().to_le_bytes());
-    packet[11] = ranges.len() as u8;
+    packet[6] = crate::core::ChannelId::DEFAULT.get();
+    packet[7..11].copy_from_slice(&crate::core::MessageId::ZERO.get().to_le_bytes());
+    packet[11..13].copy_from_slice(&0u16.to_le_bytes());
+    packet[13..15].copy_from_slice(&0u16.to_le_bytes());
+    packet[15] = crate::core::MessageFlags::EMPTY.bits();
+    packet[16] = crate::core::FrameKind::Ack.code();
+    packet[17..21].copy_from_slice(&ranges[ranges.len() - 1].1.get().to_le_bytes());
+    packet[21] = ranges.len() as u8;
 
-    let mut offset = 12;
+    let mut offset = 22;
     for (start, end) in ranges {
         packet[offset..offset + 4].copy_from_slice(&start.get().to_le_bytes());
         packet[offset + 4..offset + 8].copy_from_slice(&end.get().to_le_bytes());

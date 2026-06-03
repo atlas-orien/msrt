@@ -53,13 +53,21 @@ impl<'a> Packet<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Flags, Packet, PacketHeader, PacketNumber, PacketType};
+    use super::{Flags, Packet, PacketHeader, PacketNumber};
+    use crate::core::{ChannelId, MessageFlags, MessageId};
 
     #[test]
     fn packet_payload_contains_encoded_frames() {
         let payload = [1, 2, 3];
-        let header =
-            PacketHeader::new(PacketType::Data, PacketNumber::new(9), Flags::ACK_ELICITING);
+        let header = PacketHeader::data(
+            PacketNumber::new(9),
+            Flags::ACK_ELICITING,
+            ChannelId::DEFAULT,
+            MessageId::new(7),
+            3,
+            0,
+            MessageFlags::FIRST,
+        );
         let packet = Packet::new(header, &payload);
 
         assert_eq!(packet.payload_len(), 3);

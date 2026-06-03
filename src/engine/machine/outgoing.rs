@@ -2,9 +2,9 @@
 
 use crate::core::{
     AckFrame, ChannelId, Error, ErrorKind, Flags, FrameKind, MAX_ACK_RANGES, MessageId,
-    PacketNumber, PacketType, Result,
-    frame::{ack::ACK_FRAME_LEN, message::MESSAGE_FRAME_HEADER_LEN},
-    packet::header::PACKET_HEADER_LEN,
+    MessageFlags, PacketNumber, Result,
+    frame::ack::ACK_FRAME_LEN,
+    packet::header::{PACKET_HEADER_LEN, PacketHeader},
 };
 use crate::reliability::ReliabilityMode;
 use crate::wire::{
@@ -75,18 +75,21 @@ impl Machine {
             let fragment = &message[offset..end];
             let packet_number = self.next_packet_number;
             let mut wire = [0; MAX_WIRE_BYTES];
-            let flags = fragment_flags(offset, end, message.len());
-            let encoded = FragmentToEncode {
+            let fragment_flags = MessageFlags::from_bits(fragment_flags(offset, end, message.len()));
+            let header = PacketHeader::data(
                 packet_number,
+                if matches!(mode, ReliabilityMode::Reliable) {
+                    Flags::ACK_ELICITING
+                } else {
+                    Flags::EMPTY
+                },
                 channel_id,
                 message_id,
-                message_len: message.len(),
-                fragment_offset: offset,
-                flags,
-                fragment,
-                ack_eliciting: matches!(mode, ReliabilityMode::Reliable),
-            };
-            let written = encode_message_fragment(encoded, &mut wire, &Crc16)?;
+                message.len(),
+                offset,
+                fragment_flags,
+            );
+            let written = encode_message_fragment(header, fragment, &mut wire, &Crc16)?;
 
             self.events.push(EngineOutput::Write(WriteEvent {
                 packet_number,
@@ -118,30 +121,17 @@ impl Machine {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct FragmentToEncode<'a> {
-    packet_number: PacketNumber,
-    channel_id: ChannelId,
-    message_id: MessageId,
-    message_len: usize,
-    fragment_offset: usize,
-    flags: u8,
-    fragment: &'a [u8],
-    ack_eliciting: bool,
-}
-
 fn encode_message_fragment(
-    fragment_to_encode: FragmentToEncode<'_>,
+    header: PacketHeader,
+    fragment: &[u8],
     out: &mut [u8],
     checksum: &impl Checksum,
 ) -> Result<usize> {
-    let packet_len =
-        PACKET_HEADER_LEN + MESSAGE_FRAME_HEADER_LEN + fragment_to_encode.fragment.len();
+    let packet_len = PACKET_HEADER_LEN + fragment.len();
     let packet_len = u8::try_from(packet_len).map_err(|_| Error::new(ErrorKind::Engine))?;
-    let channel_id = fragment_to_encode.channel_id.get();
     let message_len =
-        u16::try_from(fragment_to_encode.message_len).map_err(|_| Error::new(ErrorKind::Engine))?;
-    let fragment_offset = u16::try_from(fragment_to_encode.fragment_offset)
+        u16::try_from(header.message_len).map_err(|_| Error::new(ErrorKind::Engine))?;
+    let fragment_offset = u16::try_from(header.fragment_offset)
         .map_err(|_| Error::new(ErrorKind::Engine))?;
     let envelope_header = EnvelopeHeader::new(packet_len);
     let total_len = envelope_header.total_len();
@@ -154,20 +144,15 @@ fn encode_message_fragment(
     out[WIRE_PACKET_LEN_OFFSET] = envelope_header.packet_len;
     out[WIRE_HEADER_CRC_OFFSET] = envelope_header.header_crc;
     let packet = &mut out[WIRE_HEADER_LEN..];
-    packet[0] = PacketType::Data.code();
-    packet[1] = if fragment_to_encode.ack_eliciting {
-        Flags::ACK_ELICITING.bits()
-    } else {
-        Flags::EMPTY.bits()
-    };
-    packet[2..6].copy_from_slice(&fragment_to_encode.packet_number.get().to_le_bytes());
-    packet[6] = FrameKind::Message.code();
-    packet[7] = channel_id;
-    packet[8..12].copy_from_slice(&fragment_to_encode.message_id.get().to_le_bytes());
-    packet[12..14].copy_from_slice(&message_len.to_le_bytes());
-    packet[14..16].copy_from_slice(&fragment_offset.to_le_bytes());
-    packet[16] = fragment_to_encode.flags;
-    packet[17..17 + fragment_to_encode.fragment.len()].copy_from_slice(fragment_to_encode.fragment);
+    packet[0] = header.packet_type.code();
+    packet[1] = header.flags.bits();
+    packet[2..6].copy_from_slice(&header.packet_number.get().to_le_bytes());
+    packet[6] = header.channel_id.get();
+    packet[7..11].copy_from_slice(&header.message_id.get().to_le_bytes());
+    packet[11..13].copy_from_slice(&message_len.to_le_bytes());
+    packet[13..15].copy_from_slice(&fragment_offset.to_le_bytes());
+    packet[15] = header.fragment_flags.bits();
+    packet[16..16 + fragment.len()].copy_from_slice(fragment);
 
     let checksum_value = checksum.calculate(&out[..total_len - CHECKSUM_LEN]);
     out[total_len - CHECKSUM_LEN..total_len].copy_from_slice(&checksum_value.to_le_bytes());
@@ -181,6 +166,7 @@ fn encode_ack_packet(
     out: &mut [u8],
     checksum: &impl Checksum,
 ) -> Result<usize> {
+    let header = PacketHeader::ack(packet_number);
     let packet_len = u8::try_from(ACK_PACKET_LEN).map_err(|_| Error::new(ErrorKind::Engine))?;
     let envelope_header = EnvelopeHeader::new(packet_len);
     let total_len = envelope_header.total_len();
@@ -193,14 +179,19 @@ fn encode_ack_packet(
     out[WIRE_PACKET_LEN_OFFSET] = envelope_header.packet_len;
     out[WIRE_HEADER_CRC_OFFSET] = envelope_header.header_crc;
     let packet = &mut out[WIRE_HEADER_LEN..];
-    packet[0] = PacketType::Ack.code();
-    packet[1] = 0;
-    packet[2..6].copy_from_slice(&packet_number.get().to_le_bytes());
-    packet[6] = FrameKind::Ack.code();
-    packet[7..11].copy_from_slice(&frame.largest_acknowledged.get().to_le_bytes());
-    packet[11] = frame.range_count;
+    packet[0] = header.packet_type.code();
+    packet[1] = header.flags.bits();
+    packet[2..6].copy_from_slice(&header.packet_number.get().to_le_bytes());
+    packet[6] = header.channel_id.get();
+    packet[7..11].copy_from_slice(&header.message_id.get().to_le_bytes());
+    packet[11..13].copy_from_slice(&(header.message_len as u16).to_le_bytes());
+    packet[13..15].copy_from_slice(&(header.fragment_offset as u16).to_le_bytes());
+    packet[15] = header.fragment_flags.bits();
+    packet[16] = FrameKind::Ack.code();
+    packet[17..21].copy_from_slice(&frame.largest_acknowledged.get().to_le_bytes());
+    packet[21] = frame.range_count;
 
-    let mut offset = 12;
+    let mut offset = 22;
     let mut index = 0;
 
     while index < MAX_ACK_RANGES {
@@ -221,6 +212,5 @@ const fn max_fragment_bytes() -> usize {
     MAX_WIRE_BYTES
         - crate::wire::WIRE_HEADER_LEN
         - PACKET_HEADER_LEN
-        - MESSAGE_FRAME_HEADER_LEN
         - CHECKSUM_LEN
 }

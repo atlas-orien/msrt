@@ -3,8 +3,8 @@
 use crate::core::{
     AckFrame, AckRange, ChannelId, Error, Flags, FrameKind, MAX_ACK_RANGES, MessageFlags,
     MessageId, PacketNumber, PacketType, Result,
-    frame::{ack::ACK_FRAME_LEN, message::MESSAGE_FRAME_HEADER_LEN},
-    packet::header::PACKET_HEADER_LEN,
+    frame::ack::ACK_FRAME_LEN,
+    packet::header::{PACKET_HEADER_LEN, PacketHeader},
 };
 
 use crate::engine::config::MAX_WIRE_BYTES;
@@ -29,8 +29,7 @@ pub(crate) struct DecodedAck {
 /// Decoded message fragment.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct DecodedFragment<'a> {
-    pub(crate) packet_number: PacketNumber,
-    pub(crate) ack_eliciting: bool,
+    pub(crate) header: PacketHeader,
     pub(crate) channel_id: ChannelId,
     pub(crate) message_id: MessageId,
     pub(crate) message_len: usize,
@@ -77,14 +76,13 @@ fn decode_packet_bytes(bytes: &[u8]) -> PacketDecode<'_> {
 
     let frame_bytes = &bytes[PACKET_HEADER_LEN..];
 
-    match PacketType::from_code(header.packet_type) {
-        Some(PacketType::Data) => fragment_from_packet_bytes(header, frame_bytes)
+    match header.packet_type {
+        PacketType::Data => fragment_from_packet_bytes(header, bytes)
             .map(PacketDecode::Data)
             .unwrap_or(PacketDecode::Malformed),
-        Some(PacketType::Ack) => ack_from_packet_bytes(frame_bytes)
+        PacketType::Ack => ack_from_packet_bytes(frame_bytes)
             .map(PacketDecode::Ack)
             .unwrap_or(PacketDecode::Malformed),
-        None => PacketDecode::Malformed,
     }
 }
 
@@ -102,22 +100,20 @@ pub(crate) const fn fragment_flags(offset: usize, end: usize, message_len: usize
     flags
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct DecodedPacketHeader {
-    packet_type: u8,
-    packet_flags: u8,
-    packet_number: PacketNumber,
-}
-
-fn packet_header_from_bytes(bytes: &[u8]) -> Option<DecodedPacketHeader> {
+fn packet_header_from_bytes(bytes: &[u8]) -> Option<PacketHeader> {
     if bytes.len() < PACKET_HEADER_LEN {
         return None;
     }
 
-    Some(DecodedPacketHeader {
-        packet_type: *bytes.first()?,
-        packet_flags: *bytes.get(1)?,
+    Some(PacketHeader {
+        packet_type: PacketType::from_code(*bytes.first()?)?,
+        flags: Flags::from_bits(*bytes.get(1)?),
         packet_number: PacketNumber::new(u32::from_le_bytes(bytes.get(2..6)?.try_into().ok()?)),
+        channel_id: ChannelId::new(*bytes.get(6)?),
+        message_id: MessageId::new(u32::from_le_bytes(bytes.get(7..11)?.try_into().ok()?)),
+        message_len: u16::from_le_bytes(bytes.get(11..13)?.try_into().ok()?) as usize,
+        fragment_offset: u16::from_le_bytes(bytes.get(13..15)?.try_into().ok()?) as usize,
+        fragment_flags: MessageFlags::from_bits(*bytes.get(15)?),
     })
 }
 
@@ -163,35 +159,26 @@ fn ack_from_packet_bytes(bytes: &[u8]) -> Option<DecodedAck> {
     })
 }
 
-fn fragment_from_packet_bytes(
-    header: DecodedPacketHeader,
-    bytes: &[u8],
-) -> Option<DecodedFragment<'_>> {
-    if bytes.len() < MESSAGE_FRAME_HEADER_LEN || *bytes.first()? != FrameKind::Message.code() {
+fn fragment_from_packet_bytes(header: PacketHeader, bytes: &[u8]) -> Option<DecodedFragment<'_>> {
+    if bytes.len() < PACKET_HEADER_LEN {
         return None;
     }
 
-    let channel_id = ChannelId::new(*bytes.get(1)?);
-    let message_id = MessageId::new(u32::from_le_bytes(bytes.get(2..6)?.try_into().ok()?));
-    let message_len = u16::from_le_bytes(bytes.get(6..8)?.try_into().ok()?) as usize;
-    let fragment_offset = u16::from_le_bytes(bytes.get(8..10)?.try_into().ok()?) as usize;
-    let flags = *bytes.get(10)?;
-    let fragment = bytes.get(MESSAGE_FRAME_HEADER_LEN..)?;
+    let fragment = bytes.get(PACKET_HEADER_LEN..)?;
 
-    let end = fragment_offset.checked_add(fragment.len())?;
+    let end = header.fragment_offset.checked_add(fragment.len())?;
 
-    if end > message_len {
+    if end > header.message_len {
         return None;
     }
 
     Some(DecodedFragment {
-        packet_number: header.packet_number,
-        ack_eliciting: header.packet_flags & Flags::ACK_ELICITING.bits() != 0,
-        channel_id,
-        message_id,
-        message_len,
-        fragment_offset,
-        flags,
+        header,
+        channel_id: header.channel_id,
+        message_id: header.message_id,
+        message_len: header.message_len,
+        fragment_offset: header.fragment_offset,
+        flags: header.fragment_flags.bits(),
         bytes: fragment,
     })
 }

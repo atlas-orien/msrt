@@ -6,7 +6,7 @@ use msrt::{
     Engine,
     core::{
         ChannelId, Flags, MessageFlags, MessageFrame, MessageId, Packet, PacketHeader,
-        PacketNumber, PacketType,
+        PacketNumber,
     },
     engine::EnginePoll,
     reliability::{
@@ -18,10 +18,14 @@ use msrt::{
 #[test]
 fn facade_exposes_core_packet_and_wire_envelope() {
     let payload = [0x01, 0x02, 0x03];
-    let header = PacketHeader::new(
-        PacketType::Data,
+    let header = PacketHeader::data(
         PacketNumber::new(42),
         Flags::ACK_ELICITING,
+        ChannelId::DEFAULT,
+        MessageId::new(7),
+        payload.len(),
+        0,
+        MessageFlags::FIRST.union(MessageFlags::LAST),
     );
     let packet = Packet::new(header, &payload);
 
