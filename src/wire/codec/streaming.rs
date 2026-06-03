@@ -111,8 +111,16 @@ impl<const N: usize> StreamingDecoder<N> {
         }
 
         let Some(offset) = find_magic(&self.bytes[..self.len]) else {
-            let skipped = self.len;
-            self.len = 0;
+            let keep = magic_prefix_len(&self.bytes[..self.len]);
+            let skipped = self.len.saturating_sub(keep);
+            if skipped == 0 {
+                return Ok(StreamDecodeOutcome::NeedMore {
+                    additional: Some(EnvelopeMagic::MSRT.bytes().len() - keep),
+                });
+            }
+            if skipped > 0 {
+                self.consume(skipped);
+            }
             return Ok(StreamDecodeOutcome::Noise { skipped });
         };
 
@@ -202,6 +210,21 @@ fn find_magic(bytes: &[u8]) -> Option<usize> {
         .position(|window| window == EnvelopeMagic::MSRT.bytes())
 }
 
+fn magic_prefix_len(bytes: &[u8]) -> usize {
+    let magic = EnvelopeMagic::MSRT.bytes();
+    let max = core::cmp::min(bytes.len(), magic.len().saturating_sub(1));
+    let mut len = max;
+
+    while len > 0 {
+        if bytes[bytes.len() - len..] == magic[..len] {
+            return len;
+        }
+        len -= 1;
+    }
+
+    0
+}
+
 fn header_from_bytes(bytes: &[u8]) -> Option<EnvelopeHeader> {
     let magic = [*bytes.first()?, *bytes.get(1)?];
 
@@ -241,6 +264,29 @@ mod tests {
 
         assert_eq!(
             decoder.feed(&packet.as_bytes()[split..], &Crc16).unwrap(),
+            StreamDecodeOutcome::Packet {
+                packet_bytes: b"hello",
+                consumed: packet.len
+            }
+        );
+    }
+
+    #[test]
+    fn decoder_accepts_bytewise_packet_input() {
+        let mut decoder = StreamingDecoder::<BUFFER_BYTES>::new();
+        let packet = wire_packet(b"hello");
+
+        for byte in &packet.as_bytes()[..packet.len - 1] {
+            assert!(matches!(
+                decoder.feed(&[*byte], &Crc16).unwrap(),
+                StreamDecodeOutcome::NeedMore { .. }
+            ));
+        }
+
+        assert_eq!(
+            decoder
+                .feed(&[packet.as_bytes()[packet.len - 1]], &Crc16)
+                .unwrap(),
             StreamDecodeOutcome::Packet {
                 packet_bytes: b"hello",
                 consumed: packet.len

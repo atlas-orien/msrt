@@ -6,10 +6,12 @@ use msrt::{ChannelId, Config, Engine, Event, MAX_WIRE_BYTES, Receive, Write, cor
 fn reliable_transport_survives_drops_corruption_reordering_and_duplex_load() {
     let mut mac = Engine::new(Config {
         fragment_bytes: 8,
+        retransmit_timeout_ms: 1,
         ..Config::default()
     });
     let mut mcu = Engine::new(Config {
         fragment_bytes: 9,
+        retransmit_timeout_ms: 1,
         ..Config::default()
     });
     let nav = ChannelId::new(16);

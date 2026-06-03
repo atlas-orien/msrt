@@ -16,23 +16,22 @@ fn main() {
     mac.send(b"hello msrt").expect("queue mac hello");
     pump_link("mac", &mut mac, "mcu", &mut mcu);
 
-    let hello = drive_until_message("mcu", &mut mcu, "mac", &mut mac);
+    let (hello, ack_count) = drive_passive_until_message_and_ack("mcu", &mut mcu, "mac", &mut mac);
     assert_eq!(hello.as_bytes(), b"hello msrt");
+    assert!(
+        ack_count > 0,
+        "mac should receive at least one ack from passive mcu"
+    );
 
-    println!("mcu: send pong");
-    mcu.send(b"pong msrt").expect("queue mcu pong");
-    pump_link("mcu", &mut mcu, "mac", &mut mac);
-
-    let pong = drive_until_message("mac", &mut mac, "mcu", &mut mcu);
-    assert_eq!(pong.as_bytes(), b"pong msrt");
-
-    println!("msrt smoke ok: hello/pong message exchange");
+    println!("msrt smoke ok: passive mcu received hello and mac received {ack_count} ack(s)");
 }
 
 fn pump_link(src_name: &str, src: &mut Engine, dst_name: &str, dst: &mut Engine) {
     while let Some(event) = src.poll_event() {
         match event {
-            Event::Write(write) => deliver_write(src_name, dst_name, dst, write),
+            Event::Write(write) => {
+                let _ = deliver_write(src_name, dst_name, dst, write);
+            }
             Event::Message(message) => print_message(src_name, message),
             Event::SendFailed(failed) => {
                 panic!("{src_name}: unexpected send failure: {failed:?}");
@@ -41,14 +40,16 @@ fn pump_link(src_name: &str, src: &mut Engine, dst_name: &str, dst: &mut Engine)
     }
 }
 
-fn deliver_write(src_name: &str, dst_name: &str, dst: &mut Engine, write: Write) {
+fn deliver_write(src_name: &str, dst_name: &str, dst: &mut Engine, write: Write) -> Receive {
     println!(
         "{src_name} -> {dst_name}: packet_number={}, wire_bytes={}",
         write.packet_number.get(),
         write.as_bytes().len()
     );
 
-    match dst.receive(write.as_bytes()) {
+    let report = dst.receive(write.as_bytes());
+
+    match report {
         Receive::Packet { packet_number } => {
             println!("{dst_name}: accepted packet_number={}", packet_number.get());
         }
@@ -59,20 +60,28 @@ fn deliver_write(src_name: &str, dst_name: &str, dst: &mut Engine, write: Write)
             panic!("{dst_name}: unexpected receive report: {other:?}");
         }
     }
+
+    report
 }
 
-fn drive_until_message(
+fn drive_passive_until_message_and_ack(
     local_name: &str,
     local: &mut Engine,
     peer_name: &str,
     peer: &mut Engine,
-) -> Message {
+) -> (Message, usize) {
+    let mut ack_count = 0;
+
     loop {
         match local.poll_event() {
-            Some(Event::Write(write)) => deliver_write(local_name, peer_name, peer, write),
+            Some(Event::Write(write)) => {
+                if let Receive::Ack { .. } = deliver_write(local_name, peer_name, peer, write) {
+                    ack_count += 1;
+                }
+            }
             Some(Event::Message(message)) => {
                 print_message(local_name, message);
-                return message;
+                return (message, ack_count);
             }
             Some(Event::SendFailed(failed)) => {
                 panic!("{local_name}: unexpected send failure: {failed:?}");

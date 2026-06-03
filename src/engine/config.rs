@@ -26,9 +26,9 @@ pub const DEFAULT_FRAGMENT_BYTES: usize = 32;
 /// Default maximum retransmission attempts before a send fails.
 pub const DEFAULT_MAX_RETRANSMIT_ATTEMPTS: u8 = 3;
 /// Default retransmission timeout in engine ticks.
-pub const DEFAULT_RETRANSMIT_TIMEOUT_MS: u64 = 1;
+pub const DEFAULT_RETRANSMIT_TIMEOUT_MS: u64 = 250;
 /// Default incomplete message reassembly timeout in engine ticks.
-pub const DEFAULT_REASSEMBLY_TIMEOUT_MS: u64 = 30;
+pub const DEFAULT_REASSEMBLY_TIMEOUT_MS: u64 = 1_000;
 
 /// Protocol-level purpose associated with a channel.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
