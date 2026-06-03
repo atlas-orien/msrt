@@ -20,8 +20,8 @@ pub use event::{EngineEvent, EngineEventKind};
 pub use link::{LinkIo, LinkRead, LinkWrite, RawLink};
 pub use message::{DeliveredMessage, MessageDelivery, Reassembly};
 pub use runtime::{
-    Engine, EngineOutput, MessageEvent, ReceiveReport, SendFailedEvent, SendFailureReason,
-    WriteEvent,
+    Engine, EngineOutput, EnginePoll, MessageEvent, ReceiveReport, SendFailedEvent,
+    SendFailureReason, WriteEvent,
 };
 pub use scheduler::{Schedule, Scheduler};
 pub use time::{Duration, Instant};

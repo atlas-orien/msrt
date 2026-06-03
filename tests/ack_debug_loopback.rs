@@ -1,4 +1,4 @@
-use msrt::{ChannelId, Config, Engine, Event, Receive};
+use msrt::{ChannelId, Config, Engine, Event, Poll, Receive};
 
 #[test]
 fn default_message_is_acked_without_adapter() {
@@ -86,6 +86,36 @@ fn split_serial_reads_still_ack_and_debug_without_adapter() {
     assert_no_send_failed(&mut mcu);
 }
 
+#[test]
+fn poll_copies_transmit_bytes_into_external_buffer() {
+    let mut host = Engine::new(Config::default());
+    let mut mcu = Engine::new(Config::default());
+    let mut host_tx = [0; msrt::MAX_WIRE_BYTES];
+    let mut mcu_tx = [0; msrt::MAX_WIRE_BYTES];
+
+    host.send(b"host ping").expect("queue host message");
+
+    let bytes = next_transmit(&mut host, &mut host_tx);
+    assert!(matches!(mcu.receive(bytes), Receive::Packet { .. }));
+
+    let bytes = next_transmit(&mut mcu, &mut mcu_tx);
+    assert!(matches!(host.receive(bytes), Receive::Ack { .. }));
+
+    let message = next_polled_message(&mut mcu, &mut mcu_tx);
+    assert_eq!(message.channel_id, ChannelId::DEFAULT);
+    assert_eq!(message.as_bytes(), b"host ping");
+
+    mcu.send_on(ChannelId::LOG, b"mcu received host message")
+        .expect("queue mcu debug");
+
+    let bytes = next_transmit(&mut mcu, &mut mcu_tx);
+    assert!(matches!(host.receive(bytes), Receive::Packet { .. }));
+
+    let message = next_polled_message(&mut host, &mut host_tx);
+    assert_eq!(message.channel_id, ChannelId::LOG);
+    assert_eq!(message.as_bytes(), b"mcu received host message");
+}
+
 fn deliver_next_write(src: &mut Engine, dst: &mut Engine) {
     let write = next_write(src);
     match dst.receive(write.as_bytes()) {
@@ -120,6 +150,24 @@ fn assert_no_send_failed(engine: &mut Engine) {
     while let Some(event) = engine.poll_event() {
         if let Event::SendFailed(failed) = event {
             panic!("unexpected send failure: {failed:?}");
+        }
+    }
+}
+
+fn next_transmit<'a>(engine: &mut Engine, tx_buf: &'a mut [u8]) -> &'a [u8] {
+    match engine.poll(tx_buf).expect("poll engine") {
+        Poll::Transmit(bytes) => bytes,
+        other => panic!("engine should produce transmit bytes, got {other:?}"),
+    }
+}
+
+fn next_polled_message(engine: &mut Engine, tx_buf: &mut [u8]) -> msrt::Message {
+    loop {
+        match engine.poll(tx_buf).expect("poll engine") {
+            Poll::Message(message) => return message,
+            Poll::Transmit(_) => {}
+            Poll::SendFailed(failed) => panic!("unexpected send failure: {failed:?}"),
+            Poll::Idle => panic!("engine should produce a message event"),
         }
     }
 }

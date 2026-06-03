@@ -73,6 +73,29 @@ impl Engine {
         self.events.pop()
     }
 
+    /// Polls one high-level engine action.
+    ///
+    /// Write events are copied into `tx_buf` and returned as a borrowed byte
+    /// slice so callers can pass the buffer directly to their link layer.
+    pub fn poll<'a>(&mut self, tx_buf: &'a mut [u8]) -> Result<EnginePoll<'a>> {
+        let Some(event) = self.events.pop() else {
+            return Ok(EnginePoll::Idle);
+        };
+
+        match event {
+            EngineOutput::Write(write) => {
+                if tx_buf.len() < write.len {
+                    return Err(Error::buffer_too_small());
+                }
+
+                tx_buf[..write.len].copy_from_slice(write.as_bytes());
+                Ok(EnginePoll::Transmit(&tx_buf[..write.len]))
+            }
+            EngineOutput::Message(message) => Ok(EnginePoll::Message(message)),
+            EngineOutput::SendFailed(failed) => Ok(EnginePoll::SendFailed(failed)),
+        }
+    }
+
     /// Queues a complete message for non-blocking protocol transmission.
     ///
     /// The caller submits the complete message once. The engine splits it into
@@ -162,6 +185,19 @@ pub enum EngineOutput {
     Message(MessageEvent),
     /// A message could not be sent reliably.
     SendFailed(SendFailedEvent),
+}
+
+/// High-level action returned by [`Engine::poll`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EnginePoll<'a> {
+    /// Protocol bytes should be transmitted on the link.
+    Transmit(&'a [u8]),
+    /// A complete application message has been reassembled.
+    Message(MessageEvent),
+    /// A message could not be sent reliably.
+    SendFailed(SendFailedEvent),
+    /// The engine has no pending action.
+    Idle,
 }
 
 /// A non-blocking write request produced by the engine.
