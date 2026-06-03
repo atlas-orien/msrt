@@ -1,19 +1,18 @@
-//! ACK frame primitives.
+//! ACK primitives.
 
 use crate::core::PacketNumber;
 use crate::core::packet::header::PACKET_NUMBER_LEN;
 
-/// Maximum ACK ranges carried by the v1 fixed ACK frame.
+/// Maximum ACK ranges carried by the v1 fixed ACK.
 pub const MAX_ACK_RANGES: usize = 4;
 /// Encoded ACK range count length in bytes.
 pub(crate) const ACK_RANGE_COUNT_LEN: usize = core::mem::size_of::<u8>();
-/// Encoded ACK frame length in bytes.
-pub(crate) const ACK_FRAME_LEN: usize = crate::core::frame::message::FRAME_TYPE_LEN
-    + PACKET_NUMBER_LEN
+/// Encoded ACK payload length in bytes.
+pub(crate) const ACK_LEN: usize = PACKET_NUMBER_LEN
     + ACK_RANGE_COUNT_LEN
     + MAX_ACK_RANGES * 2 * PACKET_NUMBER_LEN;
 
-/// Inclusive packet number range carried by an ACK frame.
+/// Inclusive packet number range carried by an ACK.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct AckRange {
     /// First acknowledged packet number in the range.
@@ -36,9 +35,9 @@ impl AckRange {
     }
 }
 
-/// ACK frame carrying fixed-capacity acknowledged packet ranges.
+/// ACK carrying fixed-capacity acknowledged packet ranges.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct AckFrame {
+pub struct Ack {
     /// Largest acknowledged packet number.
     pub largest_acknowledged: PacketNumber,
     /// Number of valid ranges.
@@ -47,8 +46,8 @@ pub struct AckFrame {
     pub ranges: [AckRange; MAX_ACK_RANGES],
 }
 
-impl AckFrame {
-    /// Creates an ACK frame.
+impl Ack {
+    /// Creates an ACK.
     #[must_use]
     pub const fn new(largest_acknowledged: PacketNumber) -> Self {
         let range = AckRange::new(largest_acknowledged, largest_acknowledged);
@@ -60,7 +59,7 @@ impl AckFrame {
         }
     }
 
-    /// Creates an ACK frame from fixed ranges.
+    /// Creates an ACK from fixed ranges.
     #[must_use]
     pub const fn from_ranges(ranges: [AckRange; MAX_ACK_RANGES], range_count: u8) -> Self {
         let mut largest = PacketNumber::ZERO;
@@ -86,7 +85,7 @@ impl AckFrame {
         self.ranges
     }
 
-    /// Returns whether this ACK frame acknowledges `packet_number`.
+    /// Returns whether this ACK acknowledges `packet_number`.
     #[must_use]
     pub const fn acknowledges(self, packet_number: PacketNumber) -> bool {
         let mut index = 0;

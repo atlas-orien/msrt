@@ -1,6 +1,6 @@
 //! Message fragment identifiers and ranges.
 
-use crate::core::{ChannelId, Error, ErrorKind, MessageFrame, MessageId, Result};
+use crate::core::{ChannelId, Error, ErrorKind, PacketHeader, MessageId, Result};
 
 /// Key that identifies one message on one channel.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -57,7 +57,7 @@ impl FragmentRange {
     }
 }
 
-/// Reliability-facing view of a MESSAGE frame fragment.
+/// Reliability-facing view of a message fragment carried by a DATA packet.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MessageFragment {
     /// Message identity.
@@ -79,19 +79,22 @@ impl MessageFragment {
         }
     }
 
-    /// Builds a message fragment descriptor from a MESSAGE frame.
-    pub fn try_from_message_frame(frame: MessageFrame<'_>) -> Result<Self> {
-        let len =
-            u32::try_from(frame.data.len()).map_err(|_| Error::new(ErrorKind::Reliability))?;
-        let range = FragmentRange::new(frame.fragment_offset, len);
+    /// Builds a message fragment descriptor from a packet header and payload length.
+    pub fn try_from_packet_header(header: PacketHeader, payload_len: usize) -> Result<Self> {
+        let len = u32::try_from(payload_len).map_err(|_| Error::new(ErrorKind::Reliability))?;
+        let message_len =
+            u32::try_from(header.message_len).map_err(|_| Error::new(ErrorKind::Reliability))?;
+        let fragment_offset = u32::try_from(header.fragment_offset)
+            .map_err(|_| Error::new(ErrorKind::Reliability))?;
+        let range = FragmentRange::new(fragment_offset, len);
 
-        if !range.fits_in(frame.message_len) {
+        if !range.fits_in(message_len) {
             return Err(Error::new(ErrorKind::Reliability));
         }
 
         Ok(Self::new(
-            MessageKey::new(frame.channel_id, frame.message_id),
-            frame.message_len,
+            MessageKey::new(header.channel_id, header.message_id),
+            message_len,
             range,
         ))
     }
@@ -99,7 +102,7 @@ impl MessageFragment {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::{ChannelId, MessageFlags, MessageFrame, MessageId};
+    use crate::core::{ChannelId, Flags, MessageFlags, MessageId, PacketHeader, PacketNumber};
 
     use super::{FragmentRange, MessageFragment, MessageKey};
 
@@ -110,18 +113,18 @@ mod tests {
     }
 
     #[test]
-    fn message_frame_maps_to_message_fragment() {
-        let bytes = [1, 2, 3];
-        let frame = MessageFrame::new(
+    fn packet_header_maps_to_message_fragment() {
+        let header = PacketHeader::data(
+            PacketNumber::new(3),
+            Flags::ACK_ELICITING,
             ChannelId::new(7),
             MessageId::new(9),
             8,
             2,
             MessageFlags::EMPTY,
-            &bytes,
         );
 
-        let fragment = MessageFragment::try_from_message_frame(frame).unwrap();
+        let fragment = MessageFragment::try_from_packet_header(header, 3).unwrap();
 
         assert_eq!(
             fragment.key,

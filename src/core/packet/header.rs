@@ -8,7 +8,7 @@ use super::{PacketNumber, PacketType};
 
 use crate::core::{
     ChannelId, MessageFlags, MessageId,
-    frame::message::{
+    message::{
         CHANNEL_ID_LEN, FRAGMENT_FLAGS_LEN, FRAGMENT_OFFSET_LEN, MESSAGE_ID_LEN, MESSAGE_LEN_LEN,
     },
 };

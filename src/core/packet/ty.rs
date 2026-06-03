@@ -3,9 +3,9 @@
 /// Packet type carried by the v1 packet header.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PacketType {
-    /// Packet carrying message data frames.
+    /// Packet carrying message fragment bytes.
     Data,
-    /// Packet carrying acknowledgement frames.
+    /// Packet carrying an ACK payload.
     Ack,
 }
 

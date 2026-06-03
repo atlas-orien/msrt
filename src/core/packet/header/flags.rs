@@ -11,7 +11,7 @@ impl Flags {
     /// Packet is ack-eliciting.
     pub const ACK_ELICITING: Self = Self(1 << 0);
 
-    /// Packet contains realtime-sensitive frames.
+    /// Packet contains realtime-sensitive payload.
     pub const REALTIME: Self = Self(1 << 1);
 
     /// Creates flags from raw bits.

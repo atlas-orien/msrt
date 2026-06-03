@@ -5,8 +5,7 @@ const TX_BUF_BYTES: usize = 128;
 use msrt::{
     Engine,
     core::{
-        ChannelId, Flags, MessageFlags, MessageFrame, MessageId, Packet, PacketHeader,
-        PacketNumber,
+        ChannelId, Flags, MessageFlags, MessageId, Packet, PacketHeader, PacketNumber,
     },
     engine::EnginePoll,
     reliability::{
@@ -41,17 +40,17 @@ fn facade_exposes_core_packet_and_wire_envelope() {
 
 #[test]
 fn facade_exposes_reliability_fragment_view() {
-    let bytes = [1, 2, 3, 4];
-    let frame = MessageFrame::new(
+    let header = PacketHeader::data(
+        PacketNumber::new(11),
+        Flags::ACK_ELICITING,
         ChannelId::new(7),
         MessageId::new(9),
         8,
         2,
         MessageFlags::FIRST,
-        &bytes,
     );
 
-    let fragment = MessageFragment::try_from_message_frame(frame).unwrap();
+    let fragment = MessageFragment::try_from_packet_header(header, 4).unwrap();
 
     assert_eq!(
         fragment.key,

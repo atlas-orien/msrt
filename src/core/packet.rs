@@ -12,13 +12,13 @@ pub use ty::PacketType;
 
 /// Borrowed protocol packet.
 ///
-/// A packet is the protocol transport unit. Its payload contains encoded MSRT
-/// protocol frames.
+/// A packet is the protocol transport unit. Its header determines how the
+/// payload is interpreted.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Packet<'a> {
     /// Packet metadata.
     pub header: PacketHeader,
-    /// Borrowed packet payload containing encoded protocol frames.
+    /// Borrowed packet payload bytes.
     pub payload: PacketPayload<'a>,
 }
 
@@ -57,7 +57,7 @@ mod tests {
     use crate::core::{ChannelId, MessageFlags, MessageId};
 
     #[test]
-    fn packet_payload_contains_encoded_frames() {
+    fn packet_payload_contains_bytes() {
         let payload = [1, 2, 3];
         let header = PacketHeader::data(
             PacketNumber::new(9),

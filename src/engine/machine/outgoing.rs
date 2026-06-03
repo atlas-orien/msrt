@@ -1,9 +1,9 @@
 //! Outgoing message fragmentation and ACK encoding.
 
 use crate::core::{
-    AckFrame, ChannelId, Error, ErrorKind, Flags, FrameKind, MAX_ACK_RANGES, MessageId,
-    MessageFlags, PacketNumber, Result,
-    frame::ack::ACK_FRAME_LEN,
+    Ack, ChannelId, Error, ErrorKind, Flags, MAX_ACK_RANGES, MessageId, MessageFlags,
+    PacketNumber, Result,
+    ack::ACK_LEN,
     packet::header::{PACKET_HEADER_LEN, PacketHeader},
 };
 use crate::reliability::ReliabilityMode;
@@ -20,7 +20,7 @@ use crate::engine::{
     },
 };
 
-const ACK_PACKET_LEN: usize = PACKET_HEADER_LEN + ACK_FRAME_LEN;
+const ACK_PACKET_LEN: usize = PACKET_HEADER_LEN + ACK_LEN;
 
 impl Machine {
     pub(super) fn send_on_impl(
@@ -40,10 +40,10 @@ impl Machine {
 
     pub(super) fn queue_ack(&mut self, acknowledged: PacketNumber) -> Result<()> {
         self.ack_ranges.observe(acknowledged);
-        let frame = self.ack_ranges.frame();
+        let ack = self.ack_ranges.ack();
         let packet_number = self.next_packet_number;
         let mut wire = [0; MAX_WIRE_BYTES];
-        let written = encode_ack_packet(packet_number, frame, &mut wire, &Crc16)?;
+        let written = encode_ack_packet(packet_number, ack, &mut wire, &Crc16)?;
 
         self.events.push(EngineOutput::Write(WriteEvent {
             packet_number,
@@ -162,7 +162,7 @@ fn encode_message_fragment(
 
 fn encode_ack_packet(
     packet_number: PacketNumber,
-    frame: AckFrame,
+    ack: Ack,
     out: &mut [u8],
     checksum: &impl Checksum,
 ) -> Result<usize> {
@@ -187,17 +187,16 @@ fn encode_ack_packet(
     packet[11..13].copy_from_slice(&(header.message_len as u16).to_le_bytes());
     packet[13..15].copy_from_slice(&(header.fragment_offset as u16).to_le_bytes());
     packet[15] = header.fragment_flags.bits();
-    packet[16] = FrameKind::Ack.code();
-    packet[17..21].copy_from_slice(&frame.largest_acknowledged.get().to_le_bytes());
-    packet[21] = frame.range_count;
+    packet[16..20].copy_from_slice(&ack.largest_acknowledged.get().to_le_bytes());
+    packet[20] = ack.range_count;
 
-    let mut offset = 22;
+    let mut offset = 21;
     let mut index = 0;
 
     while index < MAX_ACK_RANGES {
-        packet[offset..offset + 4].copy_from_slice(&frame.ranges[index].start.get().to_le_bytes());
+        packet[offset..offset + 4].copy_from_slice(&ack.ranges[index].start.get().to_le_bytes());
         packet[offset + 4..offset + 8]
-            .copy_from_slice(&frame.ranges[index].end.get().to_le_bytes());
+            .copy_from_slice(&ack.ranges[index].end.get().to_le_bytes());
         offset += 8;
         index += 1;
     }

@@ -751,7 +751,7 @@ fn ack_packet_for_ranges(
 ) -> WriteEvent {
     let mut bytes = [0; crate::engine::config::MAX_WIRE_BYTES];
     let packet_len = (crate::core::packet::header::PACKET_HEADER_LEN
-        + crate::core::frame::ack::ACK_FRAME_LEN) as u8;
+        + crate::core::ack::ACK_LEN) as u8;
     let total_len = crate::wire::WIRE_HEADER_LEN + usize::from(packet_len) + 2;
 
     bytes[..crate::wire::WIRE_MAGIC_LEN].copy_from_slice(&crate::wire::EnvelopeMagic::MSRT.bytes());
@@ -766,11 +766,10 @@ fn ack_packet_for_ranges(
     packet[11..13].copy_from_slice(&0u16.to_le_bytes());
     packet[13..15].copy_from_slice(&0u16.to_le_bytes());
     packet[15] = crate::core::MessageFlags::EMPTY.bits();
-    packet[16] = crate::core::FrameKind::Ack.code();
-    packet[17..21].copy_from_slice(&ranges[ranges.len() - 1].1.get().to_le_bytes());
-    packet[21] = ranges.len() as u8;
+    packet[16..20].copy_from_slice(&ranges[ranges.len() - 1].1.get().to_le_bytes());
+    packet[20] = ranges.len() as u8;
 
-    let mut offset = 22;
+    let mut offset = 21;
     for (start, end) in ranges {
         packet[offset..offset + 4].copy_from_slice(&start.get().to_le_bytes());
         packet[offset + 4..offset + 8].copy_from_slice(&end.get().to_le_bytes());

@@ -1,10 +1,10 @@
 //! ACK tracking boundary.
 
-use crate::core::{AckFrame, Error, ErrorKind, PacketNumber, Result};
+use crate::core::{Ack, Error, ErrorKind, PacketNumber, Result};
 
 use super::PacketState;
 
-/// Result of applying an ACK frame to local packet state.
+/// Result of applying an ACK to local packet state.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AckOutcome {
     /// The ACK confirmed a packet that was still in flight.
@@ -29,8 +29,8 @@ pub trait AckTracker {
     /// Records that a packet has been sent and is waiting for acknowledgement.
     fn on_packet_sent(&mut self, packet_number: PacketNumber);
 
-    /// Applies an ACK frame to the tracked packet state.
-    fn on_ack(&mut self, frame: AckFrame) -> AckOutcome;
+    /// Applies an ACK to the tracked packet state.
+    fn on_ack(&mut self, ack: Ack) -> AckOutcome;
 
     /// Returns the current known state for a packet number.
     fn state_of(&self, packet_number: PacketNumber) -> PacketState;
@@ -75,15 +75,15 @@ impl<const N: usize> PacketAckTracker<N> {
         Err(Error::new(ErrorKind::Reliability))
     }
 
-    /// Applies an ACK frame.
+    /// Applies an ACK.
     #[must_use]
-    pub fn apply_ack(&mut self, frame: AckFrame) -> AckOutcome {
+    pub fn apply_ack(&mut self, ack: Ack) -> AckOutcome {
         for slot in &mut self.packets {
             let Some(mut tracked) = *slot else {
                 continue;
             };
 
-            if !frame.acknowledges(tracked.packet_number) {
+            if !ack.acknowledges(tracked.packet_number) {
                 continue;
             }
 
@@ -101,7 +101,7 @@ impl<const N: usize> PacketAckTracker<N> {
         }
 
         AckOutcome::Ignored {
-            packet_number: frame.largest_acknowledged,
+            packet_number: ack.largest_acknowledged,
         }
     }
 }
@@ -117,8 +117,8 @@ impl<const N: usize> AckTracker for PacketAckTracker<N> {
         let _ = self.try_on_packet_sent(packet_number);
     }
 
-    fn on_ack(&mut self, frame: AckFrame) -> AckOutcome {
-        self.apply_ack(frame)
+    fn on_ack(&mut self, ack: Ack) -> AckOutcome {
+        self.apply_ack(ack)
     }
 
     fn state_of(&self, packet_number: PacketNumber) -> PacketState {
@@ -148,7 +148,7 @@ impl TrackedPacket {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::{AckFrame, PacketNumber};
+    use crate::core::{Ack, PacketNumber};
 
     use super::{AckOutcome, AckTracker, PacketAckTracker, PacketState};
 
@@ -161,12 +161,12 @@ mod tests {
 
         assert_eq!(tracker.state_of(packet_number), PacketState::InFlight);
         assert_eq!(
-            tracker.on_ack(AckFrame::new(packet_number)),
+            tracker.on_ack(Ack::new(packet_number)),
             AckOutcome::NewlyAcked { packet_number }
         );
         assert_eq!(tracker.state_of(packet_number), PacketState::Acked);
         assert_eq!(
-            tracker.on_ack(AckFrame::new(packet_number)),
+            tracker.on_ack(Ack::new(packet_number)),
             AckOutcome::AlreadyAcked { packet_number }
         );
     }
@@ -183,7 +183,7 @@ mod tests {
         tracker.on_packet_sent(end);
 
         assert_eq!(
-            tracker.on_ack(AckFrame::from_ranges(ranges, 1)),
+            tracker.on_ack(Ack::from_ranges(ranges, 1)),
             AckOutcome::NewlyAcked {
                 packet_number: start
             }

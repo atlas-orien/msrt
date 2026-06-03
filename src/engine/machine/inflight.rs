@@ -1,6 +1,6 @@
 //! In-flight packet tracking.
 
-use crate::core::{AckFrame, ChannelId, Error, ErrorKind, MessageId, PacketNumber, Result};
+use crate::core::{Ack, ChannelId, Error, ErrorKind, MessageId, PacketNumber, Result};
 
 use crate::engine::config::{MAX_IN_FLIGHT_PACKETS, MAX_WIRE_BYTES};
 
@@ -53,13 +53,13 @@ impl InFlightPackets {
         Err(Error::new(ErrorKind::Engine))
     }
 
-    pub(crate) fn ack_frame(&mut self, frame: AckFrame) {
+    pub(crate) fn apply_ack(&mut self, ack: Ack) {
         for slot in &mut self.packets {
             let Some(packet) = *slot else {
                 continue;
             };
 
-            if frame.acknowledges(packet.packet_number) {
+            if ack.acknowledges(packet.packet_number) {
                 *slot = None;
                 self.len = self.len.saturating_sub(1);
             }

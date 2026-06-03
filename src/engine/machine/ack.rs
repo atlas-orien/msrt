@@ -1,6 +1,6 @@
 //! ACK range collection.
 
-use crate::core::{AckFrame, AckRange, MAX_ACK_RANGES, PacketNumber};
+use crate::core::{Ack, AckRange, MAX_ACK_RANGES, PacketNumber};
 
 use crate::engine::config::MAX_ACK_TRACKED_PACKETS;
 
@@ -41,7 +41,7 @@ impl AckRanges {
         }
     }
 
-    pub(crate) fn frame(&self) -> AckFrame {
+    pub(crate) fn ack(&self) -> Ack {
         let mut numbers = [None; MAX_ACK_TRACKED_PACKETS];
         let mut len = 0;
 
@@ -103,7 +103,7 @@ fn sort_packet_numbers(numbers: &mut [Option<PacketNumber>; MAX_ACK_TRACKED_PACK
 fn ranges_from_sorted_numbers(
     numbers: [Option<PacketNumber>; MAX_ACK_TRACKED_PACKETS],
     len: usize,
-) -> AckFrame {
+) -> Ack {
     let empty = AckRange::new(PacketNumber::ZERO, PacketNumber::ZERO);
     let mut ranges = [empty; MAX_ACK_RANGES];
     let mut range_count = 0;
@@ -133,7 +133,7 @@ fn ranges_from_sorted_numbers(
         range_count += 1;
     }
 
-    AckFrame::from_ranges(ranges, range_count as u8)
+    Ack::from_ranges(ranges, range_count as u8)
 }
 
 #[cfg(test)]
@@ -152,11 +152,11 @@ mod tests {
 
         ranges.observe(PacketNumber::new(MAX_ACK_TRACKED_PACKETS as u32));
 
-        let frame = ranges.frame();
+        let ack = ranges.ack();
 
-        assert!(!frame.acknowledges(PacketNumber::new(0)));
-        assert!(frame.acknowledges(PacketNumber::new(1)));
-        assert!(frame.acknowledges(PacketNumber::new(MAX_ACK_TRACKED_PACKETS as u32)));
+        assert!(!ack.acknowledges(PacketNumber::new(0)));
+        assert!(ack.acknowledges(PacketNumber::new(1)));
+        assert!(ack.acknowledges(PacketNumber::new(MAX_ACK_TRACKED_PACKETS as u32)));
     }
 
     #[test]
@@ -167,13 +167,13 @@ mod tests {
             ranges.observe(PacketNumber::new(packet_number));
         }
 
-        let frame = ranges.frame();
+        let ack = ranges.ack();
 
-        assert_eq!(frame.range_count as usize, crate::core::MAX_ACK_RANGES);
-        assert!(frame.acknowledges(PacketNumber::new(8)));
-        assert!(frame.acknowledges(PacketNumber::new(6)));
-        assert!(frame.acknowledges(PacketNumber::new(4)));
-        assert!(frame.acknowledges(PacketNumber::new(2)));
-        assert!(!frame.acknowledges(PacketNumber::new(0)));
+        assert_eq!(ack.range_count as usize, crate::core::MAX_ACK_RANGES);
+        assert!(ack.acknowledges(PacketNumber::new(8)));
+        assert!(ack.acknowledges(PacketNumber::new(6)));
+        assert!(ack.acknowledges(PacketNumber::new(4)));
+        assert!(ack.acknowledges(PacketNumber::new(2)));
+        assert!(!ack.acknowledges(PacketNumber::new(0)));
     }
 }

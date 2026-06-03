@@ -1,9 +1,9 @@
 //! v1 draft packet byte layout glue.
 
 use crate::core::{
-    AckFrame, AckRange, ChannelId, Error, Flags, FrameKind, MAX_ACK_RANGES, MessageFlags,
-    MessageId, PacketNumber, PacketType, Result,
-    frame::ack::ACK_FRAME_LEN,
+    Ack, AckRange, ChannelId, Error, Flags, MAX_ACK_RANGES, MessageFlags, MessageId,
+    PacketNumber, PacketType, Result,
+    ack::ACK_LEN,
     packet::header::{PACKET_HEADER_LEN, PacketHeader},
 };
 
@@ -23,7 +23,7 @@ pub(crate) enum PacketDecode<'a> {
 /// Decoded ACK packet.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct DecodedAck {
-    pub(crate) frame: AckFrame,
+    pub(crate) ack: Ack,
 }
 
 /// Decoded message fragment.
@@ -74,13 +74,13 @@ fn decode_packet_bytes(bytes: &[u8]) -> PacketDecode<'_> {
         return PacketDecode::Malformed;
     };
 
-    let frame_bytes = &bytes[PACKET_HEADER_LEN..];
+    let payload_bytes = &bytes[PACKET_HEADER_LEN..];
 
     match header.packet_type {
         PacketType::Data => fragment_from_packet_bytes(header, bytes)
             .map(PacketDecode::Data)
             .unwrap_or(PacketDecode::Malformed),
-        PacketType::Ack => ack_from_packet_bytes(frame_bytes)
+        PacketType::Ack => ack_from_packet_bytes(payload_bytes)
             .map(PacketDecode::Ack)
             .unwrap_or(PacketDecode::Malformed),
     }
@@ -118,12 +118,12 @@ fn packet_header_from_bytes(bytes: &[u8]) -> Option<PacketHeader> {
 }
 
 fn ack_from_packet_bytes(bytes: &[u8]) -> Option<DecodedAck> {
-    if bytes.len() != ACK_FRAME_LEN || *bytes.first()? != FrameKind::Ack.code() {
+    if bytes.len() != ACK_LEN {
         return None;
     }
 
-    let largest = PacketNumber::new(u32::from_le_bytes(bytes.get(1..5)?.try_into().ok()?));
-    let range_count = *bytes.get(5)?;
+    let largest = PacketNumber::new(u32::from_le_bytes(bytes.get(0..4)?.try_into().ok()?));
+    let range_count = *bytes.get(4)?;
 
     if range_count as usize > MAX_ACK_RANGES {
         return None;
@@ -131,7 +131,7 @@ fn ack_from_packet_bytes(bytes: &[u8]) -> Option<DecodedAck> {
 
     let empty = AckRange::new(PacketNumber::ZERO, PacketNumber::ZERO);
     let mut ranges = [empty; MAX_ACK_RANGES];
-    let mut offset = 6;
+    let mut offset = 5;
     let mut index = 0;
 
     while index < MAX_ACK_RANGES {
@@ -151,7 +151,7 @@ fn ack_from_packet_bytes(bytes: &[u8]) -> Option<DecodedAck> {
     }
 
     Some(DecodedAck {
-        frame: AckFrame {
+        ack: Ack {
             largest_acknowledged: largest,
             range_count,
             ranges,

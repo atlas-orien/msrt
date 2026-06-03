@@ -2,7 +2,8 @@
 
 /// Borrowed packet payload bytes.
 ///
-/// These bytes represent encoded MSRT protocol frames.
+/// For DATA packets these bytes are message fragment data. For ACK packets
+/// these bytes are an encoded [`crate::core::Ack`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PacketPayload<'a> {
     bytes: &'a [u8],
