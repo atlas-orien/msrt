@@ -15,7 +15,7 @@ fn engine_sends_one_message_as_multiple_write_events() {
     let message_id = engine.send(b"hello msrt testing").unwrap();
     let mut writes = 0;
 
-    while let Some(event) = Machine::poll_event(&mut engine) {
+    while let Some(event) = Machine::poll_event(&mut engine.machine) {
         match event {
             EngineOutput::Write(_) => writes += 1,
             EngineOutput::Message(_) => panic!("sender should not receive its own message"),
@@ -39,7 +39,7 @@ fn engine_receives_fragments_as_one_message_event() {
 
     a.send(b"hello msrt testing").unwrap();
 
-    while let Some(event) = Machine::poll_event(&mut a) {
+    while let Some(event) = Machine::poll_event(&mut a.machine) {
         let EngineOutput::Write(write) = event else {
             continue;
         };
@@ -50,7 +50,7 @@ fn engine_receives_fragments_as_one_message_event() {
         ));
     }
 
-    while let Some(event) = Machine::poll_event(&mut b) {
+    while let Some(event) = Machine::poll_event(&mut b.machine) {
         if let EngineOutput::Message(message) = event {
             assert_eq!(message.as_bytes(), b"hello msrt testing");
             return;
@@ -73,7 +73,7 @@ fn engine_reassembles_interleaved_messages() {
     a.send(b"abcd").unwrap();
     a.send(b"wxyz").unwrap();
 
-    while let Some(event) = Machine::poll_event(&mut a) {
+    while let Some(event) = Machine::poll_event(&mut a.machine) {
         let EngineOutput::Write(write) = event else {
             continue;
         };
@@ -186,7 +186,7 @@ fn engine_ack_range_clears_multiple_in_flight_packets() {
 
     a.send(b"abcdef").unwrap();
 
-    while let Some(event) = Machine::poll_event(&mut a) {
+    while let Some(event) = Machine::poll_event(&mut a.machine) {
         let EngineOutput::Write(write) = event else {
             continue;
         };
@@ -197,7 +197,7 @@ fn engine_ack_range_clears_multiple_in_flight_packets() {
         ));
     }
 
-    while let Some(event) = Machine::poll_event(&mut b) {
+    while let Some(event) = Machine::poll_event(&mut b.machine) {
         let EngineOutput::Write(write) = event else {
             continue;
         };
@@ -249,7 +249,7 @@ fn engine_ack_range_gap_retransmits_only_missing_packet() {
     ));
 
     assert_eq!(next_polled_write(&mut engine, 1).packet_number.get(), 1);
-    assert!(Machine::poll_event(&mut engine).is_none());
+    assert!(Machine::poll_event(&mut engine.machine).is_none());
 }
 
 #[test]
@@ -321,7 +321,7 @@ fn engine_receives_sticky_packets_and_multiple_packets_per_receive() {
 
     a.send(b"hello msrt testing").unwrap();
 
-    while let Some(event) = Machine::poll_event(&mut a) {
+    while let Some(event) = Machine::poll_event(&mut a.machine) {
         let EngineOutput::Write(write) = event else {
             continue;
         };
@@ -356,7 +356,7 @@ fn engine_acknowledges_duplicate_without_delivering_twice() {
     ));
 
     let mut duplicate_messages = 0;
-    while let Some(event) = Machine::poll_event(&mut b) {
+    while let Some(event) = Machine::poll_event(&mut b.machine) {
         if matches!(event, EngineOutput::Message(_)) {
             duplicate_messages += 1;
         }
@@ -376,7 +376,7 @@ fn engine_uses_greedy_fragmentation() {
 
     engine.send(b"hello world").unwrap();
 
-    while let Some(event) = Machine::poll_event(&mut engine) {
+    while let Some(event) = Machine::poll_event(&mut engine.machine) {
         let EngineOutput::Write(write) = event else {
             continue;
         };
@@ -432,7 +432,7 @@ fn engine_best_effort_channel_does_not_track_in_flight() {
 
     engine.send_on(channel_id, b"hello best effort").unwrap();
 
-    while let Some(event) = Machine::poll_event(&mut engine) {
+    while let Some(event) = Machine::poll_event(&mut engine.machine) {
         let EngineOutput::Write(_) = event else {
             panic!("best-effort send should only produce writes before tick");
         };
@@ -486,7 +486,7 @@ fn engine_receives_best_effort_without_ack() {
         ReceiveReport::Packet { .. }
     ));
 
-    let Some(event) = Machine::poll_event(&mut receiver) else {
+    let Some(event) = Machine::poll_event(&mut receiver.machine) else {
         panic!("receiver should emit the complete best-effort message");
     };
     let EngineOutput::Message(message) = event else {
@@ -496,7 +496,7 @@ fn engine_receives_best_effort_without_ack() {
     assert_eq!(message.channel_id, channel_id);
     assert_eq!(message.profile, ChannelProfile::Data);
     assert_eq!(message.as_bytes(), b"hello best effort");
-    assert!(Machine::poll_event(&mut receiver).is_none());
+    assert!(Machine::poll_event(&mut receiver.machine).is_none());
 }
 
 #[test]
@@ -538,7 +538,7 @@ fn engine_log_channel_defaults_to_best_effort_and_log_profile() {
     assert_eq!(message.channel_id, crate::core::ChannelId::LOG);
     assert_eq!(message.profile, ChannelProfile::Log);
     assert_eq!(message.as_bytes(), b"log line");
-    assert!(Machine::poll_event(&mut receiver).is_none());
+    assert!(Machine::poll_event(&mut receiver.machine).is_none());
 }
 
 #[test]
@@ -627,7 +627,7 @@ fn engine_send_failed_is_message_scoped() {
     assert_eq!(failed.channel_id, crate::core::ChannelId::DEFAULT);
     assert_eq!(failed.reason, SendFailureReason::RetryLimitReached);
     assert_eq!(engine.machine.in_flight.packets().count(), 0);
-    assert!(Machine::poll_event(&mut engine).is_none());
+    assert!(Machine::poll_event(&mut engine.machine).is_none());
 }
 
 #[test]
@@ -674,7 +674,7 @@ fn engine_send_failed_suppresses_same_tick_message_retransmits() {
     assert_eq!(failed.channel_id, crate::core::ChannelId::DEFAULT);
     assert_eq!(failed.reason, SendFailureReason::RetryLimitReached);
     assert_eq!(engine.machine.in_flight.packets().count(), 0);
-    assert!(Machine::poll_event(&mut engine).is_none());
+    assert!(Machine::poll_event(&mut engine.machine).is_none());
 }
 
 fn fragment_len_from_wire(bytes: &[u8]) -> usize {
@@ -686,7 +686,7 @@ fn fragment_len_from_wire(bytes: &[u8]) -> usize {
 }
 
 fn next_write(engine: &mut Engine) -> WriteEvent {
-    let Some(EngineOutput::Write(write)) = Machine::poll_event(engine) else {
+    let Some(EngineOutput::Write(write)) = Machine::poll_event(&mut engine.machine) else {
         panic!("engine should produce a write event");
     };
 
@@ -742,8 +742,7 @@ fn ack_packet_for_ranges(
 
     bytes[..crate::wire::WIRE_MAGIC_LEN].copy_from_slice(&crate::wire::EnvelopeMagic::MSRT.bytes());
     bytes[crate::wire::WIRE_PACKET_LEN_OFFSET] = packet_len;
-    bytes[crate::wire::WIRE_HEADER_CRC_OFFSET] =
-        crate::wire::header_crc(crate::wire::EnvelopeMagic::MSRT, packet_len);
+    bytes[crate::wire::WIRE_HEADER_CRC_OFFSET] = crate::wire::header_crc(packet_len);
     let packet = &mut bytes[crate::wire::WIRE_HEADER_LEN..];
     packet[0] = crate::core::PacketType::Ack.code();
     packet[1] = 0;
@@ -778,7 +777,7 @@ fn first_fragments_for_five_messages(engine: &mut Engine) -> [Option<WriteEvent>
         engine.send(message).unwrap();
     }
 
-    while let Some(event) = Machine::poll_event(engine) {
+    while let Some(event) = Machine::poll_event(&mut engine.machine) {
         let EngineOutput::Write(write) = event else {
             continue;
         };
@@ -799,7 +798,7 @@ fn assert_message(engine: &mut Engine, expected: &[u8]) {
 }
 
 fn next_message(engine: &mut Engine) -> MessageEvent {
-    while let Some(event) = Machine::poll_event(engine) {
+    while let Some(event) = Machine::poll_event(&mut engine.machine) {
         if let EngineOutput::Message(message) = event {
             return message;
         }

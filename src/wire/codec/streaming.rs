@@ -112,16 +112,8 @@ impl<const N: usize> StreamingDecoder<N> {
         }
 
         let Some(offset) = find_magic(&self.bytes[..self.len]) else {
-            let keep = magic_prefix_len(&self.bytes[..self.len]);
-            let skipped = self.len.saturating_sub(keep);
-            if skipped == 0 {
-                return Ok(StreamDecodeOutcome::NeedMore {
-                    additional: Some(EnvelopeMagic::MSRT.bytes().len() - keep),
-                });
-            }
-            if skipped > 0 {
-                self.consume(skipped);
-            }
+            let skipped = self.len;
+            self.consume(skipped);
             return Ok(StreamDecodeOutcome::Noise { skipped });
         };
 
@@ -206,21 +198,6 @@ fn find_magic(bytes: &[u8]) -> Option<usize> {
     bytes
         .windows(EnvelopeMagic::MSRT.bytes().len())
         .position(|window| window == EnvelopeMagic::MSRT.bytes())
-}
-
-fn magic_prefix_len(bytes: &[u8]) -> usize {
-    let magic = EnvelopeMagic::MSRT.bytes();
-    let max = core::cmp::min(bytes.len(), magic.len().saturating_sub(1));
-    let mut len = max;
-
-    while len > 0 {
-        if bytes[bytes.len() - len..] == magic[..len] {
-            return len;
-        }
-        len -= 1;
-    }
-
-    0
 }
 
 fn header_from_bytes(bytes: &[u8]) -> Option<EnvelopeHeader> {

@@ -2,7 +2,7 @@
 
 use crate::core::{Error, MessageId, PacketNumber, Result};
 use crate::engine::{
-    Engine, EnginePoll, MessageEvent, ReceiveReport, SendFailedEvent,
+    EngineConfig, EnginePoll, MessageEvent, SendFailedEvent,
     config::{MAX_IN_FLIGHT_PACKETS, MAX_INGRESS_BYTES, MAX_WIRE_BYTES},
 };
 use crate::reliability::PacketDedup;
@@ -56,13 +56,14 @@ impl Machine {
     }
 
     pub(crate) fn poll<'a>(
-        engine: &mut Engine,
+        &mut self,
+        config: &EngineConfig,
         now_ms: u64,
         tx_buf: &'a mut [u8],
     ) -> Result<EnginePoll<'a>> {
-        Self::tick(engine, now_ms);
+        self.tick(config, now_ms);
 
-        let Some(event) = engine.machine.events.pop() else {
+        let Some(event) = self.events.pop() else {
             return Ok(EnginePoll::Idle);
         };
 
@@ -72,10 +73,7 @@ impl Machine {
                     return Err(Error::buffer_too_small());
                 }
 
-                engine
-                    .machine
-                    .in_flight
-                    .note_sent(write.packet_number, now_ms);
+                self.in_flight.note_sent(write.packet_number, now_ms);
                 tx_buf[..write.len].copy_from_slice(write.as_bytes());
                 Ok(EnginePoll::Transmit {
                     bytes: &tx_buf[..write.len],
@@ -88,24 +86,21 @@ impl Machine {
     }
 
     pub(crate) fn send_on(
-        engine: &mut Engine,
+        &mut self,
+        config: &EngineConfig,
         channel_id: crate::core::ChannelId,
         message: &[u8],
     ) -> Result<MessageId> {
-        outgoing::send_on(engine, channel_id, message)
+        self.send_on_impl(config, channel_id, message)
     }
 
-    pub(crate) fn receive(engine: &mut Engine, bytes: &[u8]) -> ReceiveReport {
-        ingress::receive(engine, bytes)
-    }
-
-    fn tick(engine: &mut Engine, now_ms: u64) {
-        retransmit::tick(engine, now_ms);
+    fn tick(&mut self, config: &EngineConfig, now_ms: u64) {
+        self.tick_retransmit(config, now_ms);
     }
 
     #[cfg(test)]
-    pub(crate) fn poll_event(engine: &mut Engine) -> Option<EngineOutput> {
-        engine.machine.events.pop()
+    pub(crate) fn poll_event(machine: &mut Machine) -> Option<EngineOutput> {
+        machine.events.pop()
     }
 }
 

@@ -13,112 +13,109 @@ use crate::wire::{
 };
 
 use crate::engine::{
-    Engine,
+    EngineConfig,
     config::{MAX_MESSAGE_BYTES, MAX_WIRE_BYTES},
-    machine::{EngineOutput, WriteEvent, inflight::InFlightPacket, packet::fragment_flags},
+    machine::{
+        EngineOutput, Machine, WriteEvent, inflight::InFlightPacket, packet::fragment_flags,
+    },
 };
 
 const ACK_PACKET_LEN: usize = PACKET_HEADER_LEN + ACK_FRAME_LEN;
 
-pub(crate) fn send_on(
-    engine: &mut Engine,
-    channel_id: ChannelId,
-    message: &[u8],
-) -> Result<MessageId> {
-    let fragment_bytes = engine.config.fragment_bytes.clamp(1, max_fragment_bytes());
-    let message_id = engine.machine.next_message_id;
-    let mode = engine.config.reliability_mode(channel_id);
-    send_message_fragments(
-        engine,
-        channel_id,
-        message_id,
-        message,
-        fragment_bytes,
-        mode,
-    )?;
-    engine.machine.next_message_id =
-        MessageId::new(engine.machine.next_message_id.get().wrapping_add(1));
+impl Machine {
+    pub(crate) fn send_on_impl(
+        &mut self,
+        config: &EngineConfig,
+        channel_id: ChannelId,
+        message: &[u8],
+    ) -> Result<MessageId> {
+        let fragment_bytes = config.fragment_bytes.clamp(1, max_fragment_bytes());
+        let message_id = self.next_message_id;
+        let mode = config.reliability_mode(channel_id);
+        self.send_message_fragments(channel_id, message_id, message, fragment_bytes, mode)?;
+        self.next_message_id = MessageId::new(self.next_message_id.get().wrapping_add(1));
 
-    Ok(message_id)
-}
-
-pub(crate) fn queue_ack(engine: &mut Engine, acknowledged: PacketNumber) -> Result<()> {
-    engine.machine.ack_ranges.observe(acknowledged);
-    let frame = engine.machine.ack_ranges.frame();
-    let packet_number = engine.machine.next_packet_number;
-    let mut wire = [0; MAX_WIRE_BYTES];
-    let written = encode_ack_packet(packet_number, frame, &mut wire, &Crc16)?;
-
-    engine.machine.events.push(EngineOutput::Write(WriteEvent {
-        packet_number,
-        bytes: wire,
-        len: written,
-        attempts: 0,
-    }))?;
-    engine.machine.next_packet_number = engine.machine.next_packet_number.next();
-
-    Ok(())
-}
-
-fn send_message_fragments(
-    engine: &mut Engine,
-    channel_id: ChannelId,
-    message_id: MessageId,
-    message: &[u8],
-    fragment_bytes: usize,
-    mode: ReliabilityMode,
-) -> Result<()> {
-    if message.len() > MAX_MESSAGE_BYTES {
-        return Err(Error::new(ErrorKind::Engine));
+        Ok(message_id)
     }
 
-    let mut offset = 0;
-
-    while offset < message.len() || (message.is_empty() && offset == 0) {
-        let end = core::cmp::min(offset + fragment_bytes, message.len());
-        let fragment = &message[offset..end];
-        let packet_number = engine.machine.next_packet_number;
+    pub(crate) fn queue_ack(&mut self, acknowledged: PacketNumber) -> Result<()> {
+        self.ack_ranges.observe(acknowledged);
+        let frame = self.ack_ranges.frame();
+        let packet_number = self.next_packet_number;
         let mut wire = [0; MAX_WIRE_BYTES];
-        let flags = fragment_flags(offset, end, message.len());
-        let encoded = FragmentToEncode {
-            packet_number,
-            channel_id,
-            message_id,
-            message_len: message.len(),
-            fragment_offset: offset,
-            flags,
-            fragment,
-            ack_eliciting: matches!(mode, ReliabilityMode::Reliable),
-        };
-        let written = encode_message_fragment(encoded, &mut wire, &Crc16)?;
+        let written = encode_ack_packet(packet_number, frame, &mut wire, &Crc16)?;
 
-        engine.machine.events.push(EngineOutput::Write(WriteEvent {
+        self.events.push(EngineOutput::Write(WriteEvent {
             packet_number,
             bytes: wire,
             len: written,
             attempts: 0,
         }))?;
-        if matches!(mode, ReliabilityMode::Reliable) {
-            engine.machine.in_flight.track(InFlightPacket {
+        self.next_packet_number = self.next_packet_number.next();
+
+        Ok(())
+    }
+
+    fn send_message_fragments(
+        &mut self,
+        channel_id: ChannelId,
+        message_id: MessageId,
+        message: &[u8],
+        fragment_bytes: usize,
+        mode: ReliabilityMode,
+    ) -> Result<()> {
+        if message.len() > MAX_MESSAGE_BYTES {
+            return Err(Error::new(ErrorKind::Engine));
+        }
+
+        let mut offset = 0;
+
+        while offset < message.len() || (message.is_empty() && offset == 0) {
+            let end = core::cmp::min(offset + fragment_bytes, message.len());
+            let fragment = &message[offset..end];
+            let packet_number = self.next_packet_number;
+            let mut wire = [0; MAX_WIRE_BYTES];
+            let flags = fragment_flags(offset, end, message.len());
+            let encoded = FragmentToEncode {
                 packet_number,
                 channel_id,
                 message_id,
+                message_len: message.len(),
+                fragment_offset: offset,
+                flags,
+                fragment,
+                ack_eliciting: matches!(mode, ReliabilityMode::Reliable),
+            };
+            let written = encode_message_fragment(encoded, &mut wire, &Crc16)?;
+
+            self.events.push(EngineOutput::Write(WriteEvent {
+                packet_number,
                 bytes: wire,
                 len: written,
                 attempts: 0,
-                last_sent_ms: engine.machine.now_ms,
-            })?;
-        }
-        engine.machine.next_packet_number = engine.machine.next_packet_number.next();
+            }))?;
+            if matches!(mode, ReliabilityMode::Reliable) {
+                self.in_flight.track(InFlightPacket {
+                    packet_number,
+                    channel_id,
+                    message_id,
+                    bytes: wire,
+                    len: written,
+                    attempts: 0,
+                    last_sent_ms: self.now_ms,
+                })?;
+            }
+            self.next_packet_number = self.next_packet_number.next();
 
-        if message.is_empty() {
-            break;
+            if message.is_empty() {
+                break;
+            }
+
+            offset = end;
         }
 
-        offset = end;
+        Ok(())
     }
-
-    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -34,7 +34,7 @@ impl Engine {
     /// Write events are copied into `tx_buf` and returned as a borrowed byte
     /// slice so callers can pass the buffer directly to their link layer.
     pub fn poll<'a>(&mut self, now_ms: u64, tx_buf: &'a mut [u8]) -> Result<EnginePoll<'a>> {
-        Machine::poll(self, now_ms, tx_buf)
+        self.machine.poll(&self.config, now_ms, tx_buf)
     }
 
     /// Queues a complete message for non-blocking protocol transmission.
@@ -49,7 +49,7 @@ impl Engine {
     ///
     /// This is the channel-aware form of [`Engine::send`].
     pub fn send_on(&mut self, channel_id: ChannelId, message: &[u8]) -> Result<MessageId> {
-        Machine::send_on(self, channel_id, message)
+        self.machine.send_on(&self.config, channel_id, message)
     }
 
     /// Feeds already-arrived wire bytes into the engine.
@@ -57,7 +57,7 @@ impl Engine {
     /// This method never waits for more bytes. It handles the current input and
     /// queues events if a complete message becomes available.
     pub fn receive(&mut self, bytes: &[u8]) -> ReceiveReport {
-        Machine::receive(self, bytes)
+        self.machine.receive(&self.config, bytes)
     }
 }
 

@@ -5,106 +5,98 @@ use crate::reliability::{Dedup, DedupDecision};
 use crate::wire::{Crc16, StreamDecodeOutcome};
 
 use crate::engine::{
-    Engine, ReceiveReport,
+    EngineConfig, ReceiveReport,
     machine::{
-        EngineOutput,
-        outgoing::queue_ack,
+        EngineOutput, Machine,
         packet::{PacketBytes, PacketDecode, decode_packet_bytes},
     },
 };
 
-pub(crate) fn receive(engine: &mut Engine, bytes: &[u8]) -> ReceiveReport {
-    receive_bytes(engine, bytes)
-}
+impl Machine {
+    pub(crate) fn receive(&mut self, config: &EngineConfig, bytes: &[u8]) -> ReceiveReport {
+        self.receive_bytes(config, bytes)
+    }
 
-fn receive_bytes(engine: &mut Engine, bytes: &[u8]) -> ReceiveReport {
-    let mut input = bytes;
-    let mut report = ReceiveReport::Incomplete { needed: None };
+    fn receive_bytes(&mut self, config: &EngineConfig, bytes: &[u8]) -> ReceiveReport {
+        let mut input = bytes;
+        let mut report = ReceiveReport::Incomplete { needed: None };
 
-    loop {
-        let outcome = match engine.machine.ingress.feed(input, &Crc16) {
-            Ok(outcome) => outcome,
-            Err(error) => return ReceiveReport::Error(error),
-        };
-        input = &[];
+        loop {
+            let outcome = match self.ingress.feed(input, &Crc16) {
+                Ok(outcome) => outcome,
+                Err(error) => return ReceiveReport::Error(error),
+            };
+            input = &[];
 
-        match outcome {
-            StreamDecodeOutcome::Packet {
-                packet_bytes,
-                consumed: _,
-            } => {
-                let packet = match PacketBytes::try_from_slice(packet_bytes) {
-                    Ok(packet) => packet,
-                    Err(error) => return ReceiveReport::Error(error),
-                };
-                report = receive_complete_packet(engine, packet.as_bytes());
+            match outcome {
+                StreamDecodeOutcome::Packet {
+                    packet_bytes,
+                    consumed: _,
+                } => {
+                    let packet = match PacketBytes::try_from_slice(packet_bytes) {
+                        Ok(packet) => packet,
+                        Err(error) => return ReceiveReport::Error(error),
+                    };
+                    report = self.receive_complete_packet(config, packet.as_bytes());
 
-                if matches!(report, ReceiveReport::Error(_)) {
-                    return report;
-                }
-            }
-            StreamDecodeOutcome::NeedMore { additional } => {
-                return match report {
-                    ReceiveReport::Incomplete { .. } => {
-                        ReceiveReport::Incomplete { needed: additional }
+                    if matches!(report, ReceiveReport::Error(_)) {
+                        return report;
                     }
-                    other => other,
-                };
-            }
-            StreamDecodeOutcome::Noise { skipped } => {
-                report = ReceiveReport::Noise { skipped };
-            }
-            StreamDecodeOutcome::Corrupted { consumed: _ } => {
-                report = ReceiveReport::Corrupted;
-            }
-            StreamDecodeOutcome::Resync { skipped } => {
-                report = ReceiveReport::Noise { skipped };
+                }
+                StreamDecodeOutcome::NeedMore { additional } => {
+                    return match report {
+                        ReceiveReport::Incomplete { .. } => {
+                            ReceiveReport::Incomplete { needed: additional }
+                        }
+                        other => other,
+                    };
+                }
+                StreamDecodeOutcome::Noise { skipped } => {
+                    report = ReceiveReport::Noise { skipped };
+                }
+                StreamDecodeOutcome::Corrupted { consumed: _ } => {
+                    report = ReceiveReport::Corrupted;
+                }
+                StreamDecodeOutcome::Resync { skipped } => {
+                    report = ReceiveReport::Noise { skipped };
+                }
             }
         }
     }
-}
 
-fn receive_complete_packet(engine: &mut Engine, bytes: &[u8]) -> ReceiveReport {
-    match decode_packet_bytes(bytes) {
-        PacketDecode::Data(fragment) => {
-            let packet_number = fragment.packet_number;
-            let ack_eliciting = fragment.ack_eliciting;
+    fn receive_complete_packet(&mut self, config: &EngineConfig, bytes: &[u8]) -> ReceiveReport {
+        match decode_packet_bytes(bytes) {
+            PacketDecode::Data(fragment) => {
+                let packet_number = fragment.packet_number;
+                let ack_eliciting = fragment.ack_eliciting;
 
-            if ack_eliciting && queue_ack(engine, packet_number).is_err() {
-                return ReceiveReport::Error(Error::new(ErrorKind::Engine));
-            }
-
-            if engine.machine.dedup.observe(packet_number) == DedupDecision::Duplicate {
-                return ReceiveReport::Duplicate { packet_number };
-            }
-
-            match engine
-                .machine
-                .reassembly
-                .observe(fragment, engine.machine.now_ms)
-            {
-                Ok(Some(mut message)) => {
-                    message.profile = engine.config.channel_profile(message.channel_id);
-                    if engine
-                        .machine
-                        .events
-                        .push(EngineOutput::Message(message))
-                        .is_err()
-                    {
-                        return ReceiveReport::Error(Error::new(ErrorKind::Engine));
-                    }
-                    ReceiveReport::Packet { packet_number }
+                if ack_eliciting && self.queue_ack(packet_number).is_err() {
+                    return ReceiveReport::Error(Error::new(ErrorKind::Engine));
                 }
-                Ok(None) => ReceiveReport::Packet { packet_number },
-                Err(error) => ReceiveReport::Error(error),
+
+                if self.dedup.observe(packet_number) == DedupDecision::Duplicate {
+                    return ReceiveReport::Duplicate { packet_number };
+                }
+
+                match self.reassembly.observe(fragment, self.now_ms) {
+                    Ok(Some(mut message)) => {
+                        message.profile = config.channel_profile(message.channel_id);
+                        if self.events.push(EngineOutput::Message(message)).is_err() {
+                            return ReceiveReport::Error(Error::new(ErrorKind::Engine));
+                        }
+                        ReceiveReport::Packet { packet_number }
+                    }
+                    Ok(None) => ReceiveReport::Packet { packet_number },
+                    Err(error) => ReceiveReport::Error(error),
+                }
             }
-        }
-        PacketDecode::Ack(ack) => {
-            engine.machine.in_flight.ack_frame(ack.frame);
-            ReceiveReport::Ack {
-                packet_number: ack.frame.largest_acknowledged,
+            PacketDecode::Ack(ack) => {
+                self.in_flight.ack_frame(ack.frame);
+                ReceiveReport::Ack {
+                    packet_number: ack.frame.largest_acknowledged,
+                }
             }
+            PacketDecode::Malformed => ReceiveReport::Error(Error::malformed()),
         }
-        PacketDecode::Malformed => ReceiveReport::Error(Error::malformed()),
     }
 }
