@@ -2,10 +2,11 @@ use std::{
     env, io,
     net::{SocketAddr, UdpSocket},
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use msrt::{
+    core::{MessageId, PacketNumber},
     Engine,
     engine::{EngineConfig, EnginePoll, ReceiveReport},
 };
@@ -71,7 +72,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("msrt udp mcu bind={} peer={}", args.bind, args.peer);
 
     let start = Instant::now();
+    let session_id = process_session_id();
     let mut engine = Engine::new(EngineConfig {
+        initial_packet_number: PacketNumber::new(session_id),
+        initial_message_id: MessageId::new(session_id),
         max_retransmit_attempts: u8::MAX,
         ..EngineConfig::default()
     });
@@ -145,6 +149,15 @@ fn pump_engine(
 
 fn elapsed_ms(start: Instant) -> u64 {
     start.elapsed().as_millis().try_into().unwrap_or(u64::MAX)
+}
+
+fn process_session_id() -> u32 {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_millis();
+
+    millis as u32
 }
 
 fn next_value(args: &mut impl Iterator<Item = String>, name: &str) -> Result<String, String> {

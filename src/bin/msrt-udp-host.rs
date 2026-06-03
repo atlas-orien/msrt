@@ -2,10 +2,11 @@ use std::{
     env, io,
     net::{SocketAddr, UdpSocket},
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use msrt::{
+    core::{MessageId, PacketNumber},
     Engine,
     engine::{EngineConfig, EnginePoll, ReceiveReport},
 };
@@ -134,7 +135,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let start = Instant::now();
+    let session_id = process_session_id();
     let mut engine = Engine::new(EngineConfig {
+        initial_packet_number: PacketNumber::new(session_id),
+        initial_message_id: MessageId::new(session_id),
         max_retransmit_attempts: u8::MAX,
         ..EngineConfig::default()
     });
@@ -149,11 +153,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         let now = elapsed_ms(start);
 
-        if !send_done && should_send(&args, sent_messages, last_send, start) {
-            if engine.send(&args.message).is_ok() {
-                sent_messages += 1;
-                last_send = Instant::now();
-            }
+        if !send_done
+            && should_send(&args, sent_messages, last_send, start)
+            && engine.send(&args.message).is_ok()
+        {
+            sent_messages += 1;
+            last_send = Instant::now();
         }
 
         recv_udp(&socket, &mut engine, &mut rx_buf)?;
@@ -364,7 +369,7 @@ impl NoiseLcg {
         }
         self.tx_count += 1;
         let every = 100 / usize::from(noise_percent);
-        every != 0 && self.tx_count % every == 0
+        every != 0 && self.tx_count.is_multiple_of(every)
     }
 }
 
@@ -394,6 +399,15 @@ fn make_message(len: usize) -> Vec<u8> {
 
 fn elapsed_ms(start: Instant) -> u64 {
     start.elapsed().as_millis().try_into().unwrap_or(u64::MAX)
+}
+
+fn process_session_id() -> u32 {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_millis();
+
+    millis as u32
 }
 
 fn next_value(args: &mut impl Iterator<Item = String>, name: &str) -> Result<String, String> {
