@@ -1,6 +1,6 @@
 //! Deterministic long-run reliable transport simulation.
 
-use msrt::{ChannelId, Config, Engine, Event, MAX_WIRE_BYTES, Receive, Write, core::PacketType};
+use msrt::{ChannelId, Config, Engine, MAX_WIRE_BYTES, Poll, Receive, core::PacketType};
 
 #[test]
 fn reliable_transport_survives_drops_corruption_reordering_and_duplex_load() {
@@ -98,29 +98,35 @@ fn pump_one(
     direction: &mut SimDirection,
     delivered: &mut DeliveredMessages,
 ) -> bool {
-    match src.poll_event() {
-        Some(Event::Write(write)) => {
+    let mut tx_buf = [0; MAX_WIRE_BYTES];
+
+    match src.poll(&mut tx_buf).expect("poll engine") {
+        Poll::Transmit(bytes) => {
+            let write = SimWrite::from_bytes(bytes);
             direction.deliver(dst, write);
             true
         }
-        Some(Event::Message(message)) => {
+        Poll::Message(message) => {
             delivered.push(message.channel_id, message.as_bytes());
             true
         }
-        Some(Event::SendFailed(failed)) => {
+        Poll::SendFailed(failed) => {
             panic!("reliable simulation should not fail sends: {failed:?}");
         }
-        None => false,
+        Poll::Idle => false,
     }
 }
 
 fn assert_no_unexpected_events(engine: &mut Engine) {
-    while let Some(event) = engine.poll_event() {
-        match event {
-            Event::Write(_) | Event::Message(_) => {}
-            Event::SendFailed(failed) => {
+    let mut tx_buf = [0; MAX_WIRE_BYTES];
+
+    loop {
+        match engine.poll(&mut tx_buf).expect("poll engine") {
+            Poll::Transmit(_) | Poll::Message(_) => {}
+            Poll::SendFailed(failed) => {
                 panic!("simulation completed but found send failure: {failed:?}");
             }
+            Poll::Idle => break,
         }
     }
 }
@@ -202,7 +208,7 @@ impl SimLink {
 #[derive(Debug)]
 struct SimDirection {
     seen_data: [bool; 64],
-    held: [Option<Write>; 8],
+    held: [Option<SimWrite>; 8],
     held_len: usize,
 }
 
@@ -215,13 +221,13 @@ impl SimDirection {
         }
     }
 
-    fn deliver(&mut self, dst: &mut Engine, write: Write) {
+    fn deliver(&mut self, dst: &mut Engine, write: SimWrite) {
         if !is_data(write) {
             receive_ok(dst, write.as_bytes());
             return;
         }
 
-        let packet_number = write.packet_number.get() as usize;
+        let packet_number = packet_number(write.as_bytes()) as usize;
         let first_seen = packet_number < self.seen_data.len() && !self.seen_data[packet_number];
 
         if packet_number < self.seen_data.len() {
@@ -250,7 +256,7 @@ impl SimDirection {
         receive_ok(dst, write.as_bytes());
     }
 
-    fn hold(&mut self, write: Write) {
+    fn hold(&mut self, write: SimWrite) {
         assert!(self.held_len < self.held.len(), "held packet buffer full");
 
         self.held[self.held_len] = Some(write);
@@ -274,6 +280,32 @@ fn receive_ok(dst: &mut Engine, bytes: &[u8]) {
     }
 }
 
-fn is_data(write: Write) -> bool {
+fn is_data(write: SimWrite) -> bool {
     write.as_bytes().get(8).copied() == Some(PacketType::Data.code())
+}
+
+fn packet_number(bytes: &[u8]) -> u32 {
+    u32::from_le_bytes(bytes[10..14].try_into().expect("packet number bytes"))
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct SimWrite {
+    bytes: [u8; MAX_WIRE_BYTES],
+    len: usize,
+}
+
+impl SimWrite {
+    fn from_bytes(bytes: &[u8]) -> Self {
+        let mut stored = [0; MAX_WIRE_BYTES];
+        stored[..bytes.len()].copy_from_slice(bytes);
+
+        Self {
+            bytes: stored,
+            len: bytes.len(),
+        }
+    }
+
+    fn as_bytes(&self) -> &[u8] {
+        &self.bytes[..self.len]
+    }
 }

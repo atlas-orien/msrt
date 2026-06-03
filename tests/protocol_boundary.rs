@@ -1,7 +1,7 @@
 //! Integration tests for the no_std MSRT protocol facade.
 
 use msrt::{
-    Config, Engine, Event,
+    Config, Engine, Poll,
     core::{
         ChannelId, Flags, MessageFlags, MessageFrame, MessageId, Packet, PacketHeader,
         PacketNumber, PacketType,
@@ -56,16 +56,20 @@ fn facade_exposes_reliability_fragment_view() {
 #[test]
 fn facade_exposes_concrete_engine_api() {
     let mut engine = Engine::new(Config::default());
+    let mut tx_buf = [0; msrt::MAX_WIRE_BYTES];
     let message_id = engine.send(b"hello").unwrap();
 
     assert_eq!(message_id, MessageId::ZERO);
 
-    let Some(Event::Write(write)) = engine.poll_event() else {
-        panic!("engine should produce a write event");
+    let Poll::Transmit(bytes) = engine.poll(&mut tx_buf).unwrap() else {
+        panic!("engine should produce transmit bytes");
     };
 
-    assert_eq!(write.packet_number, PacketNumber::ZERO);
-    assert!(!write.as_bytes().is_empty());
+    assert_eq!(
+        PacketNumber::new(u32::from_le_bytes(bytes[10..14].try_into().unwrap())),
+        PacketNumber::ZERO
+    );
+    assert!(!bytes.is_empty());
 }
 
 #[test]

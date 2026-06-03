@@ -1,4 +1,4 @@
-use msrt::{ChannelId, Config, Engine, Event, Poll, Receive};
+use msrt::{ChannelId, Config, Engine, Poll, Receive};
 
 #[test]
 fn default_message_is_acked_without_adapter() {
@@ -124,32 +124,25 @@ fn deliver_next_write(src: &mut Engine, dst: &mut Engine) {
     }
 }
 
-fn next_write(engine: &mut Engine) -> msrt::Write {
-    let Some(Event::Write(write)) = engine.poll_event() else {
-        panic!("engine should produce a write event");
-    };
-
-    write
+fn next_write(engine: &mut Engine) -> TestWrite {
+    let mut tx_buf = [0; msrt::MAX_WIRE_BYTES];
+    let bytes = next_transmit(engine, &mut tx_buf);
+    TestWrite::from_bytes(bytes)
 }
 
 fn next_message(engine: &mut Engine) -> msrt::Message {
-    loop {
-        let Some(event) = engine.poll_event() else {
-            panic!("engine should produce a message event");
-        };
-
-        match event {
-            Event::Message(message) => return message,
-            Event::Write(_) => {}
-            Event::SendFailed(failed) => panic!("unexpected send failure: {failed:?}"),
-        }
-    }
+    let mut tx_buf = [0; msrt::MAX_WIRE_BYTES];
+    next_polled_message(engine, &mut tx_buf)
 }
 
 fn assert_no_send_failed(engine: &mut Engine) {
-    while let Some(event) = engine.poll_event() {
-        if let Event::SendFailed(failed) = event {
-            panic!("unexpected send failure: {failed:?}");
+    let mut tx_buf = [0; msrt::MAX_WIRE_BYTES];
+
+    loop {
+        match engine.poll(&mut tx_buf).expect("poll engine") {
+            Poll::SendFailed(failed) => panic!("unexpected send failure: {failed:?}"),
+            Poll::Idle => break,
+            Poll::Transmit(_) | Poll::Message(_) => {}
         }
     }
 }
@@ -169,5 +162,27 @@ fn next_polled_message(engine: &mut Engine, tx_buf: &mut [u8]) -> msrt::Message 
             Poll::SendFailed(failed) => panic!("unexpected send failure: {failed:?}"),
             Poll::Idle => panic!("engine should produce a message event"),
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct TestWrite {
+    bytes: [u8; msrt::MAX_WIRE_BYTES],
+    len: usize,
+}
+
+impl TestWrite {
+    fn from_bytes(bytes: &[u8]) -> Self {
+        let mut stored = [0; msrt::MAX_WIRE_BYTES];
+        stored[..bytes.len()].copy_from_slice(bytes);
+
+        Self {
+            bytes: stored,
+            len: bytes.len(),
+        }
+    }
+
+    fn as_bytes(&self) -> &[u8] {
+        &self.bytes[..self.len]
     }
 }

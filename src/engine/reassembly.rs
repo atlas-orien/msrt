@@ -3,7 +3,7 @@
 use crate::core::{ChannelId, Error, ErrorKind, MessageFlags, MessageId, Result};
 
 use crate::engine::{
-    MAX_MESSAGE_BYTES, MAX_REASSEMBLY_MESSAGES, MessageEvent, runtime::packet::DecodedFragment,
+    MAX_MESSAGE_BYTES, MAX_REASSEMBLY_MESSAGES, MessageEvent, packet::DecodedFragment,
 };
 
 /// Fixed-capacity message reassembly table.

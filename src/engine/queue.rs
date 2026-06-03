@@ -2,7 +2,7 @@
 
 use crate::core::{Error, ErrorKind, Result};
 
-use crate::{EngineOutput, MAX_EVENTS};
+use crate::engine::{EngineOutput, MAX_EVENTS};
 
 /// Fixed-capacity event queue.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

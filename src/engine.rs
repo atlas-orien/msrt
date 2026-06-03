@@ -1,4 +1,25 @@
-//! Minimal protocol engine implementation.
+#![doc = "Protocol engine boundaries for MSRT."]
+
+pub mod config;
+pub mod event;
+pub(crate) mod layout;
+pub mod link;
+pub mod message;
+pub mod scheduler;
+pub mod time;
+
+pub use config::{
+    ChannelProfile, ChannelSpec, DEFAULT_FRAGMENT_BYTES, DEFAULT_MAX_RETRANSMIT_ATTEMPTS,
+    DEFAULT_REASSEMBLY_TIMEOUT_MS, DEFAULT_RETRANSMIT_TIMEOUT_MS, EngineConfig,
+    MAX_ACK_TRACKED_PACKETS, MAX_CHANNEL_POLICIES, MAX_CHANNEL_SPECS, MAX_EVENTS,
+    MAX_IN_FLIGHT_PACKETS, MAX_INGRESS_BYTES, MAX_MESSAGE_BYTES, MAX_REASSEMBLY_MESSAGES,
+    MAX_WIRE_BYTES,
+};
+pub use event::{EngineEvent, EngineEventKind};
+pub use link::{LinkIo, LinkRead, LinkWrite, RawLink};
+pub use message::{DeliveredMessage, MessageDelivery, Reassembly};
+pub use scheduler::{Schedule, Scheduler};
+pub use time::{Duration, Instant};
 
 pub(crate) mod ack;
 pub(crate) mod inflight;
@@ -13,13 +34,10 @@ use crate::core::{ChannelId, Error, MessageId, PacketNumber, Result};
 use crate::reliability::{ChannelReliability, PacketDedup, ReliabilityMode};
 use crate::wire::StreamingDecoder;
 
-use crate::engine::{
-    ChannelProfile, ChannelSpec, EngineConfig, MAX_CHANNEL_POLICIES, MAX_CHANNEL_SPECS,
-    MAX_IN_FLIGHT_PACKETS, MAX_INGRESS_BYTES, MAX_MESSAGE_BYTES, MAX_WIRE_BYTES,
-    runtime::{
-        ack::AckRanges, inflight::InFlightPackets, queue::EventQueue, reassembly::ReassemblyBuffer,
-    },
-};
+use ack::AckRanges;
+use inflight::InFlightPackets;
+use queue::EventQueue;
+use reassembly::ReassemblyBuffer;
 
 /// Minimal non-blocking MSRT protocol engine.
 ///
@@ -69,7 +87,8 @@ impl Engine {
     }
 
     /// Polls one queued engine output event.
-    pub fn poll_event(&mut self) -> Option<EngineOutput> {
+    #[cfg(test)]
+    pub(crate) fn poll_event(&mut self) -> Option<EngineOutput> {
         self.events.pop()
     }
 
@@ -178,7 +197,7 @@ impl Engine {
 
 /// Events produced by the minimal engine.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum EngineOutput {
+pub(crate) enum EngineOutput {
     /// Protocol bytes should be written to the serial link.
     Write(WriteEvent),
     /// A complete application message has been reassembled.
@@ -202,7 +221,7 @@ pub enum EnginePoll<'a> {
 
 /// A non-blocking write request produced by the engine.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct WriteEvent {
+pub(crate) struct WriteEvent {
     /// Packet number assigned to this write.
     pub packet_number: PacketNumber,
     /// Fixed storage containing encoded wire bytes.

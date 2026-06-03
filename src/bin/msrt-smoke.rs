@@ -1,6 +1,6 @@
 //! Minimal Mac-to-MCU smoke demo for the MSRT facade crate.
 
-use msrt::{Config, Engine, Event, Message, Receive, Write};
+use msrt::{Config, Engine, MAX_WIRE_BYTES, Message, Poll, Receive};
 
 fn main() {
     let mut mac = Engine::new(Config {
@@ -27,27 +27,30 @@ fn main() {
 }
 
 fn pump_link(src_name: &str, src: &mut Engine, dst_name: &str, dst: &mut Engine) {
-    while let Some(event) = src.poll_event() {
-        match event {
-            Event::Write(write) => {
-                let _ = deliver_write(src_name, dst_name, dst, write);
+    let mut tx_buf = [0; MAX_WIRE_BYTES];
+
+    loop {
+        match src.poll(&mut tx_buf).expect("poll engine") {
+            Poll::Transmit(bytes) => {
+                let _ = deliver_write(src_name, dst_name, dst, bytes);
             }
-            Event::Message(message) => print_message(src_name, message),
-            Event::SendFailed(failed) => {
+            Poll::Message(message) => print_message(src_name, message),
+            Poll::SendFailed(failed) => {
                 panic!("{src_name}: unexpected send failure: {failed:?}");
             }
+            Poll::Idle => break,
         }
     }
 }
 
-fn deliver_write(src_name: &str, dst_name: &str, dst: &mut Engine, write: Write) -> Receive {
+fn deliver_write(src_name: &str, dst_name: &str, dst: &mut Engine, bytes: &[u8]) -> Receive {
     println!(
         "{src_name} -> {dst_name}: packet_number={}, wire_bytes={}",
-        write.packet_number.get(),
-        write.as_bytes().len()
+        packet_number(bytes),
+        bytes.len()
     );
 
-    let report = dst.receive(write.as_bytes());
+    let report = dst.receive(bytes);
 
     match report {
         Receive::Packet { packet_number } => {
@@ -71,22 +74,23 @@ fn drive_passive_until_message_and_ack(
     peer: &mut Engine,
 ) -> (Message, usize) {
     let mut ack_count = 0;
+    let mut tx_buf = [0; MAX_WIRE_BYTES];
 
     loop {
-        match local.poll_event() {
-            Some(Event::Write(write)) => {
-                if let Receive::Ack { .. } = deliver_write(local_name, peer_name, peer, write) {
+        match local.poll(&mut tx_buf).expect("poll engine") {
+            Poll::Transmit(bytes) => {
+                if let Receive::Ack { .. } = deliver_write(local_name, peer_name, peer, bytes) {
                     ack_count += 1;
                 }
             }
-            Some(Event::Message(message)) => {
+            Poll::Message(message) => {
                 print_message(local_name, message);
                 return (message, ack_count);
             }
-            Some(Event::SendFailed(failed)) => {
+            Poll::SendFailed(failed) => {
                 panic!("{local_name}: unexpected send failure: {failed:?}");
             }
-            None => panic!("{local_name}: expected a message event"),
+            Poll::Idle => panic!("{local_name}: expected a message event"),
         }
     }
 }
@@ -98,4 +102,8 @@ fn print_message(name: &str, message: Message) {
         "{name}: received message_id={}, message={text}",
         message.message_id.get()
     );
+}
+
+fn packet_number(bytes: &[u8]) -> u32 {
+    u32::from_le_bytes(bytes[10..14].try_into().expect("packet number bytes"))
 }
