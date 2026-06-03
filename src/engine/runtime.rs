@@ -539,6 +539,18 @@ mod tests {
     }
 
     #[test]
+    fn engine_default_retransmit_timeout_does_not_retry_after_one_tick() {
+        let mut engine = Engine::new(EngineConfig::default());
+
+        engine.send(b"hello").unwrap();
+        let _ = next_write(&mut engine);
+
+        engine.tick(1);
+
+        assert!(engine.poll_event().is_none());
+    }
+
+    #[test]
     fn engine_receives_half_packet() {
         let mut a = Engine::new(EngineConfig::default());
         let mut b = Engine::new(EngineConfig::default());

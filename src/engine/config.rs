@@ -31,16 +31,12 @@ pub const DEFAULT_FRAGMENT_BYTES: usize = 32;
 /// hiding disconnects for too long.
 pub const DEFAULT_MAX_RETRANSMIT_ATTEMPTS: u8 = 5;
 /// Default retransmission timeout in engine ticks.
-///
-/// The default is intentionally larger than the raw wire time of a 128-byte
-/// packet at 115200 baud. It leaves room for USB CDC buffering, MCU scheduler
-/// jitter, single-byte polling adapters, and the peer's ACK write path.
 pub const DEFAULT_RETRANSMIT_TIMEOUT_MS: u64 = 250;
 /// Default incomplete message reassembly timeout in engine ticks.
 ///
 /// This must outlive the default reliable-send retry window so late
 /// retransmitted fragments can still complete an in-progress message.
-pub const DEFAULT_REASSEMBLY_TIMEOUT_MS: u64 = 3000;
+pub const DEFAULT_REASSEMBLY_TIMEOUT_MS: u64 = 2_000;
 
 /// Protocol-level purpose associated with a channel.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
