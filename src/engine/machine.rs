@@ -20,6 +20,8 @@ pub(crate) mod packet;
 pub(crate) mod queue;
 pub(crate) mod reassembly;
 pub(crate) mod retransmit;
+#[cfg(test)]
+mod tests;
 
 /// Internal protocol state owned by [`crate::engine::Engine`].
 #[derive(Clone, Debug, Eq, PartialEq)]
