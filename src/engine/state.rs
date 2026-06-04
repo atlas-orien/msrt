@@ -1,59 +1,54 @@
-//! Internal engine state machinery.
+//! Internal engine protocol state.
 
 use crate::core::{Error, MessageId, PacketNumber, Result};
 use crate::engine::{
-    EngineConfig, EnginePoll, MessageEvent, ReceiveReport, SendFailedEvent,
-    config::{MAX_IN_FLIGHT_PACKETS, MAX_INGRESS_BYTES, MAX_WIRE_BYTES},
+    EngineConfig, EnginePoll, MessageEvent, ReceiveReport, SendFailedEvent, config::MAX_WIRE_BYTES,
 };
-use crate::reliability::PacketDedup;
-use crate::wire::StreamingDecoder;
 
 use self::{
-    ack::AckRanges, inflight::InFlightPackets, queue::EventQueue, reassembly::ReassemblyBuffer,
+    ack::AckState, clock::ClockState, ingress::IngressState, numbers::NumberState,
+    reassembly::ReassemblyState, receive::ReceiveState, recovery::RecoveryState,
+    scheduler::SchedulerState,
 };
 
 pub(crate) mod ack;
-pub(crate) mod inflight;
+pub(crate) mod clock;
 pub(crate) mod ingress;
-pub(crate) mod outgoing;
-pub(crate) mod packet;
-pub(crate) mod queue;
+pub(crate) mod numbers;
 pub(crate) mod reassembly;
-pub(crate) mod retransmit;
+pub(crate) mod receive;
+pub(crate) mod recovery;
+pub(crate) mod scheduler;
 #[cfg(test)]
 mod tests;
 
 /// Internal protocol state owned by [`crate::engine::Engine`].
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct Machine {
-    pub(crate) next_packet_number: PacketNumber,
-    pub(crate) next_message_id: MessageId,
-    pub(crate) now_ms: u64,
-    pub(crate) events: EventQueue,
-    pub(crate) in_flight: InFlightPackets,
-    pub(crate) ack_ranges: AckRanges,
-    pub(crate) ack_pending: bool,
-    pub(crate) ingress: StreamingDecoder<MAX_INGRESS_BYTES>,
-    pub(crate) dedup: PacketDedup<MAX_IN_FLIGHT_PACKETS>,
-    pub(crate) reassembly: ReassemblyBuffer,
+pub(crate) struct EngineState {
+    pub(crate) clock: ClockState,
+    pub(crate) numbers: NumberState,
+    pub(crate) scheduler: SchedulerState,
+    pub(crate) recovery: RecoveryState,
+    pub(crate) ack: AckState,
+    pub(crate) ingress: IngressState,
+    pub(crate) receive: ReceiveState,
+    pub(crate) reassembly: ReassemblyState,
 }
 
-impl Machine {
+impl EngineState {
     pub(crate) const fn new(
         initial_packet_number: PacketNumber,
         initial_message_id: MessageId,
     ) -> Self {
         Self {
-            next_packet_number: initial_packet_number,
-            next_message_id: initial_message_id,
-            now_ms: 0,
-            events: EventQueue::new(),
-            in_flight: InFlightPackets::new(),
-            ack_ranges: AckRanges::new(),
-            ack_pending: false,
-            ingress: StreamingDecoder::new(),
-            dedup: PacketDedup::new(),
-            reassembly: ReassemblyBuffer::new(),
+            clock: ClockState::new(),
+            numbers: NumberState::new(initial_packet_number, initial_message_id),
+            scheduler: SchedulerState::new(),
+            recovery: RecoveryState::new(),
+            ack: AckState::new(),
+            ingress: IngressState::new(),
+            receive: ReceiveState::new(),
+            reassembly: ReassemblyState::new(),
         }
     }
 
@@ -65,11 +60,11 @@ impl Machine {
     ) -> Result<EnginePoll<'a>> {
         self.tick_retransmit(config, now_ms);
 
-        if self.ack_pending {
+        if self.ack.is_pending() {
             return self.poll_pending_ack(tx_buf);
         }
 
-        let Some(event) = self.events.pop() else {
+        let Some(event) = self.scheduler.pop() else {
             return Ok(EnginePoll::Idle);
         };
 
@@ -81,11 +76,11 @@ impl Machine {
 
                 match write.priority {
                     WritePriority::Retransmit => {
-                        self.in_flight
+                        self.recovery
                             .note_retransmit_sent(write.packet_number, now_ms);
                     }
                     WritePriority::Control | WritePriority::NewData => {
-                        self.in_flight.note_sent(write.packet_number, now_ms);
+                        self.recovery.note_sent(write.packet_number, now_ms);
                     }
                 }
                 tx_buf[..write.len].copy_from_slice(write.as_bytes());
@@ -117,16 +112,15 @@ impl Machine {
     }
 
     fn poll_pending_ack<'a>(&mut self, tx_buf: &'a mut [u8]) -> Result<EnginePoll<'a>> {
-        let packet_number = self.next_packet_number;
-        let written = outgoing::encode_ack_packet(
+        let packet_number = self.numbers.alloc_packet_number();
+        let written = crate::engine::codec::outgoing::encode_ack_packet(
             packet_number,
-            self.ack_ranges.ack(),
+            self.ack.build_ack(),
             tx_buf,
             &crate::wire::Crc16,
         )?;
 
-        self.ack_pending = false;
-        self.next_packet_number = self.next_packet_number.next();
+        self.ack.on_ack_sent();
 
         Ok(EnginePoll::Transmit {
             bytes: &tx_buf[..written],
@@ -135,12 +129,12 @@ impl Machine {
     }
 
     #[cfg(test)]
-    pub(crate) fn poll_event(machine: &mut Machine) -> Option<EngineOutput> {
-        machine.events.pop()
+    pub(crate) fn poll_event(state: &mut EngineState) -> Option<EngineOutput> {
+        state.scheduler.pop()
     }
 }
 
-/// Events produced by the engine machinery.
+/// Events produced by engine state.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum EngineOutput {
     /// Protocol bytes should be written to the serial link.

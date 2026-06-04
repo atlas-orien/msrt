@@ -1,24 +1,24 @@
-//! Engine output event queue.
+//! Engine output scheduling state.
 
 use crate::core::{Error, ErrorKind, PacketType, Result};
 
 use crate::{
     engine::{
         config::MAX_EVENTS,
-        machine::{EngineOutput, WriteEvent},
+        state::{EngineOutput, WriteEvent},
     },
     wire::WIRE_HEADER_LEN,
 };
 
-/// Fixed-capacity event queue.
+/// Fixed-capacity output scheduler.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct EventQueue {
+pub(crate) struct SchedulerState {
     events: [Option<EngineOutput>; MAX_EVENTS],
     head: usize,
     len: usize,
 }
 
-impl EventQueue {
+impl SchedulerState {
     pub(crate) const fn new() -> Self {
         Self {
             events: [None; MAX_EVENTS],
@@ -151,9 +151,9 @@ impl EventPriority {
     fn for_event(event: &EngineOutput) -> Self {
         match event {
             EngineOutput::Write(write) => match write.priority {
-                crate::engine::machine::WritePriority::Control => Self::Control,
-                crate::engine::machine::WritePriority::Retransmit => Self::Retransmit,
-                crate::engine::machine::WritePriority::NewData => Self::NewWrite,
+                crate::engine::state::WritePriority::Control => Self::Control,
+                crate::engine::state::WritePriority::Retransmit => Self::Retransmit,
+                crate::engine::state::WritePriority::NewData => Self::NewWrite,
             },
             EngineOutput::SendFailed(_) => Self::Local,
             EngineOutput::Message(_) => Self::Local,
@@ -164,12 +164,14 @@ impl EventPriority {
 #[cfg(test)]
 mod tests {
     use crate::core::{PacketNumber, PacketType};
-    use crate::engine::machine::{EngineOutput, WriteEvent, WritePriority, queue::EventQueue};
+    use crate::engine::state::{
+        EngineOutput, WriteEvent, WritePriority, scheduler::SchedulerState,
+    };
     use crate::wire::WIRE_HEADER_LEN;
 
     #[test]
     fn queue_replaces_old_ack_with_new_ack() {
-        let mut queue = EventQueue::new();
+        let mut queue = SchedulerState::new();
         let old_ack = write_event(
             PacketType::Ack,
             PacketNumber::new(1),
@@ -190,7 +192,7 @@ mod tests {
 
     #[test]
     fn queue_replaces_duplicate_packet_number() {
-        let mut queue = EventQueue::new();
+        let mut queue = SchedulerState::new();
         let first = write_event(
             PacketType::Data,
             PacketNumber::new(7),

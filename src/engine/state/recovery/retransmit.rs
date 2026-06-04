@@ -3,12 +3,14 @@
 use crate::engine::{
     EngineConfig, SendFailedEvent, SendFailureReason,
     config::MAX_IN_FLIGHT_PACKETS,
-    machine::{EngineOutput, Machine, WriteEvent},
+    state::{EngineOutput, EngineState, WriteEvent},
 };
 
-impl Machine {
-    pub(super) fn tick_retransmit(&mut self, config: &EngineConfig, now_ms: u64) {
-        self.now_ms = now_ms;
+use super::inflight::InFlightPacket;
+
+impl EngineState {
+    pub(crate) fn tick_retransmit(&mut self, config: &EngineConfig, now_ms: u64) {
+        self.clock.update(now_ms);
         self.reassembly.expire(now_ms, config.reassembly_timeout_ms);
 
         let mut retransmits = [None; MAX_IN_FLIGHT_PACKETS];
@@ -18,7 +20,7 @@ impl Machine {
         let mut failed_messages = [None; MAX_IN_FLIGHT_PACKETS];
         let mut failed_message_len = 0;
 
-        for packet in self.in_flight.packets() {
+        for packet in self.recovery.packets() {
             if !packet.sent {
                 continue;
             }
@@ -48,13 +50,15 @@ impl Machine {
 
         for packet in failures[..failure_len].iter().flatten() {
             self.log_send_failed_snapshot(config, now_ms, packet);
-            self.in_flight
+            self.recovery
                 .remove_message(packet.channel_id, packet.message_id);
-            let _ = self.events.push(EngineOutput::SendFailed(SendFailedEvent {
-                channel_id: packet.channel_id,
-                message_id: packet.message_id,
-                reason: SendFailureReason::RetryLimitReached,
-            }));
+            let _ = self
+                .scheduler
+                .push(EngineOutput::SendFailed(SendFailedEvent {
+                    channel_id: packet.channel_id,
+                    message_id: packet.message_id,
+                    reason: SendFailureReason::RetryLimitReached,
+                }));
         }
 
         for packet in retransmits[..retransmit_len].iter().flatten() {
@@ -67,12 +71,12 @@ impl Machine {
                 continue;
             }
 
-            let _ = self.events.push(EngineOutput::Write(WriteEvent {
+            let _ = self.scheduler.push(EngineOutput::Write(WriteEvent {
                 packet_number: packet.packet_number,
                 bytes: packet.bytes,
                 len: packet.len,
                 attempts: packet.attempts.saturating_add(1),
-                priority: crate::engine::machine::WritePriority::Retransmit,
+                priority: crate::engine::state::WritePriority::Retransmit,
             }));
         }
     }
@@ -82,12 +86,12 @@ impl Machine {
         &self,
         config: &EngineConfig,
         now_ms: u64,
-        failed: &crate::engine::machine::inflight::InFlightPacket,
+        failed: &InFlightPacket,
     ) {
         eprintln!(
             "msrt in_flight send_failed now={} len={} failed_channel={} failed_message={} failed_packet={} attempts={} age_ms={} retry_limit={} rto_ms={}",
             now_ms,
-            self.in_flight.len(),
+            self.recovery.in_flight_len(),
             failed.channel_id.get(),
             failed.message_id.get(),
             failed.packet_number.get(),
@@ -103,7 +107,7 @@ impl Machine {
         &self,
         _config: &EngineConfig,
         _now_ms: u64,
-        _failed: &crate::engine::machine::inflight::InFlightPacket,
+        _failed: &InFlightPacket,
     ) {
     }
 }

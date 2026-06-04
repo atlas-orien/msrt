@@ -4,17 +4,17 @@ use crate::core::{ChannelId, Error, ErrorKind, MessageFlags, MessageId, Result};
 
 use crate::engine::{
     MessageEvent,
+    codec::packet::DecodedFragment,
     config::{MAX_MESSAGE_BYTES, MAX_REASSEMBLY_MESSAGES},
-    machine::packet::DecodedFragment,
 };
 
-/// Fixed-capacity message reassembly table.
+/// Message reassembly state machine.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct ReassemblyBuffer {
+pub(crate) struct ReassemblyState {
     slots: [ReassemblySlot; MAX_REASSEMBLY_MESSAGES],
 }
 
-impl ReassemblyBuffer {
+impl ReassemblyState {
     pub(crate) const fn new() -> Self {
         Self {
             slots: [ReassemblySlot::new(); MAX_REASSEMBLY_MESSAGES],

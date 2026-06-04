@@ -14,28 +14,26 @@ use crate::wire::{
 
 use crate::engine::{
     EngineConfig,
+    codec::packet::fragment_flags,
     config::{MAX_EVENTS, MAX_MESSAGE_BYTES, MAX_WIRE_BYTES},
-    machine::{
-        EngineOutput, Machine, WriteEvent, inflight::InFlightPacket, packet::fragment_flags,
-    },
+    state::{EngineOutput, EngineState, WriteEvent, recovery::inflight::InFlightPacket},
 };
 
 const ACK_PACKET_LEN: usize = PACKET_HEADER_LEN + ACK_LEN;
 const LIVENESS_PACKET_LEN: usize = PACKET_HEADER_LEN;
 
-impl Machine {
-    pub(super) fn send_on_impl(
+impl EngineState {
+    pub(crate) fn send_on_impl(
         &mut self,
         config: &EngineConfig,
         channel_id: ChannelId,
         message: &[u8],
     ) -> Result<MessageId> {
         let fragment_bytes = config.fragment_bytes.clamp(1, max_fragment_bytes());
-        let message_id = self.next_message_id;
+        let message_id = self.numbers.alloc_message_id();
         let mode = config.reliability_mode(channel_id);
         self.ensure_can_queue_message(message.len(), fragment_bytes, mode)?;
         self.send_message_fragments(channel_id, message_id, message, fragment_bytes, mode)?;
-        self.next_message_id = MessageId::new(self.next_message_id.get().wrapping_add(1));
 
         Ok(message_id)
     }
@@ -48,27 +46,28 @@ impl Machine {
     ) -> Result<()> {
         let fragments = fragment_count(message_len, fragment_bytes);
 
-        if fragments > MAX_EVENTS || self.events.available() < fragments {
+        if fragments > MAX_EVENTS || self.scheduler.available() < fragments {
             return Err(Error::new(ErrorKind::Engine));
         }
 
-        if matches!(mode, ReliabilityMode::Reliable) && self.in_flight.available() < fragments {
+        if matches!(mode, ReliabilityMode::Reliable)
+            && self.recovery.available_in_flight() < fragments
+        {
             return Err(Error::new(ErrorKind::Engine));
         }
 
         Ok(())
     }
 
-    pub(super) fn queue_ack(&mut self, acknowledged: PacketNumber) -> Result<()> {
-        self.ack_ranges.observe(acknowledged);
-        self.ack_pending = true;
+    pub(crate) fn queue_ack(&mut self, acknowledged: PacketNumber) -> Result<()> {
+        self.ack.observe(acknowledged);
 
         Ok(())
     }
 
-    pub(super) fn send_ping_impl(&mut self) -> Result<MessageId> {
-        let message_id = self.next_message_id;
-        let packet_number = self.next_packet_number;
+    pub(crate) fn send_ping_impl(&mut self) -> Result<MessageId> {
+        let message_id = self.numbers.alloc_message_id();
+        let packet_number = self.numbers.alloc_packet_number();
         let mut wire = [0; MAX_WIRE_BYTES];
         let written = encode_liveness_packet(
             PacketHeader::ping(packet_number, message_id),
@@ -76,31 +75,29 @@ impl Machine {
             &Crc16,
         )?;
 
-        self.events.push(EngineOutput::Write(WriteEvent {
+        self.scheduler.push(EngineOutput::Write(WriteEvent {
             packet_number,
             bytes: wire,
             len: written,
             attempts: 0,
-            priority: crate::engine::machine::WritePriority::NewData,
+            priority: crate::engine::state::WritePriority::NewData,
         }))?;
-        self.in_flight.track(InFlightPacket {
+        self.recovery.track(InFlightPacket {
             packet_number,
             channel_id: ChannelId::LIVENESS,
             message_id,
             bytes: wire,
             len: written,
             attempts: 0,
-            last_sent_ms: self.now_ms,
+            last_sent_ms: self.clock.now_ms(),
             sent: false,
         })?;
-        self.next_packet_number = self.next_packet_number.next();
-        self.next_message_id = MessageId::new(self.next_message_id.get().wrapping_add(1));
 
         Ok(message_id)
     }
 
-    pub(super) fn queue_pong(&mut self, message_id: MessageId) -> Result<()> {
-        let packet_number = self.next_packet_number;
+    pub(crate) fn queue_pong(&mut self, message_id: MessageId) -> Result<()> {
+        let packet_number = self.numbers.alloc_packet_number();
         let mut wire = [0; MAX_WIRE_BYTES];
         let written = encode_liveness_packet(
             PacketHeader::pong(packet_number, message_id),
@@ -108,14 +105,13 @@ impl Machine {
             &Crc16,
         )?;
 
-        self.events.push(EngineOutput::Write(WriteEvent {
+        self.scheduler.push(EngineOutput::Write(WriteEvent {
             packet_number,
             bytes: wire,
             len: written,
             attempts: 0,
-            priority: crate::engine::machine::WritePriority::Control,
+            priority: crate::engine::state::WritePriority::Control,
         }))?;
-        self.next_packet_number = self.next_packet_number.next();
 
         Ok(())
     }
@@ -137,7 +133,7 @@ impl Machine {
         while offset < message.len() || (message.is_empty() && offset == 0) {
             let end = core::cmp::min(offset + fragment_bytes, message.len());
             let fragment = &message[offset..end];
-            let packet_number = self.next_packet_number;
+            let packet_number = self.numbers.alloc_packet_number();
             let mut wire = [0; MAX_WIRE_BYTES];
             let fragment_flags =
                 MessageFlags::from_bits(fragment_flags(offset, end, message.len()));
@@ -156,26 +152,25 @@ impl Machine {
             );
             let written = encode_message_fragment(header, fragment, &mut wire, &Crc16)?;
 
-            self.events.push(EngineOutput::Write(WriteEvent {
+            self.scheduler.push(EngineOutput::Write(WriteEvent {
                 packet_number,
                 bytes: wire,
                 len: written,
                 attempts: 0,
-                priority: crate::engine::machine::WritePriority::NewData,
+                priority: crate::engine::state::WritePriority::NewData,
             }))?;
             if matches!(mode, ReliabilityMode::Reliable) {
-                self.in_flight.track(InFlightPacket {
+                self.recovery.track(InFlightPacket {
                     packet_number,
                     channel_id,
                     message_id,
                     bytes: wire,
                     len: written,
                     attempts: 0,
-                    last_sent_ms: self.now_ms,
+                    last_sent_ms: self.clock.now_ms(),
                     sent: false,
                 })?;
             }
-            self.next_packet_number = self.next_packet_number.next();
 
             if message.is_empty() {
                 break;
@@ -227,7 +222,7 @@ fn encode_message_fragment(
     Ok(total_len)
 }
 
-pub(super) fn encode_ack_packet(
+pub(crate) fn encode_ack_packet(
     packet_number: crate::core::PacketNumber,
     ack: Ack,
     out: &mut [u8],

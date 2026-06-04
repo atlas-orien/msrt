@@ -1,12 +1,13 @@
 #![doc = "Protocol engine boundaries for MSRT."]
 
+pub(crate) mod codec;
 pub(crate) mod config;
-pub(crate) mod machine;
+pub(crate) mod state;
 
 pub use config::{ChannelProfile, ChannelSpec, EngineConfig};
 
 use crate::core::{ChannelId, Error, MessageId, PacketNumber, Result};
-use machine::Machine;
+use state::EngineState;
 
 /// Minimal non-blocking MSRT protocol engine.
 ///
@@ -16,7 +17,7 @@ use machine::Machine;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Engine {
     pub(crate) config: EngineConfig,
-    pub(crate) machine: Machine,
+    pub(crate) state: EngineState,
 }
 
 impl Engine {
@@ -25,7 +26,7 @@ impl Engine {
     pub const fn new(config: EngineConfig) -> Self {
         Self {
             config,
-            machine: Machine::new(config.initial_packet_number, config.initial_message_id),
+            state: EngineState::new(config.initial_packet_number, config.initial_message_id),
         }
     }
 
@@ -34,7 +35,7 @@ impl Engine {
     /// Write events are copied into `tx_buf` and returned as a borrowed byte
     /// slice so callers can pass the buffer directly to their link layer.
     pub fn poll<'a>(&mut self, now_ms: u64, tx_buf: &'a mut [u8]) -> Result<EnginePoll<'a>> {
-        self.machine.poll(&self.config, now_ms, tx_buf)
+        self.state.poll(&self.config, now_ms, tx_buf)
     }
 
     /// Queues a complete message for non-blocking protocol transmission.
@@ -49,7 +50,7 @@ impl Engine {
     ///
     /// This is the channel-aware form of [`Engine::send`].
     pub fn send_on(&mut self, channel_id: ChannelId, message: &[u8]) -> Result<MessageId> {
-        self.machine.send_on(&self.config, channel_id, message)
+        self.state.send_on(&self.config, channel_id, message)
     }
 
     /// Queues a liveness ping packet.
@@ -57,7 +58,7 @@ impl Engine {
     /// This packet is handled by the protocol and is never delivered as an
     /// application message.
     pub fn send_ping(&mut self) -> Result<MessageId> {
-        self.machine.send_ping()
+        self.state.send_ping()
     }
 
     /// Feeds already-arrived wire bytes into the engine.
@@ -65,7 +66,7 @@ impl Engine {
     /// This method never waits for more bytes. It handles the current input and
     /// queues events if a complete message becomes available.
     pub fn receive(&mut self, bytes: &[u8]) -> ReceiveReport {
-        self.machine.receive(&self.config, bytes)
+        self.state.receive(&self.config, bytes)
     }
 }
 

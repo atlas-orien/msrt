@@ -2,17 +2,38 @@
 
 use crate::core::{ChannelId, Error, ErrorKind};
 use crate::reliability::{Dedup, DedupDecision};
-use crate::wire::{Crc16, StreamDecodeOutcome};
+use crate::wire::{Crc16, StreamDecodeOutcome, StreamingDecoder};
 
 use crate::engine::{
     EngineConfig, ReceiveReport,
-    machine::{
-        EngineOutput, Machine,
-        packet::{PacketBytes, PacketDecode},
-    },
+    codec::packet::{PacketBytes, PacketDecode},
+    config::MAX_INGRESS_BYTES,
+    state::{EngineOutput, EngineState},
 };
 
-impl Machine {
+/// Incoming byte stream decode state.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct IngressState {
+    decoder: StreamingDecoder<MAX_INGRESS_BYTES>,
+}
+
+impl IngressState {
+    pub(crate) const fn new() -> Self {
+        Self {
+            decoder: StreamingDecoder::new(),
+        }
+    }
+
+    pub(crate) fn feed(
+        &mut self,
+        bytes: &[u8],
+        checksum: &impl crate::wire::Checksum,
+    ) -> crate::core::Result<StreamDecodeOutcome<'_>> {
+        self.decoder.feed(bytes, checksum)
+    }
+}
+
+impl EngineState {
     pub(super) fn receive_ingress(&mut self, config: &EngineConfig, bytes: &[u8]) -> ReceiveReport {
         self.receive_bytes(config, bytes)
     }
@@ -78,14 +99,14 @@ impl Machine {
                     return ReceiveReport::Error(Error::new(ErrorKind::Engine));
                 }
 
-                if self.dedup.observe(packet_number) == DedupDecision::Duplicate {
+                if self.receive.dedup().observe(packet_number) == DedupDecision::Duplicate {
                     return ReceiveReport::Duplicate { packet_number };
                 }
 
-                match self.reassembly.observe(fragment, self.now_ms) {
+                match self.reassembly.observe(fragment, self.clock.now_ms()) {
                     Ok(Some(mut message)) => {
                         message.profile = config.channel_profile(message.channel_id);
-                        if self.events.push(EngineOutput::Message(message)).is_err() {
+                        if self.scheduler.push(EngineOutput::Message(message)).is_err() {
                             return ReceiveReport::Error(Error::new(ErrorKind::Engine));
                         }
                         ReceiveReport::Packet { packet_number }
@@ -95,7 +116,7 @@ impl Machine {
                 }
             }
             PacketDecode::Ack(ack) => {
-                self.in_flight.apply_ack(ack.ack);
+                self.recovery.apply_ack(ack.ack);
                 ReceiveReport::Ack {
                     packet_number: ack.ack.largest_acknowledged,
                 }
@@ -111,7 +132,7 @@ impl Machine {
                 }
             }
             PacketDecode::Pong(pong) => {
-                self.in_flight
+                self.recovery
                     .remove_message(ChannelId::LIVENESS, pong.header.message_id);
                 ReceiveReport::Pong {
                     packet_number: pong.header.packet_number,

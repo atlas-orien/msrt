@@ -4,9 +4,42 @@ use crate::core::{Ack, AckRange, MAX_ACK_RANGES, PacketNumber};
 
 use crate::engine::config::MAX_ACK_TRACKED_PACKETS;
 
+/// ACK state machine.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct AckState {
+    ranges: AckRanges,
+    pending: bool,
+}
+
+impl AckState {
+    pub(crate) const fn new() -> Self {
+        Self {
+            ranges: AckRanges::new(),
+            pending: false,
+        }
+    }
+
+    pub(crate) fn observe(&mut self, packet_number: PacketNumber) {
+        self.ranges.observe(packet_number);
+        self.pending = true;
+    }
+
+    pub(crate) const fn is_pending(&self) -> bool {
+        self.pending
+    }
+
+    pub(crate) fn build_ack(&self) -> Ack {
+        self.ranges.ack()
+    }
+
+    pub(crate) fn on_ack_sent(&mut self) {
+        self.pending = false;
+    }
+}
+
 /// Fixed-capacity observed packet set used to build ACK ranges.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct AckRanges {
+struct AckRanges {
     packets: [Option<PacketNumber>; MAX_ACK_TRACKED_PACKETS],
     next: usize,
     len: usize,
