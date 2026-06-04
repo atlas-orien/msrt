@@ -76,7 +76,7 @@ impl EngineState {
                 bytes: packet.bytes,
                 len: packet.len,
                 attempts: packet.attempts.saturating_add(1),
-                priority: crate::engine::state::WritePriority::Retransmit,
+                priority: crate::engine::state::scheduler::WritePriority::Retransmit,
             }));
         }
     }
@@ -88,17 +88,18 @@ impl EngineState {
         now_ms: u64,
         failed: &InFlightPacket,
     ) {
-        eprintln!(
-            "msrt in_flight send_failed now={} len={} failed_channel={} failed_message={} failed_packet={} attempts={} age_ms={} retry_limit={} rto_ms={}",
+        tracing::error!(
+            target: "msrt::engine::recovery",
             now_ms,
-            self.recovery.in_flight_len(),
-            failed.channel_id.get(),
-            failed.message_id.get(),
-            failed.packet_number.get(),
-            failed.attempts,
-            now_ms.saturating_sub(failed.last_sent_ms),
-            config.max_retransmit_attempts,
-            config.retransmit_timeout_ms,
+            in_flight_len = self.recovery.in_flight_len(),
+            failed_channel = failed.channel_id.get(),
+            failed_message = failed.message_id.get(),
+            failed_packet = failed.packet_number.get(),
+            attempts = failed.attempts,
+            age_ms = now_ms.saturating_sub(failed.last_sent_ms),
+            retry_limit = config.max_retransmit_attempts,
+            rto_ms = config.retransmit_timeout_ms,
+            "in-flight packet reached retry limit"
         );
     }
 

@@ -23,12 +23,13 @@ include = [
 
 [features]
 default = ["std"]
-std = []
+std = ["dep:tracing"]
 
 [dependencies]
+tracing = { version = "0.1", optional = true }
 
 [dev-dependencies]
-criterion = { version = "0.8.2", default-features = false }
+criterion = { version = "0.8" }
 
 [[bench]]
 name = "protocol"

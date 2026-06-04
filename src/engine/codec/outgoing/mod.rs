@@ -80,7 +80,7 @@ impl EngineState {
             bytes: wire,
             len: written,
             attempts: 0,
-            priority: crate::engine::state::WritePriority::NewData,
+            priority: crate::engine::state::scheduler::WritePriority::NewData,
         }))?;
         self.recovery.track(InFlightPacket {
             packet_number,
@@ -110,7 +110,7 @@ impl EngineState {
             bytes: wire,
             len: written,
             attempts: 0,
-            priority: crate::engine::state::WritePriority::Control,
+            priority: crate::engine::state::scheduler::WritePriority::Control,
         }))?;
 
         Ok(())
@@ -157,7 +157,7 @@ impl EngineState {
                 bytes: wire,
                 len: written,
                 attempts: 0,
-                priority: crate::engine::state::WritePriority::NewData,
+                priority: crate::engine::state::scheduler::WritePriority::NewData,
             }))?;
             if matches!(mode, ReliabilityMode::Reliable) {
                 self.recovery.track(InFlightPacket {

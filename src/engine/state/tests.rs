@@ -209,7 +209,7 @@ fn engine_ack_range_clears_multiple_in_flight_packets() {
             bytes: stored,
             len: bytes.len(),
             attempts,
-            priority: crate::engine::state::WritePriority::Control,
+            priority: crate::engine::state::scheduler::WritePriority::Control,
         });
     }
 
@@ -730,7 +730,7 @@ fn next_polled_write(engine: &mut Engine, now_ms: u64) -> WriteEvent {
         bytes: stored,
         len: bytes.len(),
         attempts,
-        priority: crate::engine::state::WritePriority::NewData,
+        priority: crate::engine::state::scheduler::WritePriority::NewData,
     }
 }
 
@@ -789,7 +789,7 @@ fn ack_packet_for_ranges(
         bytes,
         len: total_len,
         attempts: 0,
-        priority: crate::engine::state::WritePriority::Control,
+        priority: crate::engine::state::scheduler::WritePriority::Control,
     }
 }
 

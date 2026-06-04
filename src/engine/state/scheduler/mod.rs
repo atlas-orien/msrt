@@ -1,11 +1,12 @@
 //! Engine output scheduling state.
 
-use crate::core::{Error, ErrorKind, PacketType, Result};
+use crate::core::{Error, ErrorKind, PacketNumber, PacketType, Result};
 
 use crate::{
     engine::{
-        config::MAX_EVENTS,
-        state::{EngineOutput, WriteEvent},
+        EnginePoll, MessageEvent, SendFailedEvent,
+        config::{MAX_EVENTS, MAX_WIRE_BYTES},
+        state::{ack::AckState, numbers::NumberState, recovery::RecoveryState},
     },
     wire::WIRE_HEADER_LEN,
 };
@@ -71,6 +72,29 @@ impl SchedulerState {
         event
     }
 
+    pub(crate) fn poll<'a>(
+        &mut self,
+        ack: &mut AckState,
+        numbers: &mut NumberState,
+        recovery: &mut RecoveryState,
+        now_ms: u64,
+        tx_buf: &'a mut [u8],
+    ) -> Result<EnginePoll<'a>> {
+        if ack.is_pending() {
+            return poll_pending_ack(ack, numbers, tx_buf);
+        }
+
+        let Some(event) = self.pop() else {
+            return Ok(EnginePoll::Idle);
+        };
+
+        match event {
+            EngineOutput::Write(write) => poll_write(write, recovery, now_ms, tx_buf),
+            EngineOutput::Message(message) => Ok(EnginePoll::Message(message)),
+            EngineOutput::SendFailed(failed) => Ok(EnginePoll::SendFailed(failed)),
+        }
+    }
+
     fn highest_priority_offset(&self) -> usize {
         let mut best_offset = 0;
         let mut best_priority =
@@ -125,6 +149,54 @@ impl SchedulerState {
     }
 }
 
+fn poll_pending_ack<'a>(
+    ack: &mut AckState,
+    numbers: &mut NumberState,
+    tx_buf: &'a mut [u8],
+) -> Result<EnginePoll<'a>> {
+    let packet_number = numbers.alloc_packet_number();
+    let written = crate::engine::codec::outgoing::encode_ack_packet(
+        packet_number,
+        ack.build_ack(),
+        tx_buf,
+        &crate::wire::Crc16,
+    )?;
+
+    ack.on_ack_sent();
+
+    Ok(EnginePoll::Transmit {
+        bytes: &tx_buf[..written],
+        attempts: 0,
+    })
+}
+
+fn poll_write<'a>(
+    write: WriteEvent,
+    recovery: &mut RecoveryState,
+    now_ms: u64,
+    tx_buf: &'a mut [u8],
+) -> Result<EnginePoll<'a>> {
+    if tx_buf.len() < write.len {
+        return Err(Error::buffer_too_small());
+    }
+
+    match write.priority {
+        WritePriority::Retransmit => {
+            recovery.note_retransmit_sent(write.packet_number, now_ms);
+        }
+        WritePriority::Control | WritePriority::NewData => {
+            recovery.note_sent(write.packet_number, now_ms);
+        }
+    }
+
+    tx_buf[..write.len].copy_from_slice(write.as_bytes());
+
+    Ok(EnginePoll::Transmit {
+        bytes: &tx_buf[..write.len],
+        attempts: write.attempts,
+    })
+}
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum EventPriority {
     Control,
@@ -159,6 +231,47 @@ impl EventPriority {
             EngineOutput::Message(_) => Self::Local,
         }
     }
+}
+
+/// Events produced by engine state.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum EngineOutput {
+    /// Protocol bytes should be written to the serial link.
+    Write(WriteEvent),
+    /// A complete application message has been reassembled.
+    Message(MessageEvent),
+    /// A message could not be sent reliably.
+    SendFailed(SendFailedEvent),
+}
+
+/// A non-blocking write request produced by the engine.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct WriteEvent {
+    /// Packet number assigned to this write.
+    pub packet_number: PacketNumber,
+    /// Fixed storage containing encoded wire bytes.
+    pub bytes: [u8; MAX_WIRE_BYTES],
+    /// Number of valid bytes in `bytes`.
+    pub len: usize,
+    /// Send attempt count: 0 = first send, ≥1 = retransmit.
+    pub attempts: u8,
+    /// Internal transmit priority used by the scheduler.
+    pub priority: WritePriority,
+}
+
+impl WriteEvent {
+    /// Returns the valid encoded wire bytes.
+    #[must_use]
+    pub const fn as_bytes(&self) -> &[u8] {
+        self.bytes.split_at(self.len).0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) enum WritePriority {
+    Control,
+    Retransmit,
+    NewData,
 }
 
 #[cfg(test)]
