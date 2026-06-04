@@ -1,13 +1,13 @@
 //! In-flight packet tracking.
 
-use crate::core::{Ack, ChannelId, Error, ErrorKind, MessageId, PacketNumber, Result};
+use crate::core::{ChannelId, Error, ErrorKind, MessageId, PacketKey, Result};
 
 use crate::engine::config::{MAX_IN_FLIGHT_PACKETS, MAX_WIRE_BYTES};
 
 /// Encoded packet waiting for acknowledgement.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct InFlightPacket {
-    pub(crate) packet_number: PacketNumber,
+    pub(crate) key: PacketKey,
     pub(crate) channel_id: ChannelId,
     pub(crate) message_id: MessageId,
     pub(crate) bytes: [u8; MAX_WIRE_BYTES],
@@ -35,7 +35,7 @@ impl InFlightPackets {
     pub(crate) fn track(&mut self, packet: InFlightPacket) -> Result<()> {
         for slot in &mut self.packets {
             if slot
-                .map(|current| current.packet_number == packet.packet_number)
+                .map(|current| current.key == packet.key)
                 .unwrap_or(false)
             {
                 *slot = Some(packet);
@@ -54,15 +54,16 @@ impl InFlightPackets {
         Err(Error::new(ErrorKind::Engine))
     }
 
-    pub(crate) fn apply_ack(&mut self, ack: Ack) {
+    pub(crate) fn apply_ack(&mut self, key: PacketKey) {
         for slot in &mut self.packets {
             let Some(packet) = *slot else {
                 continue;
             };
 
-            if ack.acknowledges(packet.packet_number) {
+            if packet.key == key {
                 *slot = None;
                 self.len = self.len.saturating_sub(1);
+                return;
             }
         }
     }
@@ -92,9 +93,9 @@ impl InFlightPackets {
         }
     }
 
-    pub(crate) fn note_sent(&mut self, packet_number: PacketNumber, now_ms: u64) {
+    pub(crate) fn note_sent(&mut self, key: PacketKey, now_ms: u64) {
         for packet in self.packets.iter_mut().flatten() {
-            if packet.packet_number == packet_number {
+            if packet.key == key {
                 packet.sent = true;
                 packet.last_sent_ms = now_ms;
                 return;
@@ -102,9 +103,9 @@ impl InFlightPackets {
         }
     }
 
-    pub(crate) fn note_retransmit_sent(&mut self, packet_number: PacketNumber, now_ms: u64) {
+    pub(crate) fn note_retransmit_sent(&mut self, key: PacketKey, now_ms: u64) {
         for packet in self.packets.iter_mut().flatten() {
-            if packet.packet_number == packet_number {
+            if packet.key == key {
                 packet.sent = true;
                 packet.attempts = packet.attempts.saturating_add(1);
                 packet.last_sent_ms = now_ms;

@@ -4,7 +4,7 @@ pub mod flags;
 
 pub use flags::Flags;
 
-use super::{PacketNumber, PacketType};
+use super::{PacketIndex, PacketKey, PacketType};
 
 use crate::core::{
     ChannelId, MessageFlags, MessageId,
@@ -17,14 +17,14 @@ use crate::core::{
 pub(crate) const PACKET_TYPE_LEN: usize = core::mem::size_of::<u8>();
 /// Encoded packet flags length in bytes.
 pub(crate) const PACKET_FLAGS_LEN: usize = core::mem::size_of::<u8>();
-/// Encoded packet number length in bytes.
-pub(crate) const PACKET_NUMBER_LEN: usize = core::mem::size_of::<u32>();
+/// Encoded message-scoped packet index length in bytes.
+pub(crate) const PACKET_INDEX_LEN: usize = core::mem::size_of::<u16>();
 /// Encoded packet header length in bytes.
 pub(crate) const PACKET_HEADER_LEN: usize = PACKET_TYPE_LEN
     + PACKET_FLAGS_LEN
-    + PACKET_NUMBER_LEN
     + CHANNEL_ID_LEN
     + MESSAGE_ID_LEN
+    + PACKET_INDEX_LEN
     + MESSAGE_LEN_LEN
     + FRAGMENT_OFFSET_LEN
     + FRAGMENT_FLAGS_LEN;
@@ -34,8 +34,8 @@ pub(crate) const PACKET_HEADER_LEN: usize = PACKET_TYPE_LEN
 pub struct PacketHeader {
     /// Packet type.
     pub packet_type: PacketType,
-    /// Packet number used by acknowledgement and retransmission logic.
-    pub packet_number: PacketNumber,
+    /// Packet index scoped to `message_id`.
+    pub packet_index: PacketIndex,
     /// Packet flags.
     pub flags: Flags,
     /// Logical channel carrying this message fragment.
@@ -54,7 +54,7 @@ impl PacketHeader {
     /// Creates a DATA packet header.
     #[must_use]
     pub const fn data(
-        packet_number: PacketNumber,
+        packet_index: PacketIndex,
         flags: Flags,
         channel_id: ChannelId,
         message_id: MessageId,
@@ -64,7 +64,7 @@ impl PacketHeader {
     ) -> Self {
         Self {
             packet_type: PacketType::Data,
-            packet_number,
+            packet_index,
             flags,
             channel_id,
             message_id,
@@ -76,13 +76,13 @@ impl PacketHeader {
 
     /// Creates an ACK packet header.
     #[must_use]
-    pub const fn ack(packet_number: PacketNumber) -> Self {
+    pub const fn ack(key: PacketKey) -> Self {
         Self {
             packet_type: PacketType::Ack,
-            packet_number,
             flags: Flags::EMPTY,
-            channel_id: ChannelId::DEFAULT,
-            message_id: MessageId::ZERO,
+            channel_id: key.channel_id,
+            message_id: key.message_id,
+            packet_index: key.packet_index,
             message_len: 0,
             fragment_offset: 0,
             fragment_flags: MessageFlags::EMPTY,
@@ -91,14 +91,14 @@ impl PacketHeader {
 
     /// Creates a PING packet header.
     #[must_use]
-    pub const fn ping(packet_number: PacketNumber, message_id: MessageId) -> Self {
-        Self::liveness(PacketType::Ping, packet_number, message_id)
+    pub const fn ping(message_id: MessageId) -> Self {
+        Self::liveness(PacketType::Ping, message_id)
     }
 
     /// Creates a PONG packet header.
     #[must_use]
-    pub const fn pong(packet_number: PacketNumber, message_id: MessageId) -> Self {
-        Self::liveness(PacketType::Pong, packet_number, message_id)
+    pub const fn pong(message_id: MessageId) -> Self {
+        Self::liveness(PacketType::Pong, message_id)
     }
 
     /// Returns whether this packet should elicit an acknowledgement.
@@ -107,20 +107,22 @@ impl PacketHeader {
         self.flags.contains(Flags::ACK_ELICITING)
     }
 
-    const fn liveness(
-        packet_type: PacketType,
-        packet_number: PacketNumber,
-        message_id: MessageId,
-    ) -> Self {
+    const fn liveness(packet_type: PacketType, message_id: MessageId) -> Self {
         Self {
             packet_type,
-            packet_number,
             flags: Flags::EMPTY,
             channel_id: ChannelId::LIVENESS,
             message_id,
+            packet_index: PacketIndex::ZERO,
             message_len: 0,
             fragment_offset: 0,
             fragment_flags: MessageFlags::EMPTY,
         }
+    }
+
+    /// Returns this packet's stable message-scoped identity.
+    #[must_use]
+    pub const fn key(self) -> PacketKey {
+        PacketKey::new(self.channel_id, self.message_id, self.packet_index)
     }
 }

@@ -27,7 +27,7 @@ engine
 - ACK tracker
 - dedup table
 - message reassembly table
-- packet number
+- packet key
 - message id
 
 因此 MSRT 不提供 `engine.reset()` 或 `reset_ingress()` 这种局部清理 API。断开以后，endpoint 直接丢掉旧 `Engine`；下一次连接创建新的 `Engine`。

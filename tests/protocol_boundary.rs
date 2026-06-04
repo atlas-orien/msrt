@@ -4,7 +4,7 @@ const TX_BUF_BYTES: usize = 128;
 
 use msrt::{
     Engine,
-    core::{ChannelId, Flags, MessageFlags, MessageId, Packet, PacketHeader, PacketNumber},
+    core::{ChannelId, Flags, MessageFlags, MessageId, Packet, PacketHeader, PacketIndex},
     engine::EnginePoll,
     reliability::{
         ChannelReliability, FragmentRange, MessageFragment, MessageKey, ReliabilityMode,
@@ -16,7 +16,7 @@ use msrt::{
 fn facade_exposes_core_packet_and_wire_envelope() {
     let payload = [0x01, 0x02, 0x03];
     let header = PacketHeader::data(
-        PacketNumber::new(42),
+        PacketIndex::new(0),
         Flags::ACK_ELICITING,
         ChannelId::DEFAULT,
         MessageId::new(7),
@@ -39,7 +39,7 @@ fn facade_exposes_core_packet_and_wire_envelope() {
 #[test]
 fn facade_exposes_reliability_fragment_view() {
     let header = PacketHeader::data(
-        PacketNumber::new(11),
+        PacketIndex::new(0),
         Flags::ACK_ELICITING,
         ChannelId::new(7),
         MessageId::new(9),
@@ -70,12 +70,16 @@ fn facade_exposes_concrete_engine_api() {
     };
 
     assert_eq!(
-        PacketNumber::new(u32::from_le_bytes(
-            bytes[msrt::wire::WIRE_HEADER_LEN + 2..msrt::wire::WIRE_HEADER_LEN + 6]
+        bytes[msrt::wire::WIRE_HEADER_LEN + 2],
+        ChannelId::DEFAULT.get()
+    );
+    assert_eq!(
+        u16::from_le_bytes(
+            bytes[msrt::wire::WIRE_HEADER_LEN + 7..msrt::wire::WIRE_HEADER_LEN + 9]
                 .try_into()
                 .unwrap()
-        )),
-        PacketNumber::ZERO
+        ),
+        PacketIndex::ZERO.get()
     );
     assert!(!bytes.is_empty());
 }

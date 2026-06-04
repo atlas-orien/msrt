@@ -230,14 +230,14 @@ impl SimDirection {
             return;
         }
 
-        let packet_number = packet_number(write.as_bytes()) as usize;
-        let first_seen = packet_number < self.seen_data.len() && !self.seen_data[packet_number];
+        let packet_index = packet_index(write.as_bytes()) as usize;
+        let first_seen = packet_index < self.seen_data.len() && !self.seen_data[packet_index];
 
-        if packet_number < self.seen_data.len() {
-            self.seen_data[packet_number] = true;
+        if packet_index < self.seen_data.len() {
+            self.seen_data[packet_index] = true;
         }
 
-        if first_seen && packet_number % 4 == 3 {
+        if first_seen && packet_index % 4 == 3 {
             self.hold(write);
             return;
         }
@@ -277,11 +277,11 @@ fn is_data(write: SimWrite) -> bool {
     write.as_bytes().get(8).copied() == Some(PacketType::Data.code())
 }
 
-fn packet_number(bytes: &[u8]) -> u32 {
-    u32::from_le_bytes(
-        bytes[msrt::wire::WIRE_HEADER_LEN + 2..msrt::wire::WIRE_HEADER_LEN + 6]
+fn packet_index(bytes: &[u8]) -> u16 {
+    u16::from_le_bytes(
+        bytes[msrt::wire::WIRE_HEADER_LEN + 7..msrt::wire::WIRE_HEADER_LEN + 9]
             .try_into()
-            .expect("packet number bytes"),
+            .expect("packet index bytes"),
     )
 }
 

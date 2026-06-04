@@ -1,6 +1,6 @@
 //! Reliable packet recovery state.
 
-use crate::core::{Ack, ChannelId, MessageId, PacketNumber, Result};
+use crate::core::{ChannelId, MessageId, PacketKey, Result};
 
 use self::inflight::{InFlightPacket, InFlightPackets};
 
@@ -26,8 +26,8 @@ impl RecoveryState {
         self.in_flight.track(packet)
     }
 
-    pub(crate) fn apply_ack(&mut self, ack: Ack) {
-        self.in_flight.apply_ack(ack);
+    pub(crate) fn apply_ack(&mut self, key: PacketKey) {
+        self.in_flight.apply_ack(key);
     }
 
     pub(crate) fn packets(&self) -> impl Iterator<Item = &InFlightPacket> {
@@ -56,11 +56,11 @@ impl RecoveryState {
         self.in_flight.remove_message(channel_id, message_id);
     }
 
-    pub(crate) fn note_sent(&mut self, packet_number: PacketNumber, now_ms: u64) {
-        self.in_flight.note_sent(packet_number, now_ms);
+    pub(crate) fn note_sent(&mut self, key: PacketKey, now_ms: u64) {
+        self.in_flight.note_sent(key, now_ms);
     }
 
-    pub(crate) fn note_retransmit_sent(&mut self, packet_number: PacketNumber, now_ms: u64) {
-        self.in_flight.note_retransmit_sent(packet_number, now_ms);
+    pub(crate) fn note_retransmit_sent(&mut self, key: PacketKey, now_ms: u64) {
+        self.in_flight.note_retransmit_sent(key, now_ms);
     }
 }

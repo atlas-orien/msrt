@@ -1,6 +1,6 @@
 //! Engine output scheduling state.
 
-use crate::core::{Error, ErrorKind, PacketNumber, Result};
+use crate::core::{Error, ErrorKind, PacketKey, Result};
 
 use crate::engine::{
     EnginePoll, SendFailedEvent,
@@ -68,10 +68,10 @@ impl SchedulerState {
     pub(crate) fn poll_ack<'a>(
         &mut self,
         ack: &mut AckState,
-        numbers: &mut NumberState,
+        _numbers: &mut NumberState,
         tx_buf: &'a mut [u8],
     ) -> Result<EnginePoll<'a>> {
-        poll_pending_ack(ack, numbers, tx_buf)
+        poll_pending_ack(ack, _numbers, tx_buf)
     }
 
     pub(crate) fn pop_urgent(&mut self) -> Option<EngineOutput> {
@@ -245,19 +245,15 @@ const fn queue_for_event(event: &EngineOutput) -> QueueKind {
 
 fn poll_pending_ack<'a>(
     ack: &mut AckState,
-    numbers: &mut NumberState,
+    _numbers: &mut NumberState,
     tx_buf: &'a mut [u8],
 ) -> Result<EnginePoll<'a>> {
-    let packet_number = numbers.alloc_packet_number();
-    let ack_payload = ack.build_ack();
-    let written = crate::engine::codec::outgoing::encode_ack_packet(
-        packet_number,
-        ack_payload,
-        tx_buf,
-        &crate::wire::Crc16,
-    )?;
+    let Some(key) = ack.pop() else {
+        return Ok(EnginePoll::Idle);
+    };
 
-    ack.on_ack_sent();
+    let written =
+        crate::engine::codec::outgoing::encode_ack_packet(key, tx_buf, &crate::wire::Crc16)?;
 
     Ok(EnginePoll::Transmit {
         bytes: &tx_buf[..written],
@@ -289,10 +285,10 @@ fn poll_write<'a>(
 
     match write.priority {
         WritePriority::Retransmit => {
-            recovery.note_retransmit_sent(write.packet_number, now_ms);
+            recovery.note_retransmit_sent(write.key, now_ms);
         }
         WritePriority::Control | WritePriority::NewData => {
-            recovery.note_sent(write.packet_number, now_ms);
+            recovery.note_sent(write.key, now_ms);
         }
     }
 
@@ -305,7 +301,7 @@ fn poll_write<'a>(
 }
 
 fn is_redundant_write(current: WriteEvent, incoming: WriteEvent) -> bool {
-    current.packet_number == incoming.packet_number
+    current.key == incoming.key
 }
 
 #[cfg(feature = "std")]
@@ -321,12 +317,14 @@ fn log_event(now_ms: u64, queue: &str, offset: usize, event: &EngineOutput) {
                 .map(|packet_type| packet_type.code())
                 .unwrap_or_default();
             eprintln!(
-                "msrt scheduler event now={} queue={} offset={} kind=write packet_type={} pn={} attempts={} len={} priority={:?}",
+                "msrt scheduler event now={} queue={} offset={} kind=write packet_type={} ch={} msg={} idx={} attempts={} len={} priority={:?}",
                 now_ms,
                 queue,
                 offset,
                 packet_type,
-                write.packet_number.get(),
+                write.key.channel_id.get(),
+                write.key.message_id.get(),
+                write.key.packet_index.get(),
                 write.attempts,
                 write.len,
                 write.priority,
@@ -357,8 +355,8 @@ pub(crate) enum EngineOutput {
 /// A non-blocking write request produced by the engine.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct WriteEvent {
-    /// Packet number assigned to this write.
-    pub packet_number: PacketNumber,
+    /// Message-scoped packet identity assigned to this write.
+    pub key: PacketKey,
     /// Fixed storage containing encoded wire bytes.
     pub bytes: [u8; MAX_WIRE_BYTES],
     /// Number of valid bytes in `bytes`.
@@ -386,7 +384,7 @@ pub(crate) enum WritePriority {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::{PacketNumber, PacketType};
+    use crate::core::{ChannelId, MessageId, PacketIndex, PacketKey, PacketType};
     use crate::engine::state::{
         EngineOutput, WriteEvent,
         scheduler::{SchedulerState, WritePriority},
@@ -398,12 +396,12 @@ mod tests {
         let mut queue = SchedulerState::new();
         let data = write_event(
             PacketType::Data,
-            PacketNumber::new(1),
+            PacketIndex::new(1),
             WritePriority::NewData,
         );
         let control = write_event(
             PacketType::Pong,
-            PacketNumber::new(2),
+            PacketIndex::new(2),
             WritePriority::Control,
         );
 
@@ -416,11 +414,11 @@ mod tests {
     }
 
     #[test]
-    fn queue_replaces_duplicate_packet_number() {
+    fn queue_replaces_duplicate_packet_key() {
         let mut queue = SchedulerState::new();
         let first = write_event(
             PacketType::Data,
-            PacketNumber::new(7),
+            PacketIndex::new(7),
             WritePriority::NewData,
         );
         let retransmit = WriteEvent {
@@ -441,12 +439,12 @@ mod tests {
         let mut queue = SchedulerState::new();
         let data = write_event(
             PacketType::Data,
-            PacketNumber::new(1),
+            PacketIndex::new(1),
             WritePriority::NewData,
         );
         let retransmit = write_event(
             PacketType::Data,
-            PacketNumber::new(2),
+            PacketIndex::new(2),
             WritePriority::Retransmit,
         );
 
@@ -460,14 +458,15 @@ mod tests {
 
     fn write_event(
         packet_type: PacketType,
-        packet_number: PacketNumber,
+        packet_index: PacketIndex,
         priority: WritePriority,
     ) -> WriteEvent {
         let mut bytes = [0; crate::engine::config::MAX_WIRE_BYTES];
         bytes[WIRE_HEADER_LEN] = packet_type.code();
+        let key = PacketKey::new(ChannelId::DEFAULT, MessageId::new(1), packet_index);
 
         WriteEvent {
-            packet_number,
+            key,
             bytes,
             len: WIRE_HEADER_LEN + 1,
             attempts: 0,

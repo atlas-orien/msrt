@@ -1,12 +1,12 @@
 //! Timeout policy boundary.
 
-use crate::core::PacketNumber;
+use crate::core::PacketKey;
 
 /// Timeout event produced by a engine-provided clock.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TimeoutEvent {
     /// Packet that timed out.
-    pub packet_number: PacketNumber,
+    pub key: PacketKey,
     /// Engine-defined elapsed ticks since the packet was sent.
     pub elapsed_ticks: u64,
     /// Number of previous retransmission attempts.
@@ -16,9 +16,9 @@ pub struct TimeoutEvent {
 impl TimeoutEvent {
     /// Creates a timeout event.
     #[must_use]
-    pub const fn new(packet_number: PacketNumber, elapsed_ticks: u64, attempts: u8) -> Self {
+    pub const fn new(key: PacketKey, elapsed_ticks: u64, attempts: u8) -> Self {
         Self {
-            packet_number,
+            key,
             elapsed_ticks,
             attempts,
         }
@@ -28,15 +28,10 @@ impl TimeoutEvent {
 /// Determines whether packets have timed out.
 pub trait TimeoutPolicy {
     /// Returns whether a packet should be considered timed out at `now_ticks`.
-    fn has_timed_out(&self, packet_number: PacketNumber, now_ticks: u64) -> bool;
+    fn has_timed_out(&self, key: PacketKey, now_ticks: u64) -> bool;
 
     /// Builds a timeout event for a packet.
-    fn timeout_event(
-        &self,
-        packet_number: PacketNumber,
-        elapsed_ticks: u64,
-        attempts: u8,
-    ) -> TimeoutEvent {
-        TimeoutEvent::new(packet_number, elapsed_ticks, attempts)
+    fn timeout_event(&self, key: PacketKey, elapsed_ticks: u64, attempts: u8) -> TimeoutEvent {
+        TimeoutEvent::new(key, elapsed_ticks, attempts)
     }
 }

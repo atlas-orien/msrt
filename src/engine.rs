@@ -6,7 +6,7 @@ pub(crate) mod state;
 
 pub use config::{ChannelProfile, ChannelSpec, EngineConfig};
 
-use crate::core::{ChannelId, Error, MessageId, PacketNumber, Result};
+use crate::core::{ChannelId, Error, MessageId, PacketIndex, Result};
 use state::EngineState;
 
 /// Minimal non-blocking MSRT protocol engine.
@@ -26,7 +26,7 @@ impl Engine {
     pub const fn new(config: EngineConfig) -> Self {
         Self {
             config,
-            state: EngineState::new(config.initial_packet_number, config.initial_message_id),
+            state: EngineState::new(config.initial_message_id),
         }
     }
 
@@ -141,30 +141,30 @@ pub enum SendFailureReason {
 pub enum ReceiveReport {
     /// A packet envelope was accepted.
     Packet {
-        /// Packet number decoded from the envelope.
-        packet_number: PacketNumber,
+        /// Packet index decoded from the envelope.
+        packet_index: PacketIndex,
     },
     /// A duplicate packet envelope was acknowledged but not processed again.
     Duplicate {
-        /// Duplicate packet number.
-        packet_number: PacketNumber,
+        /// Duplicate packet index.
+        packet_index: PacketIndex,
     },
     /// An ACK packet was accepted.
     Ack {
-        /// Packet number acknowledged by the peer.
-        packet_number: PacketNumber,
+        /// Packet index acknowledged by the peer.
+        packet_index: PacketIndex,
     },
     /// A PING packet was accepted and a PONG was queued.
     Ping {
-        /// Packet number decoded from the PING packet.
-        packet_number: PacketNumber,
+        /// Packet index decoded from the PING packet.
+        packet_index: PacketIndex,
         /// Liveness message id carried by the PING packet.
         message_id: MessageId,
     },
     /// A PONG packet was accepted.
     Pong {
-        /// Packet number decoded from the PONG packet.
-        packet_number: PacketNumber,
+        /// Packet index decoded from the PONG packet.
+        packet_index: PacketIndex,
         /// Liveness message id carried by the PONG packet.
         message_id: MessageId,
     },

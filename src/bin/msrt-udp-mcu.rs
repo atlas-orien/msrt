@@ -322,7 +322,6 @@ fn process_session_id() -> u32 {
 fn test_config() -> EngineConfig {
     let session_id = process_session_id();
     EngineConfig {
-        initial_packet_number: msrt::core::PacketNumber::new(session_id),
         initial_message_id: msrt::core::MessageId::new(session_id),
         fragment_bytes: TEST_FRAGMENT_BYTES,
         ..EngineConfig::default()

@@ -50,58 +50,51 @@ host/mcu 已经收到重传 DATA
 
 这说明问题不在“包没有到”，也不在“完全没有 ACK”，而在 ACK 内容没有覆盖那个老的重传 packet。
 
-## 真正根因：ACK 语义错误
+## 真正根因：ACK 边界错误
 
-原来的 ACK 状态更像一个“最近见过的 packet number 集合”：
-
-```text
-AckRanges 保存最近 N 个 packet number
-build_ack() 从这个集合生成 ACK ranges
-```
-
-这在低压下能工作，但在高压双边发送时有致命问题：
+原来的实现把 packet 当成一个全局递增 stream：
 
 ```text
-1. 老 packet 重传到达接收端
-2. 接收端确实 observe 了它
-3. 随后大量新 packet 到达
-4. 小容量 ACK ring 被新 packet 覆盖
-5. ACK 发出去时 largest 很新，但 range 不包含老 packet
-6. 发送端收到 ACK，却无法清掉老 packet
-7. 老 packet 到 retry limit，触发 SendFailed
+全局 packet 编号
+ACK range 集合
+最大已确认编号
 ```
 
-也就是说，ACK 最大号很新并不代表它确认了所有旧包。ACK range 如果不包含那个旧 packet，发送端不能清掉它。
+这不是 MSRT 的正确边界。MSRT 是 message-oriented，packet 是某条 message 的 fragment。packet 的稳定身份应该是：
+
+```text
+channel_id + message_id + packet_index
+```
+
+全局 packet number 会把协议拉回 packet stream 模型，进而自然长出 ACK range、largest ACK、全局 dedup 这些不属于 MSRT 思想的结构。高压下这些结构会让 ACK 语义变复杂，甚至让重传 DATA 到达后仍然无法正确清掉 in-flight。
 
 这个问题和 `MAX_IN_FLIGHT_PACKETS` 没有直接关系。日志里失败时 in-flight 通常没有满，增大 in-flight 只是掩盖问题。
 
 ## 修复方向
 
-ACK 的语义被重新定义为：
+ACK 的语义被重新定义为单 packet key 确认：
 
 ```text
-ACK 只确认当前这批尚未发出去的 pending packet number
-ACK 发出去以后清空 pending 集合
-重复 DATA 到达时重新 observe，并再次 ACK
+ACK packet header = 被确认的 packet key
+ACK payload = empty
 ```
 
 也就是：
 
 ```text
 receive(DATA packet)
-  -> 先 observe packet_number 到 AckState
+  -> 先 observe PacketKey(channel_id, message_id, packet_index) 到 AckState
   -> 再做 duplicate 判断
   -> duplicate 也必须重新 ACK
 
 poll()
   -> 如果 ack pending，最高优先级发送 ACK
-  -> ACK bytes 发出后 on_ack_sent()
-  -> 清空 pending ACK ranges
+  -> 每次 ACK 只确认一个 PacketKey
 ```
 
 这个修复点很小，但非常关键。
 
-修复以后，重复 DATA 不再因为“已经见过”而失去 ACK 机会；老重传包刚到达时，会进入新的 pending ACK 集合，不会被之前的全局历史污染。
+修复以后，重复 DATA 不再因为“已经见过”而失去 ACK 机会；重传包刚到达时，会进入 pending ACK 队列，ACK 不再被全局 packet stream 或 range 压缩语义污染。
 
 ## 调度顺序
 
@@ -124,15 +117,15 @@ ACK 不能作为普通 data queue 里的一个普通 write event 长时间排队
 
 ## 去重结论
 
-发送队列需要对相同 packet number 的 DATA/retransmit 做去重，避免同一个 packet 在队列里堆出多份。
+发送队列需要对相同 `PacketKey` 的 DATA/retransmit 做去重，避免同一个 packet 在队列里堆出多份。
 
 但 ACK 不能按“同一个 ACK 已经发过”这种思路去重。ACK 是不可靠的，对方可能没有收到。重复 DATA 到来时再次 ACK 是必要行为。
 
 最终原则：
 
 ```text
-DATA/retransmit 队列可以按 packet number 去重
-ACK pending 只表达当前需要确认的 packet set
+DATA/retransmit 队列可以按 packet key 去重
+ACK pending 只表达当前需要确认的 packet key 队列
 重复 DATA 必须重新生成 ACK
 ```
 

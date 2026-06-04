@@ -102,7 +102,7 @@ impl MessageFragment {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::{ChannelId, Flags, MessageFlags, MessageId, PacketHeader, PacketNumber};
+    use crate::core::{ChannelId, Flags, MessageFlags, MessageId, PacketHeader, PacketIndex};
 
     use super::{FragmentRange, MessageFragment, MessageKey};
 
@@ -115,7 +115,7 @@ mod tests {
     #[test]
     fn packet_header_maps_to_message_fragment() {
         let header = PacketHeader::data(
-            PacketNumber::new(3),
+            PacketIndex::new(3),
             Flags::ACK_ELICITING,
             ChannelId::new(7),
             MessageId::new(9),

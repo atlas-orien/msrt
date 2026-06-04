@@ -76,7 +76,7 @@ impl EngineState {
             }
 
             let _ = self.scheduler.push(EngineOutput::Write(WriteEvent {
-                packet_number: packet.packet_number,
+                key: packet.key,
                 bytes: packet.bytes,
                 len: packet.len,
                 attempts: packet.attempts.saturating_add(1),
@@ -93,7 +93,7 @@ impl EngineState {
         failed: &InFlightPacket,
     ) {
         eprintln!(
-            "msrt in_flight send_failed now={} len={} message_len={} ack_pending={} ack_pending_len={} failed_channel={} failed_message={} failed_packet={} attempts={} age_ms={} retry_limit={} rto_ms={}",
+            "msrt in_flight send_failed now={} len={} message_len={} ack_pending={} ack_pending_len={} failed_channel={} failed_message={} failed_index={} attempts={} age_ms={} retry_limit={} rto_ms={}",
             now_ms,
             self.recovery.in_flight_len(),
             self.message.len(),
@@ -101,7 +101,7 @@ impl EngineState {
             self.ack.pending_len(),
             failed.channel_id.get(),
             failed.message_id.get(),
-            failed.packet_number.get(),
+            failed.key.packet_index.get(),
             failed.attempts,
             now_ms.saturating_sub(failed.last_sent_ms),
             config.max_retransmit_attempts,
@@ -115,11 +115,11 @@ impl EngineState {
     fn log_in_flight_packets(&self, now_ms: u64) {
         for packet in self.recovery.packets() {
             eprintln!(
-                "msrt in_flight packet now={} pn={} ch={} msg={} attempts={} age_ms={} len={} sent={}",
+                "msrt in_flight packet now={} ch={} msg={} idx={} attempts={} age_ms={} len={} sent={}",
                 now_ms,
-                packet.packet_number.get(),
                 packet.channel_id.get(),
                 packet.message_id.get(),
+                packet.key.packet_index.get(),
                 packet.attempts,
                 now_ms.saturating_sub(packet.last_sent_ms),
                 packet.len,

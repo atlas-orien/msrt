@@ -1,6 +1,6 @@
 //! ACK tracking boundary.
 
-use crate::core::{Ack, Error, ErrorKind, PacketNumber, Result};
+use crate::core::{Error, ErrorKind, PacketKey, Result};
 
 use super::PacketState;
 
@@ -9,31 +9,31 @@ use super::PacketState;
 pub enum AckOutcome {
     /// The ACK confirmed a packet that was still in flight.
     NewlyAcked {
-        /// Confirmed packet number.
-        packet_number: PacketNumber,
+        /// Confirmed packet key.
+        key: PacketKey,
     },
     /// The packet was already known as acknowledged.
     AlreadyAcked {
-        /// Packet number that was already acknowledged.
-        packet_number: PacketNumber,
+        /// Packet key that was already acknowledged.
+        key: PacketKey,
     },
     /// The ACK could not be applied to the current state.
     Ignored {
-        /// Packet number carried by the ACK.
-        packet_number: PacketNumber,
+        /// Packet key carried by the ACK.
+        key: PacketKey,
     },
 }
 
 /// Tracks packet acknowledgement state.
 pub trait AckTracker {
     /// Records that a packet has been sent and is waiting for acknowledgement.
-    fn on_packet_sent(&mut self, packet_number: PacketNumber);
+    fn on_packet_sent(&mut self, key: PacketKey);
 
-    /// Applies an ACK to the tracked packet state.
-    fn on_ack(&mut self, ack: Ack) -> AckOutcome;
+    /// Applies an ACK key to the tracked packet state.
+    fn on_ack(&mut self, key: PacketKey) -> AckOutcome;
 
-    /// Returns the current known state for a packet number.
-    fn state_of(&self, packet_number: PacketNumber) -> PacketState;
+    /// Returns the current known state for a packet key.
+    fn state_of(&self, key: PacketKey) -> PacketState;
 }
 
 /// Fixed-capacity ACK tracker.
@@ -50,24 +50,21 @@ impl<const N: usize> PacketAckTracker<N> {
     }
 
     /// Records an in-flight packet or returns an error when no slot exists.
-    pub fn try_on_packet_sent(&mut self, packet_number: PacketNumber) -> Result<()> {
+    pub fn try_on_packet_sent(&mut self, key: PacketKey) -> Result<()> {
         if N == 0 {
             return Err(Error::new(ErrorKind::Reliability));
         }
 
         for slot in &mut self.packets {
-            if slot
-                .map(|tracked| tracked.packet_number == packet_number)
-                .unwrap_or(false)
-            {
-                *slot = Some(TrackedPacket::new(packet_number, PacketState::InFlight));
+            if slot.map(|tracked| tracked.key == key).unwrap_or(false) {
+                *slot = Some(TrackedPacket::new(key, PacketState::InFlight));
                 return Ok(());
             }
         }
 
         for slot in &mut self.packets {
             if slot.is_none() {
-                *slot = Some(TrackedPacket::new(packet_number, PacketState::InFlight));
+                *slot = Some(TrackedPacket::new(key, PacketState::InFlight));
                 return Ok(());
             }
         }
@@ -75,34 +72,30 @@ impl<const N: usize> PacketAckTracker<N> {
         Err(Error::new(ErrorKind::Reliability))
     }
 
-    /// Applies an ACK.
+    /// Applies an ACK key.
     #[must_use]
-    pub fn apply_ack(&mut self, ack: Ack) -> AckOutcome {
+    pub fn apply_ack(&mut self, key: PacketKey) -> AckOutcome {
         for slot in &mut self.packets {
             let Some(mut tracked) = *slot else {
                 continue;
             };
 
-            if !ack.acknowledges(tracked.packet_number) {
+            if tracked.key != key {
                 continue;
             }
-
-            let packet_number = tracked.packet_number;
 
             return match tracked.state {
                 PacketState::InFlight => {
                     tracked.state = PacketState::Acked;
                     *slot = Some(tracked);
-                    AckOutcome::NewlyAcked { packet_number }
+                    AckOutcome::NewlyAcked { key }
                 }
-                PacketState::Acked => AckOutcome::AlreadyAcked { packet_number },
-                _ => AckOutcome::Ignored { packet_number },
+                PacketState::Acked => AckOutcome::AlreadyAcked { key },
+                _ => AckOutcome::Ignored { key },
             };
         }
 
-        AckOutcome::Ignored {
-            packet_number: ack.largest_acknowledged,
-        }
+        AckOutcome::Ignored { key }
     }
 }
 
@@ -113,19 +106,19 @@ impl<const N: usize> Default for PacketAckTracker<N> {
 }
 
 impl<const N: usize> AckTracker for PacketAckTracker<N> {
-    fn on_packet_sent(&mut self, packet_number: PacketNumber) {
-        let _ = self.try_on_packet_sent(packet_number);
+    fn on_packet_sent(&mut self, key: PacketKey) {
+        let _ = self.try_on_packet_sent(key);
     }
 
-    fn on_ack(&mut self, ack: Ack) -> AckOutcome {
-        self.apply_ack(ack)
+    fn on_ack(&mut self, key: PacketKey) -> AckOutcome {
+        self.apply_ack(key)
     }
 
-    fn state_of(&self, packet_number: PacketNumber) -> PacketState {
+    fn state_of(&self, key: PacketKey) -> PacketState {
         self.packets
             .iter()
             .flatten()
-            .find(|tracked| tracked.packet_number == packet_number)
+            .find(|tracked| tracked.key == key)
             .map(|tracked| tracked.state)
             .unwrap_or(PacketState::Unknown)
     }
@@ -133,61 +126,32 @@ impl<const N: usize> AckTracker for PacketAckTracker<N> {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct TrackedPacket {
-    packet_number: PacketNumber,
+    key: PacketKey,
     state: PacketState,
 }
 
 impl TrackedPacket {
-    const fn new(packet_number: PacketNumber, state: PacketState) -> Self {
-        Self {
-            packet_number,
-            state,
-        }
+    const fn new(key: PacketKey, state: PacketState) -> Self {
+        Self { key, state }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::core::{Ack, PacketNumber};
+    use crate::core::{ChannelId, MessageId, PacketIndex, PacketKey};
 
     use super::{AckOutcome, AckTracker, PacketAckTracker, PacketState};
 
     #[test]
     fn ack_tracker_marks_in_flight_packet_acked() {
         let mut tracker = PacketAckTracker::<2>::new();
-        let packet_number = PacketNumber::new(7);
+        let key = PacketKey::new(ChannelId::DEFAULT, MessageId::new(7), PacketIndex::ZERO);
 
-        tracker.on_packet_sent(packet_number);
+        tracker.on_packet_sent(key);
 
-        assert_eq!(tracker.state_of(packet_number), PacketState::InFlight);
-        assert_eq!(
-            tracker.on_ack(Ack::new(packet_number)),
-            AckOutcome::NewlyAcked { packet_number }
-        );
-        assert_eq!(tracker.state_of(packet_number), PacketState::Acked);
-        assert_eq!(
-            tracker.on_ack(Ack::new(packet_number)),
-            AckOutcome::AlreadyAcked { packet_number }
-        );
-    }
-
-    #[test]
-    fn ack_tracker_applies_ack_range() {
-        let mut tracker = PacketAckTracker::<4>::new();
-        let start = PacketNumber::new(1);
-        let end = PacketNumber::new(3);
-        let ranges = [crate::core::AckRange::new(start, end); crate::core::MAX_ACK_RANGES];
-
-        tracker.on_packet_sent(start);
-        tracker.on_packet_sent(PacketNumber::new(2));
-        tracker.on_packet_sent(end);
-
-        assert_eq!(
-            tracker.on_ack(Ack::from_ranges(ranges, 1)),
-            AckOutcome::NewlyAcked {
-                packet_number: start
-            }
-        );
-        assert_eq!(tracker.state_of(start), PacketState::Acked);
+        assert_eq!(tracker.state_of(key), PacketState::InFlight);
+        assert_eq!(tracker.on_ack(key), AckOutcome::NewlyAcked { key });
+        assert_eq!(tracker.state_of(key), PacketState::Acked);
+        assert_eq!(tracker.on_ack(key), AckOutcome::AlreadyAcked { key });
     }
 }

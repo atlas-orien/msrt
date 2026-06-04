@@ -1,38 +1,67 @@
-//! Packet number primitive.
+//! Message-scoped packet index primitives.
 
-/// A packet number used by ack, deduplication, and retransmission logic.
+use crate::core::{ChannelId, MessageId};
+
+/// A packet index scoped to one message.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct PacketNumber(pub u32);
+pub struct PacketIndex(pub u16);
 
-impl PacketNumber {
-    /// First packet number used by a fresh endpoint.
+impl PacketIndex {
+    /// First packet index in every message.
     pub const ZERO: Self = Self(0);
 
-    /// Creates a packet number from its raw value.
+    /// Creates a packet index from its raw value.
     #[must_use]
-    pub const fn new(raw: u32) -> Self {
+    pub const fn new(raw: u16) -> Self {
         Self(raw)
     }
 
-    /// Returns the raw packet number value.
+    /// Returns the raw packet index value.
     #[must_use]
-    pub const fn get(self) -> u32 {
+    pub const fn get(self) -> u16 {
         self.0
     }
 
-    /// Returns the next packet number using wrapping arithmetic.
+    /// Returns the next packet index using wrapping arithmetic.
     #[must_use]
     pub const fn next(self) -> Self {
         Self(self.0.wrapping_add(1))
     }
 }
 
+/// Stable identity of a packet fragment inside one message.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct PacketKey {
+    /// Logical channel carrying the message.
+    pub channel_id: ChannelId,
+    /// Message this packet belongs to.
+    pub message_id: MessageId,
+    /// Packet index scoped to `message_id`.
+    pub packet_index: PacketIndex,
+}
+
+impl PacketKey {
+    /// Creates a packet key.
+    #[must_use]
+    pub const fn new(
+        channel_id: ChannelId,
+        message_id: MessageId,
+        packet_index: PacketIndex,
+    ) -> Self {
+        Self {
+            channel_id,
+            message_id,
+            packet_index,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::PacketNumber;
+    use super::PacketIndex;
 
     #[test]
-    fn next_wraps_at_u32_max() {
-        assert_eq!(PacketNumber::new(u32::MAX).next(), PacketNumber::ZERO);
+    fn next_wraps_at_u16_max() {
+        assert_eq!(PacketIndex::new(u16::MAX).next(), PacketIndex::ZERO);
     }
 }

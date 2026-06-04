@@ -3,6 +3,8 @@ use std::{
     fs::OpenOptions,
     io::{self, Write},
     path::PathBuf,
+    sync::mpsc::{self, Receiver, Sender, TryRecvError},
+    thread,
     time::{Duration, Instant},
 };
 
@@ -19,13 +21,16 @@ const TX_BUF_BYTES: usize = 256;
 const MAX_MESSAGE_BYTES: usize = 256;
 const DEFAULT_MESSAGE_BYTES: usize = 240;
 const TEST_FRAGMENT_BYTES: usize = 48;
-const DEFAULT_CORRUPT_PER_MILLE: u16 = 30;
-const DEFAULT_DROP_BYTE_PER_MILLE: u16 = 30;
-const DEFAULT_INSERT_BYTE_PER_MILLE: u16 = 30;
+const DEFAULT_CORRUPT_PER_MILLE: u16 = 10;
+const DEFAULT_DROP_BYTE_PER_MILLE: u16 = 10;
+const DEFAULT_INSERT_BYTE_PER_MILLE: u16 = 10;
+const DEFAULT_BURST_CORRUPT_PER_MILLE: u16 = 10;
+const DEFAULT_BURST_DROP_PER_MILLE: u16 = 10;
+const DEFAULT_PACKET_DROP_PER_MILLE: u16 = 10;
 const PROFILE_NOISE_PER_MILLE: u16 = 30;
-const EVENT_LOG_LEN: usize = 512;
 const DEFAULT_LOG_FILE: &str = "log/msrt-sim-duplex.log";
 const STATUS_INTERVAL: Duration = Duration::from_secs(60);
+const IDLE_SLEEP: Duration = Duration::from_micros(50);
 
 #[derive(Clone, Debug)]
 struct Args {
@@ -48,9 +53,9 @@ impl Args {
                 corrupt_per_mille: DEFAULT_CORRUPT_PER_MILLE,
                 drop_byte_per_mille: DEFAULT_DROP_BYTE_PER_MILLE,
                 insert_byte_per_mille: DEFAULT_INSERT_BYTE_PER_MILLE,
-                burst_corrupt_per_mille: 0,
-                burst_drop_per_mille: 0,
-                packet_drop_per_mille: 0,
+                burst_corrupt_per_mille: DEFAULT_BURST_CORRUPT_PER_MILLE,
+                burst_drop_per_mille: DEFAULT_BURST_DROP_PER_MILLE,
+                packet_drop_per_mille: DEFAULT_PACKET_DROP_PER_MILLE,
             },
         };
 
@@ -140,367 +145,543 @@ fn main() {
         }
     };
 
-    let mut sim = Sim::new(args);
-    if let Err(()) = sim.run() {
+    if let Err(error) = init_log_file(&args) {
+        eprintln!("sim log init error: {error}");
+    }
+
+    println!(
+        "msrt sim duplex threads=2 interval={}ms message_len={} {} log_file={}",
+        args.interval_ms,
+        args.message.len(),
+        noise_config_summary(args.noise),
+        args.log_file.display()
+    );
+
+    if run(args).is_err() {
         std::process::exit(1);
     }
 }
 
-struct Sim {
-    args: Args,
-    host: ClientEndpoint,
-    mcu: PassiveEndpoint,
-    host_last_state: PeerState,
-    mcu_last_state: PeerState,
-    host_last_send_ms: u64,
-    mcu_last_send_ms: u64,
-    host_sent: usize,
-    mcu_sent: usize,
-    host_received: usize,
-    mcu_received: usize,
-    last_status_at: Instant,
-    noise: NoiseLcg,
-    noise_stats: NoiseStats,
-    log: EventLog,
+fn run(args: Args) -> Result<(), ()> {
+    let start = Instant::now();
+    let (host_to_mcu_tx, host_to_mcu_rx) = mpsc::channel();
+    let (mcu_to_host_tx, mcu_to_host_rx) = mpsc::channel();
+    let (event_tx, event_rx) = mpsc::channel();
+
+    let host_args = args.clone();
+    let host_event_tx = event_tx.clone();
+    let host = thread::spawn(move || {
+        let mut worker = HostWorker::new(
+            host_args,
+            start,
+            host_to_mcu_tx,
+            mcu_to_host_rx,
+            host_event_tx,
+        );
+        worker.run()
+    });
+
+    let mcu_args = args.clone();
+    let mcu_event_tx = event_tx.clone();
+    let mcu = thread::spawn(move || {
+        let mut worker = McuWorker::new(
+            mcu_args,
+            start,
+            mcu_to_host_tx,
+            host_to_mcu_rx,
+            mcu_event_tx,
+        );
+        worker.run()
+    });
+
+    drop(event_tx);
+
+    let mut monitor = Monitor::new(args, event_rx);
+    let monitor_result = monitor.run();
+    let host_result = host.join().unwrap_or(Err(()));
+    let mcu_result = mcu.join().unwrap_or(Err(()));
+
+    monitor_result?;
+    host_result?;
+    mcu_result
 }
 
-impl Sim {
-    fn new(args: Args) -> Self {
+struct HostWorker {
+    args: Args,
+    endpoint: ClientEndpoint,
+    start: Instant,
+    tx: Sender<Vec<u8>>,
+    rx: Receiver<Vec<u8>>,
+    events: Sender<SimEvent>,
+    last_send_ms: u64,
+    last_state: PeerState,
+    noise: NoiseLcg,
+}
+
+impl HostWorker {
+    fn new(
+        args: Args,
+        start: Instant,
+        tx: Sender<Vec<u8>>,
+        rx: Receiver<Vec<u8>>,
+        events: Sender<SimEvent>,
+    ) -> Self {
         Self {
             args,
-            host: ClientEndpoint::new(test_config(0x484f_5354)),
-            mcu: PassiveEndpoint::new(test_config(0x4d43_5520)),
-            host_last_state: PeerState::Disconnected,
-            mcu_last_state: PeerState::Disconnected,
-            host_last_send_ms: 0,
-            mcu_last_send_ms: 0,
-            host_sent: 0,
-            mcu_sent: 0,
-            host_received: 0,
-            mcu_received: 0,
-            last_status_at: Instant::now(),
-            noise: NoiseLcg::with_seed(0x5349_4d31),
-            noise_stats: NoiseStats::default(),
-            log: EventLog::new(),
+            endpoint: ClientEndpoint::new(test_config(0x484f_5354)),
+            start,
+            tx,
+            rx,
+            events,
+            last_send_ms: 0,
+            last_state: PeerState::Disconnected,
+            noise: NoiseLcg::with_seed(0x484f_5354),
         }
     }
 
     fn run(&mut self) -> Result<(), ()> {
-        if let Err(error) = self.init_log_file() {
-            eprintln!("sim log init error: {error}");
-        }
+        self.endpoint.connect(0).expect("host connect");
 
-        println!(
-            "msrt sim duplex interval={}ms message_len={} {} log_file={}",
-            self.args.interval_ms,
-            self.args.message.len(),
-            noise_config_summary(self.args.noise),
-            self.args.log_file.display()
-        );
-
-        self.host.connect(0).expect("host connect");
-
-        let mut now_ms = 0;
-        while now_ms <= self.args.duration_ms {
-            self.log_state_changes(now_ms);
-            self.pump(now_ms)?;
-            self.send_application_messages(now_ms);
-            self.pump(now_ms)?;
-            self.record_periodic_status(now_ms);
-            now_ms = now_ms.saturating_add(1);
-        }
-
-        let summary = format!(
-            "sim complete elapsed={}ms host_sent={} mcu_sent={} host_received={} mcu_received={} {}",
-            self.args.duration_ms,
-            self.host_sent,
-            self.mcu_sent,
-            self.host_received,
-            self.mcu_received,
-            noise_stats_summary(self.noise_stats),
-        );
-        println!("{summary}");
-        if let Err(error) = self.write_log("complete", &summary) {
-            eprintln!("sim log write error: {error}");
-        }
-        Ok(())
-    }
-
-    fn init_log_file(&self) -> io::Result<()> {
-        if let Some(parent) = self.args.log_file.parent()
-            && !parent.as_os_str().is_empty()
-        {
-            fs::create_dir_all(parent)?;
-        }
-
-        let mut file = fs::File::create(&self.args.log_file)?;
-        writeln!(file, "status=running")?;
-        writeln!(
-            file,
-            "config interval={}ms message_len={} {}",
-            self.args.interval_ms,
-            self.args.message.len(),
-            noise_config_summary(self.args.noise)
-        )
-    }
-
-    fn pump(&mut self, now_ms: u64) -> Result<(), ()> {
-        for _ in 0..512 {
-            let mut progressed = false;
-            progressed |= self.poll_host(now_ms)?;
-            progressed |= self.poll_mcu(now_ms)?;
-
-            if !progressed {
+        loop {
+            let now_ms = now_ms(self.start);
+            if self.args.duration_ms != u64::MAX && now_ms > self.args.duration_ms {
                 return Ok(());
             }
-        }
 
-        self.log.push(now_ms, "sim", "pump limit reached");
-        Ok(())
+            self.log_state(now_ms);
+            let mut progressed = self.drain_rx(now_ms);
+            progressed |= self.poll_endpoint(now_ms)?;
+            progressed |= self.send_application_message(now_ms);
+
+            if !progressed {
+                thread::sleep(IDLE_SLEEP);
+            }
+        }
     }
 
-    fn poll_host(&mut self, now_ms: u64) -> Result<bool, ()> {
+    fn log_state(&mut self, now_ms: u64) {
+        let state = self.endpoint.peer().state();
+        if self.last_state != state {
+            let _ = self.events.send(SimEvent::State {
+                side: Side::Host,
+                now_ms,
+                state,
+            });
+            self.last_state = state;
+        }
+    }
+
+    fn drain_rx(&mut self, now_ms: u64) -> bool {
+        let mut progressed = false;
+        loop {
+            match self.rx.try_recv() {
+                Ok(bytes) => {
+                    progressed = true;
+                    receive_bytes(
+                        &mut self.endpoint,
+                        now_ms,
+                        &bytes,
+                        Side::Host,
+                        &self.events,
+                        &mut self.noise,
+                    );
+                }
+                Err(TryRecvError::Empty) => return progressed,
+                Err(TryRecvError::Disconnected) => return progressed,
+            }
+        }
+    }
+
+    fn poll_endpoint(&mut self, now_ms: u64) -> Result<bool, ()> {
         let mut tx_buf = [0; TX_BUF_BYTES];
-        match self.host.poll(now_ms, &mut tx_buf).expect("host poll") {
-            EndpointPoll::Transmit { bytes, attempts } => {
-                let packet = PacketInfo::from_wire(bytes);
-                self.log.push(
-                    now_ms,
-                    "host->mcu",
-                    Event::tx(packet, attempts, self.host.peer().state()),
-                );
-                let connected = self.host.peer().is_connected() && self.mcu.peer().is_connected();
-                let bytes = self.mutate_if_connected(bytes, connected);
-                self.receive_mcu(now_ms, &bytes);
+        match self.endpoint.poll(now_ms, &mut tx_buf).expect("host poll") {
+            EndpointPoll::Transmit { bytes, attempts: _ } => {
+                let connected = self.endpoint.peer().is_connected();
+                let (bytes, stats) =
+                    mutate_for_link(&mut self.noise, bytes, connected, self.args.noise);
+                let _ = self.events.send(SimEvent::Noise { stats });
+                self.tx.send(bytes).map_err(|_| ())?;
                 Ok(true)
             }
-            EndpointPoll::Message(message) => {
-                self.host_received += 1;
-                self.log.push(
-                    now_ms,
-                    "host",
-                    format!(
-                        "message ch={} len={}",
-                        message.channel_id.get(),
-                        message.as_bytes().len()
-                    ),
-                );
+            EndpointPoll::Message(_) => {
+                let _ = self.events.send(SimEvent::Received { side: Side::Host });
                 Ok(true)
             }
             EndpointPoll::SendFailed(failed) => {
-                self.log_failure(now_ms, "host", failed);
+                let _ = self.events.send(SimEvent::SendFailed {
+                    side: Side::Host,
+                    now_ms,
+                    failed,
+                    state: self.endpoint.peer().state(),
+                });
                 Err(())
             }
             EndpointPoll::Idle => Ok(false),
         }
     }
 
-    fn poll_mcu(&mut self, now_ms: u64) -> Result<bool, ()> {
+    fn send_application_message(&mut self, now_ms: u64) -> bool {
+        if !self.endpoint.peer().is_connected() {
+            return false;
+        }
+
+        if now_ms.saturating_sub(self.last_send_ms) < self.args.interval_ms {
+            return false;
+        }
+
+        if self.endpoint.peer_mut().send(&self.args.message).is_ok() {
+            self.last_send_ms = now_ms;
+            let _ = self.events.send(SimEvent::Sent { side: Side::Host });
+            return true;
+        }
+
+        false
+    }
+}
+
+struct McuWorker {
+    args: Args,
+    endpoint: PassiveEndpoint,
+    start: Instant,
+    tx: Sender<Vec<u8>>,
+    rx: Receiver<Vec<u8>>,
+    events: Sender<SimEvent>,
+    last_send_ms: u64,
+    last_state: PeerState,
+    noise: NoiseLcg,
+}
+
+impl McuWorker {
+    fn new(
+        args: Args,
+        start: Instant,
+        tx: Sender<Vec<u8>>,
+        rx: Receiver<Vec<u8>>,
+        events: Sender<SimEvent>,
+    ) -> Self {
+        Self {
+            args,
+            endpoint: PassiveEndpoint::new(test_config(0x4d43_5520)),
+            start,
+            tx,
+            rx,
+            events,
+            last_send_ms: 0,
+            last_state: PeerState::Disconnected,
+            noise: NoiseLcg::with_seed(0x4d43_5520),
+        }
+    }
+
+    fn run(&mut self) -> Result<(), ()> {
+        loop {
+            let now_ms = now_ms(self.start);
+            if self.args.duration_ms != u64::MAX && now_ms > self.args.duration_ms {
+                return Ok(());
+            }
+
+            self.log_state(now_ms);
+            let mut progressed = self.drain_rx(now_ms);
+            progressed |= self.poll_endpoint(now_ms)?;
+            progressed |= self.send_application_message(now_ms);
+
+            if !progressed {
+                thread::sleep(IDLE_SLEEP);
+            }
+        }
+    }
+
+    fn log_state(&mut self, now_ms: u64) {
+        let state = self.endpoint.peer().state();
+        if self.last_state != state {
+            let _ = self.events.send(SimEvent::State {
+                side: Side::Mcu,
+                now_ms,
+                state,
+            });
+            self.last_state = state;
+        }
+    }
+
+    fn drain_rx(&mut self, now_ms: u64) -> bool {
+        let mut progressed = false;
+        loop {
+            match self.rx.try_recv() {
+                Ok(bytes) => {
+                    progressed = true;
+                    receive_bytes(
+                        &mut self.endpoint,
+                        now_ms,
+                        &bytes,
+                        Side::Mcu,
+                        &self.events,
+                        &mut self.noise,
+                    );
+                }
+                Err(TryRecvError::Empty) => return progressed,
+                Err(TryRecvError::Disconnected) => return progressed,
+            }
+        }
+    }
+
+    fn poll_endpoint(&mut self, now_ms: u64) -> Result<bool, ()> {
         let mut tx_buf = [0; TX_BUF_BYTES];
-        match self.mcu.poll(now_ms, &mut tx_buf).expect("mcu poll") {
-            EndpointPoll::Transmit { bytes, attempts } => {
-                let packet = PacketInfo::from_wire(bytes);
-                self.log.push(
-                    now_ms,
-                    "mcu->host",
-                    Event::tx(packet, attempts, self.mcu.peer().state()),
-                );
-                let connected = self.host.peer().is_connected() && self.mcu.peer().is_connected();
-                let bytes = self.mutate_if_connected(bytes, connected);
-                self.receive_host(now_ms, &bytes);
+        match self.endpoint.poll(now_ms, &mut tx_buf).expect("mcu poll") {
+            EndpointPoll::Transmit { bytes, attempts: _ } => {
+                let connected = self.endpoint.peer().is_connected();
+                let (bytes, stats) =
+                    mutate_for_link(&mut self.noise, bytes, connected, self.args.noise);
+                let _ = self.events.send(SimEvent::Noise { stats });
+                self.tx.send(bytes).map_err(|_| ())?;
                 Ok(true)
             }
-            EndpointPoll::Message(message) => {
-                self.mcu_received += 1;
-                self.log.push(
-                    now_ms,
-                    "mcu",
-                    format!(
-                        "message ch={} len={}",
-                        message.channel_id.get(),
-                        message.as_bytes().len()
-                    ),
-                );
+            EndpointPoll::Message(_) => {
+                let _ = self.events.send(SimEvent::Received { side: Side::Mcu });
                 Ok(true)
             }
             EndpointPoll::SendFailed(failed) => {
-                self.log_failure(now_ms, "mcu", failed);
+                let _ = self.events.send(SimEvent::SendFailed {
+                    side: Side::Mcu,
+                    now_ms,
+                    failed,
+                    state: self.endpoint.peer().state(),
+                });
                 Err(())
             }
             EndpointPoll::Idle => Ok(false),
         }
     }
 
-    fn mutate_if_connected(&mut self, bytes: &[u8], connected: bool) -> Vec<u8> {
-        let noise = if connected {
-            self.args.noise
-        } else {
-            NoiseConfig::default()
-        };
-        let (bytes, stats) = mutate_or_copy(&mut self.noise, bytes, noise);
-        self.noise_stats.corrupted += stats.corrupted;
-        self.noise_stats.dropped += stats.dropped;
-        self.noise_stats.inserted += stats.inserted;
-        self.noise_stats.burst_corrupted += stats.burst_corrupted;
-        self.noise_stats.burst_dropped += stats.burst_dropped;
-        self.noise_stats.packet_dropped += stats.packet_dropped;
-        bytes
-    }
-
-    fn receive_host(&mut self, now_ms: u64, bytes: &[u8]) {
-        let mut index = 0;
-        while index < bytes.len() {
-            let chunk_len = self.receive_chunk_len(bytes.len() - index);
-            let report = self.host.receive(now_ms, &bytes[index..index + chunk_len]);
-            self.log_receive(now_ms, "host<-mcu", report);
-            index += chunk_len;
-        }
-    }
-
-    fn receive_mcu(&mut self, now_ms: u64, bytes: &[u8]) {
-        let mut index = 0;
-        while index < bytes.len() {
-            let chunk_len = self.receive_chunk_len(bytes.len() - index);
-            let report = self.mcu.receive(now_ms, &bytes[index..index + chunk_len]);
-            self.log_receive(now_ms, "mcu<-host", report);
-            index += chunk_len;
-        }
-    }
-
-    fn receive_chunk_len(&mut self, remaining: usize) -> usize {
-        let max = remaining.min(16);
-        1 + self.noise.next_byte() as usize % max
-    }
-
-    fn log_receive(&mut self, now_ms: u64, side: &'static str, report: ReceiveReport) {
-        match report {
-            ReceiveReport::Packet { packet_number } => {
-                self.log.push(
-                    now_ms,
-                    side,
-                    format!("rx packet pn={}", packet_number.get()),
-                );
-            }
-            ReceiveReport::Duplicate { packet_number } => {
-                self.log.push(
-                    now_ms,
-                    side,
-                    format!("rx duplicate pn={}", packet_number.get()),
-                );
-            }
-            ReceiveReport::Ack { packet_number } => {
-                self.log.push(
-                    now_ms,
-                    side,
-                    format!("rx ack largest={}", packet_number.get()),
-                );
-            }
-            ReceiveReport::Ping {
-                packet_number,
-                message_id,
-            } => {
-                self.log.push(
-                    now_ms,
-                    side,
-                    format!(
-                        "rx ping pn={} msg={}",
-                        packet_number.get(),
-                        message_id.get()
-                    ),
-                );
-            }
-            ReceiveReport::Pong {
-                packet_number,
-                message_id,
-            } => {
-                self.log.push(
-                    now_ms,
-                    side,
-                    format!(
-                        "rx pong pn={} msg={}",
-                        packet_number.get(),
-                        message_id.get()
-                    ),
-                );
-            }
-            ReceiveReport::Corrupted => {
-                self.log.push(now_ms, side, "rx corrupted");
-            }
-            ReceiveReport::Error(error) => {
-                self.log.push(now_ms, side, format!("rx error {error:?}"));
-            }
-            ReceiveReport::Noise { .. } | ReceiveReport::Incomplete { .. } => {}
-        }
-    }
-
-    fn send_application_messages(&mut self, now_ms: u64) {
-        if !self.host.peer().is_connected() || !self.mcu.peer().is_connected() {
-            return;
+    fn send_application_message(&mut self, now_ms: u64) -> bool {
+        if !self.endpoint.peer().is_connected() {
+            return false;
         }
 
-        if now_ms.saturating_sub(self.host_last_send_ms) >= self.args.interval_ms
-            && self.host.peer_mut().send(&self.args.message).is_ok()
-        {
-            self.host_sent += 1;
-            self.host_last_send_ms = now_ms;
-            self.log.push(now_ms, "host", "send app");
+        if now_ms.saturating_sub(self.last_send_ms) < self.args.interval_ms {
+            return false;
         }
 
-        if now_ms.saturating_sub(self.mcu_last_send_ms) >= self.args.interval_ms
-            && self.mcu.send(&self.args.message).is_ok()
-        {
-            self.mcu_sent += 1;
-            self.mcu_last_send_ms = now_ms;
-            self.log.push(now_ms, "mcu", "send app");
+        if self.endpoint.send(&self.args.message).is_ok() {
+            self.last_send_ms = now_ms;
+            let _ = self.events.send(SimEvent::Sent { side: Side::Mcu });
+            return true;
         }
+
+        false
     }
+}
 
-    fn log_state_changes(&mut self, now_ms: u64) {
-        let host_state = self.host.peer().state();
-        if self.host_last_state != host_state {
-            self.log.push(
+trait SimEndpoint {
+    fn receive(&mut self, now_ms: u64, bytes: &[u8]) -> ReceiveReport;
+}
+
+impl SimEndpoint for ClientEndpoint {
+    fn receive(&mut self, now_ms: u64, bytes: &[u8]) -> ReceiveReport {
+        self.receive(now_ms, bytes)
+    }
+}
+
+impl SimEndpoint for PassiveEndpoint {
+    fn receive(&mut self, now_ms: u64, bytes: &[u8]) -> ReceiveReport {
+        self.receive(now_ms, bytes)
+    }
+}
+
+fn receive_bytes(
+    endpoint: &mut impl SimEndpoint,
+    now_ms: u64,
+    bytes: &[u8],
+    side: Side,
+    events: &Sender<SimEvent>,
+    noise: &mut NoiseLcg,
+) {
+    let mut index = 0;
+    while index < bytes.len() {
+        let max = (bytes.len() - index).min(16);
+        let chunk_len = 1 + noise.next_byte() as usize % max;
+        let report = endpoint.receive(now_ms, &bytes[index..index + chunk_len]);
+        if matches!(report, ReceiveReport::Error(_)) {
+            let _ = events.send(SimEvent::ReceiveError {
+                side,
                 now_ms,
-                "host",
-                format!("state {:?}->{:?}", self.host_last_state, host_state),
-            );
-            println!("host state={host_state:?} now={now_ms}");
-            self.host_last_state = host_state;
+                report,
+            });
         }
+        index += chunk_len;
+    }
+}
 
-        let mcu_state = self.mcu.peer().state();
-        if self.mcu_last_state != mcu_state {
-            self.log.push(
-                now_ms,
-                "mcu",
-                format!("state {:?}->{:?}", self.mcu_last_state, mcu_state),
-            );
-            println!("mcu state={mcu_state:?} now={now_ms}");
-            self.mcu_last_state = mcu_state;
+fn mutate_for_link(
+    noise: &mut NoiseLcg,
+    bytes: &[u8],
+    connected: bool,
+    config: NoiseConfig,
+) -> (Vec<u8>, NoiseStats) {
+    if connected {
+        mutate_or_copy(noise, bytes, config)
+    } else {
+        mutate_or_copy(noise, bytes, NoiseConfig::default())
+    }
+}
+
+struct Monitor {
+    args: Args,
+    rx: Receiver<SimEvent>,
+    host_state: PeerState,
+    mcu_state: PeerState,
+    host_sent: usize,
+    mcu_sent: usize,
+    host_received: usize,
+    mcu_received: usize,
+    noise_stats: NoiseStats,
+    start: Instant,
+    last_status_at: Instant,
+}
+
+impl Monitor {
+    fn new(args: Args, rx: Receiver<SimEvent>) -> Self {
+        Self {
+            args,
+            rx,
+            host_state: PeerState::Disconnected,
+            mcu_state: PeerState::Disconnected,
+            host_sent: 0,
+            mcu_sent: 0,
+            host_received: 0,
+            mcu_received: 0,
+            noise_stats: NoiseStats::default(),
+            start: Instant::now(),
+            last_status_at: Instant::now(),
         }
     }
 
-    fn record_periodic_status(&mut self, now_ms: u64) {
-        if now_ms == 0 || self.last_status_at.elapsed() < STATUS_INTERVAL {
+    fn run(&mut self) -> Result<(), ()> {
+        loop {
+            match self.rx.recv_timeout(Duration::from_millis(100)) {
+                Ok(event) => self.handle_event(event)?,
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(()),
+            }
+
+            if self.args.duration_ms != u64::MAX && now_ms(self.start) > self.args.duration_ms {
+                return Ok(());
+            }
+
+            self.record_periodic_status();
+        }
+    }
+
+    fn handle_event(&mut self, event: SimEvent) -> Result<(), ()> {
+        match event {
+            SimEvent::State {
+                side,
+                now_ms,
+                state,
+            } => {
+                match side {
+                    Side::Host => self.host_state = state,
+                    Side::Mcu => self.mcu_state = state,
+                }
+                println!("{} state={state:?} now={now_ms}", side.label());
+                Ok(())
+            }
+            SimEvent::Sent { side } => {
+                match side {
+                    Side::Host => self.host_sent += 1,
+                    Side::Mcu => self.mcu_sent += 1,
+                }
+                Ok(())
+            }
+            SimEvent::Received { side } => {
+                match side {
+                    Side::Host => self.host_received += 1,
+                    Side::Mcu => self.mcu_received += 1,
+                }
+                Ok(())
+            }
+            SimEvent::Noise { stats } => {
+                self.noise_stats.add(stats);
+                Ok(())
+            }
+            SimEvent::ReceiveError {
+                side,
+                now_ms,
+                report,
+            } => {
+                eprintln!(
+                    "sim receive_error now={} side={} report={:?}",
+                    now_ms,
+                    side.label(),
+                    report
+                );
+                Err(())
+            }
+            SimEvent::SendFailed {
+                side,
+                now_ms,
+                failed,
+                state,
+            } => {
+                let summary = self.failure_summary(side, now_ms, failed, state);
+                eprintln!("{summary}");
+                if let Err(error) = self.write_log("send_failed", &summary) {
+                    eprintln!("sim log write error: {error}");
+                } else {
+                    eprintln!("sim log written to {}", self.args.log_file.display());
+                }
+                Err(())
+            }
+        }
+    }
+
+    fn record_periodic_status(&mut self) {
+        if self.last_status_at.elapsed() < STATUS_INTERVAL {
             return;
         }
 
         self.last_status_at = Instant::now();
-        let status = format!(
-            "sim stats elapsed={}s host_state={:?} mcu_state={:?} host_sent={} mcu_sent={} host_received={} mcu_received={} {}",
-            now_ms / 1000,
-            self.host.peer().state(),
-            self.mcu.peer().state(),
+        let status = self.status_summary();
+        println!("{status}");
+        if let Err(error) = self.append_status_log(&status) {
+            eprintln!("sim status log write error: {error}");
+        }
+    }
+
+    fn status_summary(&self) -> String {
+        format!(
+            "sim stats real_elapsed={}s host_state={:?} mcu_state={:?} host_sent={} mcu_sent={} host_received={} mcu_received={} {}",
+            self.start.elapsed().as_secs(),
+            self.host_state,
+            self.mcu_state,
             self.host_sent,
             self.mcu_sent,
             self.host_received,
             self.mcu_received,
             noise_stats_summary(self.noise_stats),
-        );
-        println!("{status}");
-        self.log.push(now_ms, "sim", status.clone());
-        if let Err(error) = self.append_status_log(&status) {
-            eprintln!("sim status log write error: {error}");
-        }
+        )
+    }
+
+    fn failure_summary(
+        &self,
+        side: Side,
+        now_ms: u64,
+        failed: SendFailedEvent,
+        state: PeerState,
+    ) -> String {
+        format!(
+            "sim send_failed now={} side={} state={:?} ch={} msg={} host_state={:?} mcu_state={:?} host_sent={} mcu_sent={} host_received={} mcu_received={} {}",
+            now_ms,
+            side.label(),
+            state,
+            failed.channel_id.get(),
+            failed.message_id.get(),
+            self.host_state,
+            self.mcu_state,
+            self.host_sent,
+            self.mcu_sent,
+            self.host_received,
+            self.mcu_received,
+            noise_stats_summary(self.noise_stats),
+        )
     }
 
     fn append_status_log(&self, status: &str) -> io::Result<()> {
@@ -509,30 +690,6 @@ impl Sim {
             .append(true)
             .open(&self.args.log_file)?;
         writeln!(file, "{status}")
-    }
-
-    fn log_failure(&mut self, now_ms: u64, side: &'static str, failed: SendFailedEvent) {
-        let summary = format!(
-            "sim send_failed now={} side={} ch={} msg={} host_state={:?} mcu_state={:?} host_sent={} mcu_sent={} host_received={} mcu_received={} {}",
-            now_ms,
-            side,
-            failed.channel_id.get(),
-            failed.message_id.get(),
-            self.host.peer().state(),
-            self.mcu.peer().state(),
-            self.host_sent,
-            self.mcu_sent,
-            self.host_received,
-            self.mcu_received,
-            noise_stats_summary(self.noise_stats),
-        );
-        eprintln!("{summary}");
-        if let Err(error) = self.write_log("send_failed", &summary) {
-            eprintln!("sim log write error: {error}");
-            self.log.dump_stderr();
-        } else {
-            eprintln!("sim log written to {}", self.args.log_file.display());
-        }
     }
 
     fn write_log(&self, status: &str, summary: &str) -> io::Result<()> {
@@ -551,125 +708,93 @@ impl Sim {
             self.args.interval_ms,
             self.args.message.len(),
             noise_config_summary(self.args.noise)
-        )?;
-        self.log.dump_to(&mut file)
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct PacketInfo {
-    packet_type: u8,
-    packet_number: u32,
-    channel_id: u8,
-    message_id: u32,
-    len: usize,
-}
-
-impl PacketInfo {
-    fn from_wire(bytes: &[u8]) -> Self {
-        let packet = if bytes.len() >= msrt::wire::WIRE_HEADER_LEN + 16 {
-            &bytes[msrt::wire::WIRE_HEADER_LEN..]
-        } else {
-            &[]
-        };
-        let packet_type = packet.first().copied().unwrap_or_default();
-        let packet_number = packet
-            .get(2..6)
-            .and_then(|bytes| bytes.try_into().ok())
-            .map(u32::from_le_bytes)
-            .unwrap_or_default();
-        let channel_id = packet.get(6).copied().unwrap_or_default();
-        let message_id = packet
-            .get(7..11)
-            .and_then(|bytes| bytes.try_into().ok())
-            .map(u32::from_le_bytes)
-            .unwrap_or_default();
-
-        Self {
-            packet_type,
-            packet_number,
-            channel_id,
-            message_id,
-            len: bytes.len(),
-        }
-    }
-}
-
-struct Event;
-
-impl Event {
-    fn tx(packet: PacketInfo, attempts: u8, state: PeerState) -> String {
-        format!(
-            "tx type={} pn={} ch={} msg={} attempts={} len={} state={:?}",
-            packet.packet_type,
-            packet.packet_number,
-            packet.channel_id,
-            packet.message_id,
-            attempts,
-            packet.len,
-            state,
         )
     }
 }
 
-#[derive(Clone, Debug)]
-struct EventLog {
-    events: [Option<LogEntry>; EVENT_LOG_LEN],
-    next: usize,
-    len: usize,
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Side {
+    Host,
+    Mcu,
 }
 
-impl EventLog {
-    const fn new() -> Self {
-        Self {
-            events: [const { None }; EVENT_LOG_LEN],
-            next: 0,
-            len: 0,
+impl Side {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Host => "host",
+            Self::Mcu => "mcu",
         }
-    }
-
-    fn push(&mut self, now_ms: u64, side: &'static str, message: impl Into<String>) {
-        self.events[self.next] = Some(LogEntry {
-            now_ms,
-            side,
-            message: message.into(),
-        });
-        self.next = (self.next + 1) % EVENT_LOG_LEN;
-        self.len = self.len.saturating_add(1).min(EVENT_LOG_LEN);
-    }
-
-    fn dump_stderr(&self) {
-        let mut stderr = io::stderr();
-        let _ = self.dump_to(&mut stderr);
-    }
-
-    fn dump_to(&self, out: &mut impl Write) -> io::Result<()> {
-        writeln!(out, "sim recent events:")?;
-        let start = (self.next + EVENT_LOG_LEN - self.len) % EVENT_LOG_LEN;
-        for offset in 0..self.len {
-            let index = (start + offset) % EVENT_LOG_LEN;
-            if let Some(event) = &self.events[index] {
-                writeln!(
-                    out,
-                    "sim event now={} side={} {}",
-                    event.now_ms, event.side, event.message
-                )?;
-            }
-        }
-        Ok(())
     }
 }
 
 #[derive(Clone, Debug)]
-struct LogEntry {
-    now_ms: u64,
-    side: &'static str,
-    message: String,
+enum SimEvent {
+    State {
+        side: Side,
+        now_ms: u64,
+        state: PeerState,
+    },
+    Sent {
+        side: Side,
+    },
+    Received {
+        side: Side,
+    },
+    Noise {
+        stats: NoiseStats,
+    },
+    ReceiveError {
+        side: Side,
+        now_ms: u64,
+        report: ReceiveReport,
+    },
+    SendFailed {
+        side: Side,
+        now_ms: u64,
+        failed: SendFailedEvent,
+        state: PeerState,
+    },
+}
+
+trait NoiseStatsExt {
+    fn add(&mut self, other: NoiseStats);
+}
+
+impl NoiseStatsExt for NoiseStats {
+    fn add(&mut self, other: NoiseStats) {
+        self.corrupted += other.corrupted;
+        self.dropped += other.dropped;
+        self.inserted += other.inserted;
+        self.burst_corrupted += other.burst_corrupted;
+        self.burst_dropped += other.burst_dropped;
+        self.packet_dropped += other.packet_dropped;
+    }
+}
+
+fn now_ms(start: Instant) -> u64 {
+    start.elapsed().as_millis() as u64
+}
+
+fn init_log_file(args: &Args) -> io::Result<()> {
+    if let Some(parent) = args.log_file.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent)?;
+    }
+
+    let mut file = fs::File::create(&args.log_file)?;
+    writeln!(file, "status=running")?;
+    writeln!(
+        file,
+        "config threads=2 interval={}ms message_len={} {}",
+        args.interval_ms,
+        args.message.len(),
+        noise_config_summary(args.noise)
+    )
 }
 
 fn test_config(seed: u32) -> EngineConfig {
     EngineConfig {
-        initial_packet_number: msrt::core::PacketNumber::new(seed),
         initial_message_id: msrt::core::MessageId::new(seed),
         fragment_bytes: TEST_FRAGMENT_BYTES,
         ..EngineConfig::default()

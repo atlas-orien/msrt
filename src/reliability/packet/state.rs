@@ -1,6 +1,6 @@
 //! Packet reliability state.
 
-/// Known reliability state for a packet number.
+/// Known reliability state for a packet key.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PacketState {
     /// The packet is unknown to the tracker.

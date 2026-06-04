@@ -1,6 +1,6 @@
 //! Engine configuration.
 
-use crate::core::{ChannelId, MessageId, PacketNumber};
+use crate::core::{ChannelId, MessageId};
 use crate::reliability::{ChannelReliability, ReliabilityMode};
 
 /// Maximum encoded wire bytes held by one MVP engine event.
@@ -15,8 +15,8 @@ pub(crate) const MAX_EVENTS: usize = 16;
 pub(crate) const MAX_MESSAGE_EVENTS: usize = 16;
 /// Maximum in-flight packets tracked by the MVP engine.
 pub(crate) const MAX_IN_FLIGHT_PACKETS: usize = 16;
-/// Maximum observed packets retained for ACK range generation.
-pub(crate) const MAX_ACK_TRACKED_PACKETS: usize = 16;
+/// Maximum pending ACK packet keys retained by the engine.
+pub(crate) const MAX_PENDING_ACKS: usize = 16;
 /// Maximum incomplete messages tracked by the reassembly table.
 pub(crate) const MAX_REASSEMBLY_MESSAGES: usize = 4;
 /// Maximum channel reliability policies configured in the engine.
@@ -103,8 +103,6 @@ impl ChannelSpec {
 /// Minimal protocol engine configuration.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EngineConfig {
-    /// First packet number used by this engine.
-    pub initial_packet_number: PacketNumber,
     /// First message identifier used by this engine.
     pub initial_message_id: MessageId,
     /// Maximum message fragment bytes written into one packet.
@@ -124,7 +122,6 @@ pub struct EngineConfig {
 impl Default for EngineConfig {
     fn default() -> Self {
         Self {
-            initial_packet_number: PacketNumber::ZERO,
             initial_message_id: MessageId::ZERO,
             fragment_bytes: DEFAULT_FRAGMENT_BYTES,
             max_retransmit_attempts: DEFAULT_MAX_RETRANSMIT_ATTEMPTS,

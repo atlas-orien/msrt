@@ -192,13 +192,12 @@ fn engine_send_on_uses_channel_id() {
 }
 
 #[test]
-fn engine_ack_range_clears_multiple_in_flight_packets() {
+fn engine_ack_clears_one_in_flight_packet() {
     let mut a = Engine::new(EngineConfig {
         fragment_bytes: 2,
         ..EngineConfig::default()
     });
     let mut b = Engine::new(EngineConfig::default());
-    let mut last_ack = None;
 
     a.send(b"abcdef").unwrap();
 
@@ -213,23 +212,7 @@ fn engine_ack_range_clears_multiple_in_flight_packets() {
         ));
     }
 
-    if let EnginePoll::Transmit { bytes, attempts } = b.poll(1, &mut [0; 128]).unwrap() {
-        let mut stored = [0; crate::engine::config::MAX_WIRE_BYTES];
-        stored[..bytes.len()].copy_from_slice(bytes);
-        last_ack = Some(WriteEvent {
-            packet_number: crate::core::PacketNumber::new(u32::from_le_bytes(
-                bytes[crate::wire::WIRE_HEADER_LEN + 2..crate::wire::WIRE_HEADER_LEN + 6]
-                    .try_into()
-                    .unwrap(),
-            )),
-            bytes: stored,
-            len: bytes.len(),
-            attempts,
-            priority: crate::engine::state::scheduler::WritePriority::Control,
-        });
-    }
-
-    let last_ack = last_ack.expect("receiver should emit ACK range");
+    let last_ack = next_polled_write(&mut b, 1);
 
     assert!(matches!(
         a.receive(last_ack.as_bytes()),
@@ -290,7 +273,7 @@ fn engine_polls_message_before_queued_new_data_when_no_ack_is_pending() {
 }
 
 #[test]
-fn engine_ack_range_gap_retransmits_only_missing_packet() {
+fn engine_single_ack_retransmits_unacked_packets() {
     let mut engine = Engine::new(EngineConfig {
         fragment_bytes: 2,
         retransmit_timeout_ms: 1,
@@ -299,31 +282,24 @@ fn engine_ack_range_gap_retransmits_only_missing_packet() {
 
     engine.send(b"abcdefgh").unwrap();
 
-    for expected in 0..4 {
-        assert_eq!(next_write(&mut engine).packet_number.get(), expected);
-    }
+    let first = next_write(&mut engine);
+    let second = next_write(&mut engine);
+    let third = next_write(&mut engine);
+    let fourth = next_write(&mut engine);
 
-    let ack = ack_packet_for_ranges(
-        &[
-            (
-                crate::core::PacketNumber::new(0),
-                crate::core::PacketNumber::new(0),
-            ),
-            (
-                crate::core::PacketNumber::new(2),
-                crate::core::PacketNumber::new(3),
-            ),
-        ],
-        crate::core::PacketNumber::new(100),
-    );
+    assert_eq!(first.key.packet_index.get(), 0);
+    assert_eq!(second.key.packet_index.get(), 1);
+    assert_eq!(third.key.packet_index.get(), 2);
+    assert_eq!(fourth.key.packet_index.get(), 3);
+
+    let ack = ack_packet_for_key(first.key);
 
     assert!(matches!(
         engine.receive(ack.as_bytes()),
         ReceiveReport::Ack { .. }
     ));
 
-    assert_eq!(next_polled_write(&mut engine, 1).packet_number.get(), 1);
-    assert!(EngineState::poll_event(&mut engine.state).is_none());
+    assert_eq!(next_polled_write(&mut engine, 1).key, second.key);
 }
 
 #[test]
@@ -338,17 +314,11 @@ fn engine_tick_waits_for_retransmit_timeout() {
 
     poll_idle(&mut engine, 9);
 
-    assert_eq!(
-        next_polled_write(&mut engine, 10).packet_number,
-        first.packet_number
-    );
+    assert_eq!(next_polled_write(&mut engine, 10).key, first.key);
 
     poll_idle(&mut engine, 19);
 
-    assert_eq!(
-        next_polled_write(&mut engine, 20).packet_number,
-        first.packet_number
-    );
+    assert_eq!(next_polled_write(&mut engine, 20).key, first.key);
 }
 
 #[test]
@@ -461,7 +431,7 @@ fn engine_reacknowledges_each_duplicate_data_packet() {
         packet_type_from_wire(duplicate_ack.as_bytes()),
         crate::core::PacketType::Ack
     );
-    assert_ne!(first_ack.packet_number, duplicate_ack.packet_number);
+    assert_eq!(first_ack.key, duplicate_ack.key);
 }
 
 #[test]
@@ -504,13 +474,17 @@ fn engine_encodes_v1_draft_packet_and_frame_headers() {
     );
     assert_eq!(packet[0], crate::core::PacketType::Data.code());
     assert_eq!(packet[1], crate::core::Flags::ACK_ELICITING.bits());
+    assert_eq!(packet[2], crate::core::ChannelId::DEFAULT.get());
     assert_eq!(
-        u32::from_le_bytes(packet[2..6].try_into().unwrap()),
-        write.packet_number.get()
+        u32::from_le_bytes(packet[3..7].try_into().unwrap()),
+        write.key.message_id.get()
     );
-    assert_eq!(packet[6], crate::core::ChannelId::DEFAULT.get());
     assert_eq!(
-        packet[15],
+        u16::from_le_bytes(packet[7..9].try_into().unwrap()),
+        write.key.packet_index.get()
+    );
+    assert_eq!(
+        packet[13],
         crate::core::MessageFlags::FIRST.bits() | crate::core::MessageFlags::LAST.bits()
     );
 }
@@ -685,11 +659,11 @@ fn engine_reports_send_failed_after_retry_limit() {
     let message_id = engine.send(b"hello").unwrap();
     let first = next_write(&mut engine);
 
-    assert_eq!(first.packet_number.get(), 0);
+    assert_eq!(first.key.packet_index.get(), 0);
 
     let retry = next_polled_write(&mut engine, 1);
 
-    assert_eq!(retry.packet_number, first.packet_number);
+    assert_eq!(retry.key, first.key);
 
     let failed = next_send_failed(&mut engine, 2);
 
@@ -712,16 +686,13 @@ fn engine_send_failed_is_message_scoped() {
     let second = next_write(&mut engine);
     let third = next_write(&mut engine);
 
-    assert_eq!(first.packet_number.get(), 0);
-    assert_eq!(second.packet_number.get(), 1);
-    assert_eq!(third.packet_number.get(), 2);
+    assert_eq!(first.key.packet_index.get(), 0);
+    assert_eq!(second.key.packet_index.get(), 1);
+    assert_eq!(third.key.packet_index.get(), 2);
 
-    assert_eq!(
-        next_polled_write(&mut engine, 1).packet_number,
-        first.packet_number
-    );
-    assert_eq!(next_write(&mut engine).packet_number, second.packet_number);
-    assert_eq!(next_write(&mut engine).packet_number, third.packet_number);
+    assert_eq!(next_polled_write(&mut engine, 1).key, first.key);
+    assert_eq!(next_write(&mut engine).key, second.key);
+    assert_eq!(next_write(&mut engine).key, third.key);
 
     let failed = next_send_failed(&mut engine, 2);
 
@@ -746,24 +717,15 @@ fn engine_send_failed_suppresses_same_tick_message_retransmits() {
     let second = next_write(&mut engine);
     let third = next_write(&mut engine);
 
-    assert_eq!(first.packet_number.get(), 0);
-    assert_eq!(second.packet_number.get(), 1);
-    assert_eq!(third.packet_number.get(), 2);
+    assert_eq!(first.key.packet_index.get(), 0);
+    assert_eq!(second.key.packet_index.get(), 1);
+    assert_eq!(third.key.packet_index.get(), 2);
 
-    assert_eq!(
-        next_polled_write(&mut engine, 1).packet_number,
-        first.packet_number
-    );
-    assert_eq!(next_write(&mut engine).packet_number, second.packet_number);
-    assert_eq!(next_write(&mut engine).packet_number, third.packet_number);
+    assert_eq!(next_polled_write(&mut engine, 1).key, first.key);
+    assert_eq!(next_write(&mut engine).key, second.key);
+    assert_eq!(next_write(&mut engine).key, third.key);
 
-    let ack = ack_packet_for_ranges(
-        &[(
-            crate::core::PacketNumber::new(0),
-            crate::core::PacketNumber::new(0),
-        )],
-        crate::core::PacketNumber::new(100),
-    );
+    let ack = ack_packet_for_key(first.key);
 
     assert!(matches!(
         engine.receive(ack.as_bytes()),
@@ -790,12 +752,21 @@ fn packet_flags_from_wire(bytes: &[u8]) -> u8 {
 }
 
 fn channel_id_from_wire(bytes: &[u8]) -> u8 {
-    bytes[crate::wire::WIRE_HEADER_LEN + 6]
+    bytes[crate::wire::WIRE_HEADER_LEN + 2]
 }
 
 fn packet_type_from_wire(bytes: &[u8]) -> crate::core::PacketType {
     crate::core::PacketType::from_code(bytes[crate::wire::WIRE_HEADER_LEN])
         .expect("packet type should decode")
+}
+
+fn packet_key_from_wire(bytes: &[u8]) -> crate::core::PacketKey {
+    let packet = &bytes[crate::wire::WIRE_HEADER_LEN..];
+    crate::core::PacketKey::new(
+        crate::core::ChannelId::new(packet[2]),
+        crate::core::MessageId::new(u32::from_le_bytes(packet[3..7].try_into().unwrap())),
+        crate::core::PacketIndex::new(u16::from_le_bytes(packet[7..9].try_into().unwrap())),
+    )
 }
 
 fn next_write(engine: &mut Engine) -> WriteEvent {
@@ -813,11 +784,7 @@ fn next_polled_write(engine: &mut Engine, now_ms: u64) -> WriteEvent {
     stored[..bytes.len()].copy_from_slice(bytes);
 
     WriteEvent {
-        packet_number: crate::core::PacketNumber::new(u32::from_le_bytes(
-            bytes[crate::wire::WIRE_HEADER_LEN + 2..crate::wire::WIRE_HEADER_LEN + 6]
-                .try_into()
-                .unwrap(),
-        )),
+        key: packet_key_from_wire(bytes),
         bytes: stored,
         len: bytes.len(),
         attempts,
@@ -841,13 +808,9 @@ fn next_send_failed(engine: &mut Engine, now_ms: u64) -> SendFailedEvent {
     failed
 }
 
-fn ack_packet_for_ranges(
-    ranges: &[(crate::core::PacketNumber, crate::core::PacketNumber)],
-    packet_number: crate::core::PacketNumber,
-) -> WriteEvent {
+fn ack_packet_for_key(key: crate::core::PacketKey) -> WriteEvent {
     let mut bytes = [0; crate::engine::config::MAX_WIRE_BYTES];
-    let packet_len =
-        (crate::core::packet::header::PACKET_HEADER_LEN + crate::core::ack::ACK_LEN) as u8;
+    let packet_len = crate::core::packet::header::PACKET_HEADER_LEN as u8;
     let total_len = crate::wire::WIRE_HEADER_LEN + usize::from(packet_len) + 2;
 
     bytes[..crate::wire::WIRE_MAGIC_LEN].copy_from_slice(&crate::wire::EnvelopeMagic::MSRT.bytes());
@@ -856,27 +819,18 @@ fn ack_packet_for_ranges(
     let packet = &mut bytes[crate::wire::WIRE_HEADER_LEN..];
     packet[0] = crate::core::PacketType::Ack.code();
     packet[1] = 0;
-    packet[2..6].copy_from_slice(&packet_number.get().to_le_bytes());
-    packet[6] = crate::core::ChannelId::DEFAULT.get();
-    packet[7..11].copy_from_slice(&crate::core::MessageId::ZERO.get().to_le_bytes());
+    packet[2] = key.channel_id.get();
+    packet[3..7].copy_from_slice(&key.message_id.get().to_le_bytes());
+    packet[7..9].copy_from_slice(&key.packet_index.get().to_le_bytes());
+    packet[9..11].copy_from_slice(&0u16.to_le_bytes());
     packet[11..13].copy_from_slice(&0u16.to_le_bytes());
-    packet[13..15].copy_from_slice(&0u16.to_le_bytes());
-    packet[15] = crate::core::MessageFlags::EMPTY.bits();
-    packet[16..20].copy_from_slice(&ranges[ranges.len() - 1].1.get().to_le_bytes());
-    packet[20] = ranges.len() as u8;
-
-    let mut offset = 21;
-    for (start, end) in ranges {
-        packet[offset..offset + 4].copy_from_slice(&start.get().to_le_bytes());
-        packet[offset + 4..offset + 8].copy_from_slice(&end.get().to_le_bytes());
-        offset += 8;
-    }
+    packet[13] = crate::core::MessageFlags::EMPTY.bits();
 
     let checksum = crate::wire::Checksum::calculate(&crate::wire::Crc16, &bytes[..total_len - 2]);
     bytes[total_len - 2..total_len].copy_from_slice(&checksum.to_le_bytes());
 
     WriteEvent {
-        packet_number,
+        key,
         bytes,
         len: total_len,
         attempts: 0,

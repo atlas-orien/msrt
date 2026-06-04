@@ -1,9 +1,7 @@
 //! v1 draft packet byte layout glue.
 
 use crate::core::{
-    Ack, AckRange, ChannelId, Error, Flags, MAX_ACK_RANGES, MessageFlags, MessageId, PacketNumber,
-    PacketType, Result,
-    ack::ACK_LEN,
+    ChannelId, Error, Flags, MessageFlags, MessageId, PacketIndex, PacketType, Result,
     packet::header::{PACKET_HEADER_LEN, PacketHeader},
 };
 
@@ -27,7 +25,7 @@ pub(crate) enum PacketDecode<'a> {
 /// Decoded ACK packet.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct DecodedAck {
-    pub(crate) ack: Ack,
+    pub(crate) header: PacketHeader,
 }
 
 /// Decoded liveness packet.
@@ -90,7 +88,7 @@ fn decode_packet_bytes(bytes: &[u8]) -> PacketDecode<'_> {
         PacketType::Data => fragment_from_packet_bytes(header, bytes)
             .map(PacketDecode::Data)
             .unwrap_or(PacketDecode::Malformed),
-        PacketType::Ack => ack_from_packet_bytes(payload_bytes)
+        PacketType::Ack => ack_from_packet_bytes(header, payload_bytes)
             .map(PacketDecode::Ack)
             .unwrap_or(PacketDecode::Malformed),
         PacketType::Ping => liveness_from_packet_bytes(header, payload_bytes)
@@ -124,55 +122,26 @@ fn packet_header_from_bytes(bytes: &[u8]) -> Option<PacketHeader> {
     Some(PacketHeader {
         packet_type: PacketType::from_code(*bytes.first()?)?,
         flags: Flags::from_bits(*bytes.get(1)?),
-        packet_number: PacketNumber::new(u32::from_le_bytes(bytes.get(2..6)?.try_into().ok()?)),
-        channel_id: ChannelId::new(*bytes.get(6)?),
-        message_id: MessageId::new(u32::from_le_bytes(bytes.get(7..11)?.try_into().ok()?)),
-        message_len: u16::from_le_bytes(bytes.get(11..13)?.try_into().ok()?) as usize,
-        fragment_offset: u16::from_le_bytes(bytes.get(13..15)?.try_into().ok()?) as usize,
-        fragment_flags: MessageFlags::from_bits(*bytes.get(15)?),
+        channel_id: ChannelId::new(*bytes.get(2)?),
+        message_id: MessageId::new(u32::from_le_bytes(bytes.get(3..7)?.try_into().ok()?)),
+        packet_index: PacketIndex::new(u16::from_le_bytes(bytes.get(7..9)?.try_into().ok()?)),
+        message_len: u16::from_le_bytes(bytes.get(9..11)?.try_into().ok()?) as usize,
+        fragment_offset: u16::from_le_bytes(bytes.get(11..13)?.try_into().ok()?) as usize,
+        fragment_flags: MessageFlags::from_bits(*bytes.get(13)?),
     })
 }
 
-fn ack_from_packet_bytes(bytes: &[u8]) -> Option<DecodedAck> {
-    if bytes.len() != ACK_LEN {
+fn ack_from_packet_bytes(header: PacketHeader, bytes: &[u8]) -> Option<DecodedAck> {
+    if !bytes.is_empty()
+        || header.flags != Flags::EMPTY
+        || header.message_len != 0
+        || header.fragment_offset != 0
+        || header.fragment_flags != MessageFlags::EMPTY
+    {
         return None;
     }
 
-    let largest = PacketNumber::new(u32::from_le_bytes(bytes.get(0..4)?.try_into().ok()?));
-    let range_count = *bytes.get(4)?;
-
-    if range_count as usize > MAX_ACK_RANGES {
-        return None;
-    }
-
-    let empty = AckRange::new(PacketNumber::ZERO, PacketNumber::ZERO);
-    let mut ranges = [empty; MAX_ACK_RANGES];
-    let mut offset = 5;
-    let mut index = 0;
-
-    while index < MAX_ACK_RANGES {
-        let start = PacketNumber::new(u32::from_le_bytes(
-            bytes.get(offset..offset + 4)?.try_into().ok()?,
-        ));
-        let end = PacketNumber::new(u32::from_le_bytes(
-            bytes.get(offset + 4..offset + 8)?.try_into().ok()?,
-        ));
-
-        if index < range_count as usize {
-            ranges[index] = AckRange::new(start, end);
-        }
-
-        offset += 8;
-        index += 1;
-    }
-
-    Some(DecodedAck {
-        ack: Ack {
-            largest_acknowledged: largest,
-            range_count,
-            ranges,
-        },
-    })
+    Some(DecodedAck { header })
 }
 
 fn fragment_from_packet_bytes(header: PacketHeader, bytes: &[u8]) -> Option<DecodedFragment<'_>> {

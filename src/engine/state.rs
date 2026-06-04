@@ -1,6 +1,6 @@
 //! Internal engine protocol state.
 
-use crate::core::{MessageId, PacketNumber, Result};
+use crate::core::{MessageId, Result};
 use crate::engine::{EngineConfig, EnginePoll, ReceiveReport};
 
 use self::{
@@ -38,13 +38,10 @@ pub(crate) struct EngineState {
 }
 
 impl EngineState {
-    pub(crate) const fn new(
-        initial_packet_number: PacketNumber,
-        initial_message_id: MessageId,
-    ) -> Self {
+    pub(crate) const fn new(initial_message_id: MessageId) -> Self {
         Self {
             clock: ClockState::new(),
-            numbers: NumberState::new(initial_packet_number, initial_message_id),
+            numbers: NumberState::new(initial_message_id),
             scheduler: SchedulerState::new(),
             recovery: RecoveryState::new(),
             ack: AckState::new(),

@@ -1,9 +1,7 @@
-//! Outgoing message fragmentation and ACK encoding.
+//! Outgoing message fragmentation and packet encoding.
 
 use crate::core::{
-    Ack, ChannelId, Error, ErrorKind, Flags, MAX_ACK_RANGES, MessageFlags, MessageId, PacketNumber,
-    Result,
-    ack::ACK_LEN,
+    ChannelId, Error, ErrorKind, Flags, MessageFlags, MessageId, PacketIndex, PacketKey, Result,
     packet::header::{PACKET_HEADER_LEN, PacketHeader},
 };
 use crate::reliability::ReliabilityMode;
@@ -19,7 +17,7 @@ use crate::engine::{
     state::{EngineOutput, EngineState, WriteEvent, recovery::inflight::InFlightPacket},
 };
 
-const ACK_PACKET_LEN: usize = PACKET_HEADER_LEN + ACK_LEN;
+const ACK_PACKET_LEN: usize = PACKET_HEADER_LEN;
 const LIVENESS_PACKET_LEN: usize = PACKET_HEADER_LEN;
 
 impl EngineState {
@@ -59,31 +57,30 @@ impl EngineState {
         Ok(())
     }
 
-    pub(crate) fn queue_ack(&mut self, acknowledged: PacketNumber) -> Result<()> {
-        self.ack.observe(acknowledged);
-
-        Ok(())
+    pub(crate) fn queue_ack(&mut self, acknowledged: PacketKey) -> Result<()> {
+        if self.ack.observe(acknowledged) {
+            Ok(())
+        } else {
+            Err(Error::new(ErrorKind::Engine))
+        }
     }
 
     pub(crate) fn send_ping_impl(&mut self) -> Result<MessageId> {
         let message_id = self.numbers.alloc_message_id();
-        let packet_number = self.numbers.alloc_packet_number();
+        let packet_index = PacketIndex::ZERO;
         let mut wire = [0; MAX_WIRE_BYTES];
-        let written = encode_liveness_packet(
-            PacketHeader::ping(packet_number, message_id),
-            &mut wire,
-            &Crc16,
-        )?;
+        let written = encode_liveness_packet(PacketHeader::ping(message_id), &mut wire, &Crc16)?;
+        let key = PacketKey::new(ChannelId::LIVENESS, message_id, packet_index);
 
         self.scheduler.push(EngineOutput::Write(WriteEvent {
-            packet_number,
+            key,
             bytes: wire,
             len: written,
             attempts: 0,
             priority: crate::engine::state::scheduler::WritePriority::NewData,
         }))?;
         self.recovery.track(InFlightPacket {
-            packet_number,
+            key,
             channel_id: ChannelId::LIVENESS,
             message_id,
             bytes: wire,
@@ -97,16 +94,13 @@ impl EngineState {
     }
 
     pub(crate) fn queue_pong(&mut self, message_id: MessageId) -> Result<()> {
-        let packet_number = self.numbers.alloc_packet_number();
+        let packet_index = PacketIndex::ZERO;
         let mut wire = [0; MAX_WIRE_BYTES];
-        let written = encode_liveness_packet(
-            PacketHeader::pong(packet_number, message_id),
-            &mut wire,
-            &Crc16,
-        )?;
+        let written = encode_liveness_packet(PacketHeader::pong(message_id), &mut wire, &Crc16)?;
+        let key = PacketKey::new(ChannelId::LIVENESS, message_id, packet_index);
 
         self.scheduler.push(EngineOutput::Write(WriteEvent {
-            packet_number,
+            key,
             bytes: wire,
             len: written,
             attempts: 0,
@@ -129,16 +123,17 @@ impl EngineState {
         }
 
         let mut offset = 0;
+        let mut packet_index = PacketIndex::ZERO;
 
         while offset < message.len() || (message.is_empty() && offset == 0) {
             let end = core::cmp::min(offset + fragment_bytes, message.len());
             let fragment = &message[offset..end];
-            let packet_number = self.numbers.alloc_packet_number();
             let mut wire = [0; MAX_WIRE_BYTES];
             let fragment_flags =
                 MessageFlags::from_bits(fragment_flags(offset, end, message.len()));
+            let key = PacketKey::new(channel_id, message_id, packet_index);
             let header = PacketHeader::data(
-                packet_number,
+                packet_index,
                 if matches!(mode, ReliabilityMode::Reliable) {
                     Flags::ACK_ELICITING
                 } else {
@@ -153,7 +148,7 @@ impl EngineState {
             let written = encode_message_fragment(header, fragment, &mut wire, &Crc16)?;
 
             self.scheduler.push(EngineOutput::Write(WriteEvent {
-                packet_number,
+                key,
                 bytes: wire,
                 len: written,
                 attempts: 0,
@@ -161,7 +156,7 @@ impl EngineState {
             }))?;
             if matches!(mode, ReliabilityMode::Reliable) {
                 self.recovery.track(InFlightPacket {
-                    packet_number,
+                    key,
                     channel_id,
                     message_id,
                     bytes: wire,
@@ -177,6 +172,7 @@ impl EngineState {
             }
 
             offset = end;
+            packet_index = packet_index.next();
         }
 
         Ok(())
@@ -208,13 +204,13 @@ fn encode_message_fragment(
     let packet = &mut out[WIRE_HEADER_LEN..];
     packet[0] = header.packet_type.code();
     packet[1] = header.flags.bits();
-    packet[2..6].copy_from_slice(&header.packet_number.get().to_le_bytes());
-    packet[6] = header.channel_id.get();
-    packet[7..11].copy_from_slice(&header.message_id.get().to_le_bytes());
-    packet[11..13].copy_from_slice(&message_len.to_le_bytes());
-    packet[13..15].copy_from_slice(&fragment_offset.to_le_bytes());
-    packet[15] = header.fragment_flags.bits();
-    packet[16..16 + fragment.len()].copy_from_slice(fragment);
+    packet[2] = header.channel_id.get();
+    packet[3..7].copy_from_slice(&header.message_id.get().to_le_bytes());
+    packet[7..9].copy_from_slice(&header.packet_index.get().to_le_bytes());
+    packet[9..11].copy_from_slice(&message_len.to_le_bytes());
+    packet[11..13].copy_from_slice(&fragment_offset.to_le_bytes());
+    packet[13] = header.fragment_flags.bits();
+    packet[PACKET_HEADER_LEN..PACKET_HEADER_LEN + fragment.len()].copy_from_slice(fragment);
 
     let checksum_value = checksum.calculate(&out[..total_len - CHECKSUM_LEN]);
     out[total_len - CHECKSUM_LEN..total_len].copy_from_slice(&checksum_value.to_le_bytes());
@@ -223,12 +219,11 @@ fn encode_message_fragment(
 }
 
 pub(crate) fn encode_ack_packet(
-    packet_number: crate::core::PacketNumber,
-    ack: Ack,
+    key: PacketKey,
     out: &mut [u8],
     checksum: &impl Checksum,
 ) -> Result<usize> {
-    let header = PacketHeader::ack(packet_number);
+    let header = PacketHeader::ack(key);
     let packet_len = u8::try_from(ACK_PACKET_LEN).map_err(|_| Error::new(ErrorKind::Engine))?;
     let envelope_header = EnvelopeHeader::new(packet_len);
     let total_len = envelope_header.total_len();
@@ -243,24 +238,12 @@ pub(crate) fn encode_ack_packet(
     let packet = &mut out[WIRE_HEADER_LEN..];
     packet[0] = header.packet_type.code();
     packet[1] = header.flags.bits();
-    packet[2..6].copy_from_slice(&header.packet_number.get().to_le_bytes());
-    packet[6] = header.channel_id.get();
-    packet[7..11].copy_from_slice(&header.message_id.get().to_le_bytes());
-    packet[11..13].copy_from_slice(&(header.message_len as u16).to_le_bytes());
-    packet[13..15].copy_from_slice(&(header.fragment_offset as u16).to_le_bytes());
-    packet[15] = header.fragment_flags.bits();
-    packet[16..20].copy_from_slice(&ack.largest_acknowledged.get().to_le_bytes());
-    packet[20] = ack.range_count;
-
-    let mut offset = 21;
-    let mut index = 0;
-
-    while index < MAX_ACK_RANGES {
-        packet[offset..offset + 4].copy_from_slice(&ack.ranges[index].start.get().to_le_bytes());
-        packet[offset + 4..offset + 8].copy_from_slice(&ack.ranges[index].end.get().to_le_bytes());
-        offset += 8;
-        index += 1;
-    }
+    packet[2] = header.channel_id.get();
+    packet[3..7].copy_from_slice(&header.message_id.get().to_le_bytes());
+    packet[7..9].copy_from_slice(&header.packet_index.get().to_le_bytes());
+    packet[9..11].copy_from_slice(&(header.message_len as u16).to_le_bytes());
+    packet[11..13].copy_from_slice(&(header.fragment_offset as u16).to_le_bytes());
+    packet[13] = header.fragment_flags.bits();
 
     let checksum_value = checksum.calculate(&out[..total_len - CHECKSUM_LEN]);
     out[total_len - CHECKSUM_LEN..total_len].copy_from_slice(&checksum_value.to_le_bytes());
@@ -288,12 +271,12 @@ fn encode_liveness_packet(
     let packet = &mut out[WIRE_HEADER_LEN..];
     packet[0] = header.packet_type.code();
     packet[1] = header.flags.bits();
-    packet[2..6].copy_from_slice(&header.packet_number.get().to_le_bytes());
-    packet[6] = header.channel_id.get();
-    packet[7..11].copy_from_slice(&header.message_id.get().to_le_bytes());
-    packet[11..13].copy_from_slice(&(header.message_len as u16).to_le_bytes());
-    packet[13..15].copy_from_slice(&(header.fragment_offset as u16).to_le_bytes());
-    packet[15] = header.fragment_flags.bits();
+    packet[2] = header.channel_id.get();
+    packet[3..7].copy_from_slice(&header.message_id.get().to_le_bytes());
+    packet[7..9].copy_from_slice(&header.packet_index.get().to_le_bytes());
+    packet[9..11].copy_from_slice(&(header.message_len as u16).to_le_bytes());
+    packet[11..13].copy_from_slice(&(header.fragment_offset as u16).to_le_bytes());
+    packet[13] = header.fragment_flags.bits();
 
     let checksum_value = checksum.calculate(&out[..total_len - CHECKSUM_LEN]);
     out[total_len - CHECKSUM_LEN..total_len].copy_from_slice(&checksum_value.to_le_bytes());

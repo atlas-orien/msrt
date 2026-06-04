@@ -6,7 +6,7 @@ pub mod payload;
 pub mod ty;
 
 pub use header::{Flags, PacketHeader};
-pub use number::PacketNumber;
+pub use number::{PacketIndex, PacketKey};
 pub use payload::PacketPayload;
 pub use ty::PacketType;
 
@@ -53,14 +53,14 @@ impl<'a> Packet<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Flags, Packet, PacketHeader, PacketNumber};
+    use super::{Flags, Packet, PacketHeader, PacketIndex};
     use crate::core::{ChannelId, MessageFlags, MessageId};
 
     #[test]
     fn packet_payload_contains_bytes() {
         let payload = [1, 2, 3];
         let header = PacketHeader::data(
-            PacketNumber::new(9),
+            PacketIndex::new(0),
             Flags::ACK_ELICITING,
             ChannelId::DEFAULT,
             MessageId::new(7),

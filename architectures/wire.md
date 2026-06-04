@@ -18,14 +18,14 @@ wire 负责：
 
 wire 不负责：
 
-- MESSAGE frame 语义
+- DATA payload 语义
 - ACK 策略
 - packet retransmit
 - message reassembly
 - channel policy
 - adapter read/write
 
-## Packet、Frame、Envelope
+## Packet、Payload、Envelope
 
 这三个概念必须分开：
 
@@ -34,11 +34,11 @@ Wire Envelope
 └── Packet
     ├── PacketHeader
     └── PacketPayload
-        ├── MESSAGE Frame
-        └── ACK Frame
+        ├── DATA: message fragment bytes
+        └── ACK/PING/PONG: empty
 ```
 
-Packet 和 Frame 是 core 的协议对象。Envelope 是 wire 的字节流边界。
+Packet 是 core 的协议对象。Envelope 是 wire 的字节流边界。
 
 ## 为什么需要 Envelope
 

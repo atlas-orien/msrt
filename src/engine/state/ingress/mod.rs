@@ -92,40 +92,40 @@ impl EngineState {
     ) -> ReceiveReport {
         match packet.decode() {
             PacketDecode::Data(fragment) => {
-                let packet_number = fragment.header.packet_number;
+                let packet_index = fragment.header.packet_index;
+                let key = fragment.header.key();
                 let ack_eliciting = fragment.header.is_ack_eliciting();
 
-                if ack_eliciting && self.queue_ack(packet_number).is_err() {
+                if ack_eliciting && self.queue_ack(key).is_err() {
                     return ReceiveReport::Error(Error::new(ErrorKind::Engine));
                 }
 
-                if self.receive.dedup().observe(packet_number) == DedupDecision::Duplicate {
-                    return ReceiveReport::Duplicate { packet_number };
+                if self.receive.dedup().observe(key) == DedupDecision::Duplicate {
+                    return ReceiveReport::Duplicate { packet_index };
                 }
 
                 match self.reassembly.observe(fragment, self.clock.now_ms()) {
                     Ok(Some(mut message)) => {
                         message.profile = config.channel_profile(message.channel_id);
                         self.message.push(message);
-                        ReceiveReport::Packet { packet_number }
+                        ReceiveReport::Packet { packet_index }
                     }
-                    Ok(None) => ReceiveReport::Packet { packet_number },
+                    Ok(None) => ReceiveReport::Packet { packet_index },
                     Err(error) => ReceiveReport::Error(error),
                 }
             }
             PacketDecode::Ack(ack) => {
-                self.recovery.apply_ack(ack.ack);
-                ReceiveReport::Ack {
-                    packet_number: ack.ack.largest_acknowledged,
-                }
+                let packet_index = ack.header.packet_index;
+                self.recovery.apply_ack(ack.header.key());
+                ReceiveReport::Ack { packet_index }
             }
             PacketDecode::Ping(ping) => {
-                let packet_number = ping.header.packet_number;
+                let packet_index = ping.header.packet_index;
                 if self.queue_pong(ping.header.message_id).is_err() {
                     return ReceiveReport::Error(Error::new(ErrorKind::Engine));
                 }
                 ReceiveReport::Ping {
-                    packet_number,
+                    packet_index,
                     message_id: ping.header.message_id,
                 }
             }
@@ -133,7 +133,7 @@ impl EngineState {
                 self.recovery
                     .remove_message(ChannelId::LIVENESS, pong.header.message_id);
                 ReceiveReport::Pong {
-                    packet_number: pong.header.packet_number,
+                    packet_index: pong.header.packet_index,
                     message_id: pong.header.message_id,
                 }
             }

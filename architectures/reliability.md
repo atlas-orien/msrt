@@ -17,7 +17,7 @@ reliability 不负责：
 
 - 生成 wire bytes
 - 读取 wire bytes
-- 分配 packet number
+- 分配 message id
 - 管理 engine output queue
 - 直接向外部交付 message
 
@@ -27,7 +27,7 @@ MSRT 的可靠性首先是 packet 级的。
 
 ```text
 发送 packet
-  -> 记录 packet number
+  -> 记录 packet key
   -> 等待 ACK
   -> 超时后重传
   -> 达到 retry limit 后失败

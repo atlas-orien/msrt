@@ -2,8 +2,8 @@
 
 /// Borrowed packet payload bytes.
 ///
-/// For DATA packets these bytes are message fragment data. For ACK packets
-/// these bytes are an encoded [`crate::core::Ack`].
+/// For DATA packets these bytes are message fragment data. ACK, PING, and
+/// PONG packets use an empty payload.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PacketPayload<'a> {
     bytes: &'a [u8],
