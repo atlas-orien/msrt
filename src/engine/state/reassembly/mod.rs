@@ -62,13 +62,29 @@ impl ReassemblyState {
         fragment: DecodedFragment<'_>,
         now_ms: u64,
     ) -> Result<usize> {
-        let Some(index) = self.slots.iter().position(|slot| !slot.active) else {
-            return Err(Error::new(ErrorKind::Engine));
-        };
+        let index = self
+            .slots
+            .iter()
+            .position(|slot| !slot.active)
+            .unwrap_or_else(|| self.oldest_slot());
 
         self.slots[index] = ReassemblySlot::start(key, fragment.message_len, now_ms);
 
         Ok(index)
+    }
+
+    fn oldest_slot(&self) -> usize {
+        let mut oldest_index = 0;
+        let mut oldest_updated_at = u64::MAX;
+
+        for (index, slot) in self.slots.iter().enumerate() {
+            if slot.updated_at_ms < oldest_updated_at {
+                oldest_index = index;
+                oldest_updated_at = slot.updated_at_ms;
+            }
+        }
+
+        oldest_index
     }
 }
 

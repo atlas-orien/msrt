@@ -18,7 +18,6 @@ fn engine_sends_one_message_as_multiple_write_events() {
     while let Some(event) = EngineState::poll_event(&mut engine.state) {
         match event {
             EngineOutput::Write(_) => writes += 1,
-            EngineOutput::Message(_) => panic!("sender should not receive its own message"),
             EngineOutput::SendFailed(failed) => {
                 panic!("sender should not fail in this test: {failed:?}");
             }
@@ -50,14 +49,7 @@ fn engine_receives_fragments_as_one_message_event() {
         ));
     }
 
-    while let Some(event) = EngineState::poll_event(&mut b.state) {
-        if let EngineOutput::Message(message) = event {
-            assert_eq!(message.as_bytes(), b"hello msrt testing");
-            return;
-        }
-    }
-
-    panic!("receiver should emit a complete message");
+    assert_message(&mut b, b"hello msrt testing");
 }
 
 #[test]
@@ -96,7 +88,7 @@ fn engine_reassembles_interleaved_messages() {
 }
 
 #[test]
-fn engine_rejects_fragment_when_reassembly_budget_is_full() {
+fn engine_evicts_oldest_reassembly_slot_when_budget_is_full() {
     let mut a = Engine::new(EngineConfig {
         fragment_bytes: 2,
         ..EngineConfig::default()
@@ -117,8 +109,32 @@ fn engine_rejects_fragment_when_reassembly_budget_is_full() {
                 .expect("extra fragment")
                 .as_bytes()
         ),
-        ReceiveReport::Error(_)
+        ReceiveReport::Packet { .. }
     ));
+}
+
+#[test]
+fn engine_receive_keeps_protocol_alive_when_message_queue_is_full() {
+    let mut sender = Engine::new(EngineConfig::default());
+    let mut receiver = Engine::new(EngineConfig::default());
+
+    for index in 0..crate::engine::config::MAX_MESSAGE_EVENTS + 1 {
+        sender.send(&[index as u8]).unwrap();
+        let write = next_write(&mut sender);
+
+        assert!(matches!(
+            receiver.receive(write.as_bytes()),
+            ReceiveReport::Packet { .. }
+        ));
+
+        let ack = next_write(&mut receiver);
+        assert!(matches!(
+            sender.receive(ack.as_bytes()),
+            ReceiveReport::Ack { .. }
+        ));
+    }
+
+    assert_eq!(sender.state.recovery.in_flight_len(), 0);
 }
 
 #[test]
@@ -221,6 +237,56 @@ fn engine_ack_range_clears_multiple_in_flight_packets() {
     ));
 
     poll_idle(&mut a, 1);
+}
+
+#[test]
+fn engine_polls_pending_ack_before_queued_data() {
+    let mut sender = Engine::new(EngineConfig::default());
+    let mut receiver = Engine::new(EngineConfig::default());
+    let mut peer = Engine::new(EngineConfig::default());
+
+    receiver.send(b"queued local data").unwrap();
+    sender.send(b"ack this first").unwrap();
+    let incoming = next_write(&mut sender);
+
+    assert!(matches!(
+        receiver.receive(incoming.as_bytes()),
+        ReceiveReport::Packet { .. }
+    ));
+
+    let write = next_write(&mut receiver);
+
+    assert_eq!(
+        packet_type_from_wire(write.as_bytes()),
+        crate::core::PacketType::Ack
+    );
+    assert!(matches!(
+        peer.receive(write.as_bytes()),
+        ReceiveReport::Ack { .. }
+    ));
+}
+
+#[test]
+fn engine_polls_message_before_queued_new_data_when_no_ack_is_pending() {
+    let mut sender = Engine::new(EngineConfig::default());
+    let mut receiver = Engine::new(EngineConfig::default());
+
+    sender.send(b"incoming").unwrap();
+    receiver.send(b"queued local data").unwrap();
+    let incoming = next_write(&mut sender);
+
+    assert!(matches!(
+        receiver.receive(incoming.as_bytes()),
+        ReceiveReport::Packet { .. }
+    ));
+    let _ack = next_write(&mut receiver);
+
+    let mut tx_buf = [0; crate::engine::config::MAX_WIRE_BYTES];
+    let EnginePoll::Message(message) = receiver.poll(1, &mut tx_buf).unwrap() else {
+        panic!("receiver should deliver message before queued new data");
+    };
+
+    assert_eq!(message.as_bytes(), b"incoming");
 }
 
 #[test]
@@ -363,14 +429,39 @@ fn engine_acknowledges_duplicate_without_delivering_twice() {
         ReceiveReport::Duplicate { .. }
     ));
 
-    let mut duplicate_messages = 0;
-    while let Some(event) = EngineState::poll_event(&mut b.state) {
-        if matches!(event, EngineOutput::Message(_)) {
-            duplicate_messages += 1;
-        }
-    }
+    let _duplicate_ack = next_write(&mut b);
+    poll_idle(&mut b, 1);
+}
 
-    assert_eq!(duplicate_messages, 0);
+#[test]
+fn engine_reacknowledges_each_duplicate_data_packet() {
+    let mut sender = Engine::new(EngineConfig::default());
+    let mut receiver = Engine::new(EngineConfig::default());
+
+    sender.send(b"hello").unwrap();
+    let write = next_write(&mut sender);
+
+    assert!(matches!(
+        receiver.receive(write.as_bytes()),
+        ReceiveReport::Packet { .. }
+    ));
+    let first_ack = next_write(&mut receiver);
+
+    assert!(matches!(
+        receiver.receive(write.as_bytes()),
+        ReceiveReport::Duplicate { .. }
+    ));
+    let duplicate_ack = next_write(&mut receiver);
+
+    assert_eq!(
+        packet_type_from_wire(first_ack.as_bytes()),
+        crate::core::PacketType::Ack
+    );
+    assert_eq!(
+        packet_type_from_wire(duplicate_ack.as_bytes()),
+        crate::core::PacketType::Ack
+    );
+    assert_ne!(first_ack.packet_number, duplicate_ack.packet_number);
 }
 
 #[test]
@@ -496,12 +587,7 @@ fn engine_receives_best_effort_without_ack() {
         ReceiveReport::Packet { .. }
     ));
 
-    let Some(event) = EngineState::poll_event(&mut receiver.state) else {
-        panic!("receiver should emit the complete best-effort message");
-    };
-    let EngineOutput::Message(message) = event else {
-        panic!("best-effort packet should not emit ACK before message");
-    };
+    let message = next_message(&mut receiver);
 
     assert_eq!(message.channel_id, channel_id);
     assert_eq!(message.profile, ChannelProfile::Data);
@@ -707,6 +793,11 @@ fn channel_id_from_wire(bytes: &[u8]) -> u8 {
     bytes[crate::wire::WIRE_HEADER_LEN + 6]
 }
 
+fn packet_type_from_wire(bytes: &[u8]) -> crate::core::PacketType {
+    crate::core::PacketType::from_code(bytes[crate::wire::WIRE_HEADER_LEN])
+        .expect("packet type should decode")
+}
+
 fn next_write(engine: &mut Engine) -> WriteEvent {
     next_polled_write(engine, 0)
 }
@@ -822,11 +913,13 @@ fn assert_message(engine: &mut Engine, expected: &[u8]) {
 }
 
 fn next_message(engine: &mut Engine) -> MessageEvent {
-    while let Some(event) = EngineState::poll_event(&mut engine.state) {
-        if let EngineOutput::Message(message) = event {
-            return message;
+    let mut tx_buf = [0; crate::engine::config::MAX_WIRE_BYTES];
+
+    loop {
+        match engine.poll(0, &mut tx_buf).unwrap() {
+            EnginePoll::Transmit { .. } | EnginePoll::SendFailed(_) => continue,
+            EnginePoll::Message(message) => return message,
+            EnginePoll::Idle => panic!("engine should produce a complete message"),
         }
     }
-
-    panic!("engine should produce a complete message");
 }

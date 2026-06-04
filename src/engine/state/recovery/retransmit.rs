@@ -13,6 +13,10 @@ impl EngineState {
         self.clock.update(now_ms);
         self.reassembly.expire(now_ms, config.reassembly_timeout_ms);
 
+        if !self.recovery.should_tick(now_ms) {
+            return;
+        }
+
         let mut retransmits = [None; MAX_IN_FLIGHT_PACKETS];
         let mut retransmit_len = 0;
         let mut failures = [None; MAX_IN_FLIGHT_PACKETS];
@@ -88,20 +92,45 @@ impl EngineState {
         now_ms: u64,
         failed: &InFlightPacket,
     ) {
-        tracing::error!(
-            target: "msrt::engine::recovery",
+        eprintln!(
+            "msrt in_flight send_failed now={} len={} message_len={} ack_pending={} ack_pending_len={} failed_channel={} failed_message={} failed_packet={} attempts={} age_ms={} retry_limit={} rto_ms={}",
             now_ms,
-            in_flight_len = self.recovery.in_flight_len(),
-            failed_channel = failed.channel_id.get(),
-            failed_message = failed.message_id.get(),
-            failed_packet = failed.packet_number.get(),
-            attempts = failed.attempts,
-            age_ms = now_ms.saturating_sub(failed.last_sent_ms),
-            retry_limit = config.max_retransmit_attempts,
-            rto_ms = config.retransmit_timeout_ms,
-            "in-flight packet reached retry limit"
+            self.recovery.in_flight_len(),
+            self.message.len(),
+            self.ack.is_pending(),
+            self.ack.pending_len(),
+            failed.channel_id.get(),
+            failed.message_id.get(),
+            failed.packet_number.get(),
+            failed.attempts,
+            now_ms.saturating_sub(failed.last_sent_ms),
+            config.max_retransmit_attempts,
+            config.retransmit_timeout_ms,
         );
+        self.scheduler.log_snapshot(now_ms, self.ack.is_pending());
+        self.log_in_flight_packets(now_ms);
     }
+
+    #[cfg(feature = "std")]
+    fn log_in_flight_packets(&self, now_ms: u64) {
+        for packet in self.recovery.packets() {
+            eprintln!(
+                "msrt in_flight packet now={} pn={} ch={} msg={} attempts={} age_ms={} len={} sent={}",
+                now_ms,
+                packet.packet_number.get(),
+                packet.channel_id.get(),
+                packet.message_id.get(),
+                packet.attempts,
+                now_ms.saturating_sub(packet.last_sent_ms),
+                packet.len,
+                packet.sent,
+            );
+        }
+    }
+
+    #[cfg(not(feature = "std"))]
+    #[allow(dead_code)]
+    fn log_in_flight_packets(&self, _now_ms: u64) {}
 
     #[cfg(not(feature = "std"))]
     fn log_send_failed_snapshot(

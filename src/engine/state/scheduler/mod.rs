@@ -1,30 +1,29 @@
 //! Engine output scheduling state.
 
-use crate::core::{Error, ErrorKind, PacketNumber, PacketType, Result};
+use crate::core::{Error, ErrorKind, PacketNumber, Result};
 
-use crate::{
-    engine::{
-        EnginePoll, MessageEvent, SendFailedEvent,
-        config::{MAX_EVENTS, MAX_WIRE_BYTES},
-        state::{ack::AckState, numbers::NumberState, recovery::RecoveryState},
-    },
-    wire::WIRE_HEADER_LEN,
+use crate::engine::{
+    EnginePoll, SendFailedEvent,
+    config::{MAX_EVENTS, MAX_WIRE_BYTES},
+    state::{ack::AckState, numbers::NumberState, recovery::RecoveryState},
 };
 
 /// Fixed-capacity output scheduler.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct SchedulerState {
-    events: [Option<EngineOutput>; MAX_EVENTS],
-    head: usize,
-    len: usize,
+    control: EventQueue,
+    retransmit: EventQueue,
+    new_data: EventQueue,
+    local: EventQueue,
 }
 
 impl SchedulerState {
     pub(crate) const fn new() -> Self {
         Self {
-            events: [None; MAX_EVENTS],
-            head: 0,
-            len: 0,
+            control: EventQueue::new(),
+            retransmit: EventQueue::new(),
+            new_data: EventQueue::new(),
+            local: EventQueue::new(),
         }
     }
 
@@ -33,6 +32,128 @@ impl SchedulerState {
             return Ok(());
         }
 
+        if self.len() == MAX_EVENTS {
+            return Err(Error::new(ErrorKind::Engine));
+        }
+
+        match queue_for_event(&event) {
+            QueueKind::Control => self.control.push(event),
+            QueueKind::Retransmit => self.retransmit.push(event),
+            QueueKind::NewData => self.new_data.push(event),
+            QueueKind::Local => self.local.push(event),
+        }
+    }
+
+    pub(crate) const fn available(&self) -> usize {
+        MAX_EVENTS - self.len()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pop(&mut self) -> Option<EngineOutput> {
+        if let Some(event) = self.control.pop() {
+            return Some(event);
+        }
+
+        if let Some(event) = self.retransmit.pop() {
+            return Some(event);
+        }
+
+        if let Some(event) = self.local.pop() {
+            return Some(event);
+        }
+
+        self.new_data.pop()
+    }
+
+    pub(crate) fn poll_ack<'a>(
+        &mut self,
+        ack: &mut AckState,
+        numbers: &mut NumberState,
+        tx_buf: &'a mut [u8],
+    ) -> Result<EnginePoll<'a>> {
+        poll_pending_ack(ack, numbers, tx_buf)
+    }
+
+    pub(crate) fn pop_urgent(&mut self) -> Option<EngineOutput> {
+        if let Some(event) = self.control.pop() {
+            return Some(event);
+        }
+
+        if let Some(event) = self.retransmit.pop() {
+            return Some(event);
+        }
+
+        self.local.pop()
+    }
+
+    pub(crate) fn poll_new_data<'a>(
+        &mut self,
+        recovery: &mut RecoveryState,
+        now_ms: u64,
+        tx_buf: &'a mut [u8],
+    ) -> Result<EnginePoll<'a>> {
+        let Some(event) = self.new_data.pop() else {
+            return Ok(EnginePoll::Idle);
+        };
+
+        poll_event(event, recovery, now_ms, tx_buf)
+    }
+
+    const fn len(&self) -> usize {
+        self.control.len() + self.retransmit.len() + self.new_data.len() + self.local.len()
+    }
+
+    fn replace_redundant_write(&mut self, event: EngineOutput) -> bool {
+        if self.control.replace_redundant_write(event) {
+            return true;
+        }
+
+        if self.retransmit.replace_redundant_write(event) {
+            return true;
+        }
+
+        if self.new_data.replace_redundant_write(event) {
+            return true;
+        }
+
+        self.local.replace_redundant_write(event)
+    }
+
+    #[cfg(feature = "std")]
+    pub(crate) fn log_snapshot(&self, now_ms: u64, ack_pending: bool) {
+        eprintln!(
+            "msrt scheduler now={} ack_pending={} control_len={} retransmit_len={} new_data_len={} local_len={}",
+            now_ms,
+            ack_pending,
+            self.control.len(),
+            self.retransmit.len(),
+            self.new_data.len(),
+            self.local.len()
+        );
+        self.control.log_snapshot(now_ms, "control");
+        self.retransmit.log_snapshot(now_ms, "retransmit");
+        self.new_data.log_snapshot(now_ms, "new_data");
+        self.local.log_snapshot(now_ms, "local");
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct EventQueue {
+    events: [Option<EngineOutput>; MAX_EVENTS],
+    head: usize,
+    len: usize,
+}
+
+impl EventQueue {
+    const fn new() -> Self {
+        Self {
+            events: [None; MAX_EVENTS],
+            head: 0,
+            len: 0,
+        }
+    }
+
+    fn push(&mut self, event: EngineOutput) -> Result<()> {
         if self.len == MAX_EVENTS {
             return Err(Error::new(ErrorKind::Engine));
         }
@@ -44,80 +165,18 @@ impl SchedulerState {
         Ok(())
     }
 
-    pub(crate) const fn available(&self) -> usize {
-        MAX_EVENTS - self.len
-    }
-
-    pub(crate) fn pop(&mut self) -> Option<EngineOutput> {
+    fn pop(&mut self) -> Option<EngineOutput> {
         if self.len == 0 {
             return None;
         }
 
-        let offset = self.highest_priority_offset();
-        let index = self.physical_index(offset);
+        let index = self.head;
         let event = self.events[index].take();
 
-        let mut current = offset;
-        while current + 1 < self.len {
-            let to = self.physical_index(current);
-            let from = self.physical_index(current + 1);
-            self.events[to] = self.events[from].take();
-            current += 1;
-        }
-
-        let tail = self.physical_index(self.len - 1);
-        self.events[tail] = None;
+        self.head = (self.head + 1) % MAX_EVENTS;
         self.len -= 1;
 
         event
-    }
-
-    pub(crate) fn poll<'a>(
-        &mut self,
-        ack: &mut AckState,
-        numbers: &mut NumberState,
-        recovery: &mut RecoveryState,
-        now_ms: u64,
-        tx_buf: &'a mut [u8],
-    ) -> Result<EnginePoll<'a>> {
-        if ack.is_pending() {
-            return poll_pending_ack(ack, numbers, tx_buf);
-        }
-
-        let Some(event) = self.pop() else {
-            return Ok(EnginePoll::Idle);
-        };
-
-        match event {
-            EngineOutput::Write(write) => poll_write(write, recovery, now_ms, tx_buf),
-            EngineOutput::Message(message) => Ok(EnginePoll::Message(message)),
-            EngineOutput::SendFailed(failed) => Ok(EnginePoll::SendFailed(failed)),
-        }
-    }
-
-    fn highest_priority_offset(&self) -> usize {
-        let mut best_offset = 0;
-        let mut best_priority =
-            EventPriority::for_event(self.events[self.head].as_ref().expect("queue is not empty"));
-        let mut offset = 1;
-
-        while offset < self.len {
-            let index = self.physical_index(offset);
-            let Some(event) = self.events[index].as_ref() else {
-                offset += 1;
-                continue;
-            };
-            let priority = EventPriority::for_event(event);
-
-            if priority < best_priority {
-                best_offset = offset;
-                best_priority = priority;
-            }
-
-            offset += 1;
-        }
-
-        best_offset
     }
 
     const fn physical_index(&self, offset: usize) -> usize {
@@ -147,6 +206,41 @@ impl SchedulerState {
 
         false
     }
+
+    const fn len(&self) -> usize {
+        self.len
+    }
+
+    #[cfg(feature = "std")]
+    fn log_snapshot(&self, now_ms: u64, name: &str) {
+        let mut offset = 0;
+        while offset < self.len {
+            let index = self.physical_index(offset);
+            if let Some(event) = self.events[index].as_ref() {
+                log_event(now_ms, name, offset, event);
+            }
+            offset += 1;
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum QueueKind {
+    Control,
+    Retransmit,
+    NewData,
+    Local,
+}
+
+const fn queue_for_event(event: &EngineOutput) -> QueueKind {
+    match event {
+        EngineOutput::Write(write) => match write.priority {
+            WritePriority::Control => QueueKind::Control,
+            WritePriority::Retransmit => QueueKind::Retransmit,
+            WritePriority::NewData => QueueKind::NewData,
+        },
+        EngineOutput::SendFailed(_) => QueueKind::Local,
+    }
 }
 
 fn poll_pending_ack<'a>(
@@ -155,9 +249,10 @@ fn poll_pending_ack<'a>(
     tx_buf: &'a mut [u8],
 ) -> Result<EnginePoll<'a>> {
     let packet_number = numbers.alloc_packet_number();
+    let ack_payload = ack.build_ack();
     let written = crate::engine::codec::outgoing::encode_ack_packet(
         packet_number,
-        ack.build_ack(),
+        ack_payload,
         tx_buf,
         &crate::wire::Crc16,
     )?;
@@ -168,6 +263,18 @@ fn poll_pending_ack<'a>(
         bytes: &tx_buf[..written],
         attempts: 0,
     })
+}
+
+pub(crate) fn poll_event<'a>(
+    event: EngineOutput,
+    recovery: &mut RecoveryState,
+    now_ms: u64,
+    tx_buf: &'a mut [u8],
+) -> Result<EnginePoll<'a>> {
+    match event {
+        EngineOutput::Write(write) => poll_write(write, recovery, now_ms, tx_buf),
+        EngineOutput::SendFailed(failed) => Ok(EnginePoll::SendFailed(failed)),
+    }
 }
 
 fn poll_write<'a>(
@@ -197,38 +304,43 @@ fn poll_write<'a>(
     })
 }
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-enum EventPriority {
-    Control,
-    Retransmit,
-    NewWrite,
-    Local,
-}
-
 fn is_redundant_write(current: WriteEvent, incoming: WriteEvent) -> bool {
-    match (
-        packet_type(current.as_bytes()),
-        packet_type(incoming.as_bytes()),
-    ) {
-        (Some(PacketType::Ack), Some(PacketType::Ack)) => true,
-        _ => current.packet_number == incoming.packet_number,
-    }
+    current.packet_number == incoming.packet_number
 }
 
-fn packet_type(bytes: &[u8]) -> Option<PacketType> {
-    PacketType::from_code(*bytes.get(WIRE_HEADER_LEN)?)
+#[cfg(feature = "std")]
+fn packet_type(bytes: &[u8]) -> Option<crate::core::PacketType> {
+    crate::core::PacketType::from_code(*bytes.get(crate::wire::WIRE_HEADER_LEN)?)
 }
 
-impl EventPriority {
-    fn for_event(event: &EngineOutput) -> Self {
-        match event {
-            EngineOutput::Write(write) => match write.priority {
-                crate::engine::state::WritePriority::Control => Self::Control,
-                crate::engine::state::WritePriority::Retransmit => Self::Retransmit,
-                crate::engine::state::WritePriority::NewData => Self::NewWrite,
-            },
-            EngineOutput::SendFailed(_) => Self::Local,
-            EngineOutput::Message(_) => Self::Local,
+#[cfg(feature = "std")]
+fn log_event(now_ms: u64, queue: &str, offset: usize, event: &EngineOutput) {
+    match event {
+        EngineOutput::Write(write) => {
+            let packet_type = packet_type(write.as_bytes())
+                .map(|packet_type| packet_type.code())
+                .unwrap_or_default();
+            eprintln!(
+                "msrt scheduler event now={} queue={} offset={} kind=write packet_type={} pn={} attempts={} len={} priority={:?}",
+                now_ms,
+                queue,
+                offset,
+                packet_type,
+                write.packet_number.get(),
+                write.attempts,
+                write.len,
+                write.priority,
+            );
+        }
+        EngineOutput::SendFailed(failed) => {
+            eprintln!(
+                "msrt scheduler event now={} queue={} offset={} kind=send_failed ch={} msg={}",
+                now_ms,
+                queue,
+                offset,
+                failed.channel_id.get(),
+                failed.message_id.get(),
+            );
         }
     }
 }
@@ -238,8 +350,6 @@ impl EventPriority {
 pub(crate) enum EngineOutput {
     /// Protocol bytes should be written to the serial link.
     Write(WriteEvent),
-    /// A complete application message has been reassembled.
-    Message(MessageEvent),
     /// A message could not be sent reliably.
     SendFailed(SendFailedEvent),
 }
@@ -278,28 +388,30 @@ pub(crate) enum WritePriority {
 mod tests {
     use crate::core::{PacketNumber, PacketType};
     use crate::engine::state::{
-        EngineOutput, WriteEvent, WritePriority, scheduler::SchedulerState,
+        EngineOutput, WriteEvent,
+        scheduler::{SchedulerState, WritePriority},
     };
     use crate::wire::WIRE_HEADER_LEN;
 
     #[test]
-    fn queue_replaces_old_ack_with_new_ack() {
+    fn queue_polls_control_before_data() {
         let mut queue = SchedulerState::new();
-        let old_ack = write_event(
-            PacketType::Ack,
+        let data = write_event(
+            PacketType::Data,
             PacketNumber::new(1),
-            WritePriority::Control,
+            WritePriority::NewData,
         );
-        let new_ack = write_event(
-            PacketType::Ack,
+        let control = write_event(
+            PacketType::Pong,
             PacketNumber::new(2),
             WritePriority::Control,
         );
 
-        queue.push(EngineOutput::Write(old_ack)).unwrap();
-        queue.push(EngineOutput::Write(new_ack)).unwrap();
+        queue.push(EngineOutput::Write(data)).unwrap();
+        queue.push(EngineOutput::Write(control)).unwrap();
 
-        assert_eq!(queue.pop(), Some(EngineOutput::Write(new_ack)));
+        assert_eq!(queue.pop(), Some(EngineOutput::Write(control)));
+        assert_eq!(queue.pop(), Some(EngineOutput::Write(data)));
         assert_eq!(queue.pop(), None);
     }
 
@@ -321,6 +433,28 @@ mod tests {
         queue.push(EngineOutput::Write(retransmit)).unwrap();
 
         assert_eq!(queue.pop(), Some(EngineOutput::Write(retransmit)));
+        assert_eq!(queue.pop(), None);
+    }
+
+    #[test]
+    fn queue_polls_retransmit_before_new_data() {
+        let mut queue = SchedulerState::new();
+        let data = write_event(
+            PacketType::Data,
+            PacketNumber::new(1),
+            WritePriority::NewData,
+        );
+        let retransmit = write_event(
+            PacketType::Data,
+            PacketNumber::new(2),
+            WritePriority::Retransmit,
+        );
+
+        queue.push(EngineOutput::Write(data)).unwrap();
+        queue.push(EngineOutput::Write(retransmit)).unwrap();
+
+        assert_eq!(queue.pop(), Some(EngineOutput::Write(retransmit)));
+        assert_eq!(queue.pop(), Some(EngineOutput::Write(data)));
         assert_eq!(queue.pop(), None);
     }
 

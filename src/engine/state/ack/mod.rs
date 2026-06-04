@@ -28,12 +28,18 @@ impl AckState {
         self.pending
     }
 
+    #[cfg(feature = "std")]
+    pub(crate) const fn pending_len(&self) -> usize {
+        if self.pending { self.ranges.len() } else { 0 }
+    }
+
     pub(crate) fn build_ack(&self) -> Ack {
         self.ranges.ack()
     }
 
     pub(crate) fn on_ack_sent(&mut self) {
         self.pending = false;
+        self.ranges.clear();
     }
 }
 
@@ -55,22 +61,20 @@ impl AckRanges {
     }
 
     pub(crate) fn observe(&mut self, packet_number: PacketNumber) {
-        if self
-            .packets
-            .iter()
-            .flatten()
-            .any(|current| *current == packet_number)
-        {
-            return;
-        }
-
         if MAX_ACK_TRACKED_PACKETS == 0 {
             return;
         }
 
+        self.remove(packet_number);
         self.packets[self.next] = Some(packet_number);
         self.next = (self.next + 1) % MAX_ACK_TRACKED_PACKETS;
         self.len = core::cmp::min(self.len + 1, MAX_ACK_TRACKED_PACKETS);
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.packets = [None; MAX_ACK_TRACKED_PACKETS];
+        self.next = 0;
+        self.len = 0;
     }
 
     pub(crate) fn ack(&self) -> Ack {
@@ -82,6 +86,45 @@ impl AckRanges {
 
         sort_packet_numbers(&mut numbers, self.len);
         ranges_from_sorted_numbers(numbers, self.len)
+    }
+
+    #[cfg(feature = "std")]
+    const fn len(&self) -> usize {
+        self.len
+    }
+
+    fn remove(&mut self, packet_number: PacketNumber) {
+        let mut offset = 0;
+        while offset < self.len {
+            let index =
+                (self.next + MAX_ACK_TRACKED_PACKETS - self.len + offset) % MAX_ACK_TRACKED_PACKETS;
+            if self.packets[index] == Some(packet_number) {
+                self.packets[index] = None;
+                self.compact();
+                return;
+            }
+            offset += 1;
+        }
+    }
+
+    fn compact(&mut self) {
+        let mut compacted = [None; MAX_ACK_TRACKED_PACKETS];
+        let mut len = 0;
+        let mut offset = 0;
+
+        while offset < self.len {
+            let index =
+                (self.next + MAX_ACK_TRACKED_PACKETS - self.len + offset) % MAX_ACK_TRACKED_PACKETS;
+            if let Some(packet_number) = self.packets[index] {
+                compacted[len] = Some(packet_number);
+                len += 1;
+            }
+            offset += 1;
+        }
+
+        self.packets = compacted;
+        self.next = len % MAX_ACK_TRACKED_PACKETS;
+        self.len = len;
     }
 }
 
@@ -204,5 +247,26 @@ mod tests {
         assert!(ack.acknowledges(PacketNumber::new(4)));
         assert!(ack.acknowledges(PacketNumber::new(2)));
         assert!(!ack.acknowledges(PacketNumber::new(0)));
+    }
+
+    #[test]
+    fn ack_state_clears_sent_ranges_and_reacks_old_duplicate() {
+        let mut state = super::AckState::new();
+        let retransmit = PacketNumber::new(3);
+
+        state.observe(retransmit);
+        assert!(state.build_ack().acknowledges(retransmit));
+        state.on_ack_sent();
+
+        for packet_number in 10..10 + MAX_ACK_TRACKED_PACKETS as u32 {
+            state.observe(PacketNumber::new(packet_number));
+        }
+
+        state.on_ack_sent();
+        state.observe(retransmit);
+
+        let ack = state.build_ack();
+        assert!(ack.acknowledges(retransmit));
+        assert_eq!(ack.range_count, 1);
     }
 }

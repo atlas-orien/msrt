@@ -23,10 +23,9 @@ include = [
 
 [features]
 default = ["std"]
-std = ["dep:tracing"]
+std = []
 
 [dependencies]
-tracing = { version = "0.1", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.8" }

@@ -4,14 +4,15 @@ use crate::core::{MessageId, PacketNumber, Result};
 use crate::engine::{EngineConfig, EnginePoll, ReceiveReport};
 
 use self::{
-    ack::AckState, clock::ClockState, ingress::IngressState, numbers::NumberState,
-    reassembly::ReassemblyState, receive::ReceiveState, recovery::RecoveryState,
-    scheduler::SchedulerState,
+    ack::AckState, clock::ClockState, ingress::IngressState, message::MessageState,
+    numbers::NumberState, reassembly::ReassemblyState, receive::ReceiveState,
+    recovery::RecoveryState, scheduler::SchedulerState,
 };
 
 pub(crate) mod ack;
 pub(crate) mod clock;
 pub(crate) mod ingress;
+pub(crate) mod message;
 pub(crate) mod numbers;
 pub(crate) mod reassembly;
 pub(crate) mod receive;
@@ -20,7 +21,7 @@ pub(crate) mod scheduler;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use scheduler::{EngineOutput, WriteEvent, WritePriority};
+pub(crate) use scheduler::{EngineOutput, WriteEvent};
 
 /// Internal protocol state owned by [`crate::engine::Engine`].
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -31,6 +32,7 @@ pub(crate) struct EngineState {
     pub(crate) recovery: RecoveryState,
     pub(crate) ack: AckState,
     pub(crate) ingress: IngressState,
+    pub(crate) message: MessageState,
     pub(crate) receive: ReceiveState,
     pub(crate) reassembly: ReassemblyState,
 }
@@ -47,6 +49,7 @@ impl EngineState {
             recovery: RecoveryState::new(),
             ack: AckState::new(),
             ingress: IngressState::new(),
+            message: MessageState::new(),
             receive: ReceiveState::new(),
             reassembly: ReassemblyState::new(),
         }
@@ -60,13 +63,22 @@ impl EngineState {
     ) -> Result<EnginePoll<'a>> {
         self.tick_retransmit(config, now_ms);
 
-        self.scheduler.poll(
-            &mut self.ack,
-            &mut self.numbers,
-            &mut self.recovery,
-            now_ms,
-            tx_buf,
-        )
+        if self.ack.is_pending() {
+            return self
+                .scheduler
+                .poll_ack(&mut self.ack, &mut self.numbers, tx_buf);
+        }
+
+        if let Some(event) = self.scheduler.pop_urgent() {
+            return scheduler::poll_event(event, &mut self.recovery, now_ms, tx_buf);
+        }
+
+        if let Some(message) = self.message.pop() {
+            return Ok(EnginePoll::Message(message));
+        }
+
+        self.scheduler
+            .poll_new_data(&mut self.recovery, now_ms, tx_buf)
     }
 
     pub(crate) fn send_on(

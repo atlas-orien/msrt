@@ -11,6 +11,8 @@ pub(crate) const MAX_INGRESS_BYTES: usize = MAX_WIRE_BYTES * MAX_EVENTS;
 pub(crate) const MAX_MESSAGE_BYTES: usize = 256;
 /// Maximum pending engine events.
 pub(crate) const MAX_EVENTS: usize = 16;
+/// Maximum complete messages waiting for the application to poll.
+pub(crate) const MAX_MESSAGE_EVENTS: usize = 16;
 /// Maximum in-flight packets tracked by the MVP engine.
 pub(crate) const MAX_IN_FLIGHT_PACKETS: usize = 16;
 /// Maximum observed packets retained for ACK range generation.

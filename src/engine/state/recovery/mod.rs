@@ -11,12 +11,14 @@ pub(crate) mod retransmit;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct RecoveryState {
     in_flight: InFlightPackets,
+    last_tick_ms: Option<u64>,
 }
 
 impl RecoveryState {
     pub(crate) const fn new() -> Self {
         Self {
             in_flight: InFlightPackets::new(),
+            last_tick_ms: None,
         }
     }
 
@@ -39,6 +41,15 @@ impl RecoveryState {
 
     pub(crate) const fn available_in_flight(&self) -> usize {
         self.in_flight.available()
+    }
+
+    pub(crate) fn should_tick(&mut self, now_ms: u64) -> bool {
+        if self.last_tick_ms == Some(now_ms) {
+            return false;
+        }
+
+        self.last_tick_ms = Some(now_ms);
+        true
     }
 
     pub(crate) fn remove_message(&mut self, channel_id: ChannelId, message_id: MessageId) {

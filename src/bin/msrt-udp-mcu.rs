@@ -20,9 +20,9 @@ const RX_BUF_BYTES: usize = 2048;
 const MAX_MESSAGE_BYTES: usize = 256;
 const DEFAULT_MESSAGE_BYTES: usize = 240;
 const TEST_FRAGMENT_BYTES: usize = 48;
-const DEFAULT_CORRUPT_PER_MILLE: u16 = 10;
-const DEFAULT_DROP_BYTE_PER_MILLE: u16 = 10;
-const DEFAULT_INSERT_BYTE_PER_MILLE: u16 = 10;
+const DEFAULT_CORRUPT_PER_MILLE: u16 = 30;
+const DEFAULT_DROP_BYTE_PER_MILLE: u16 = 30;
+const DEFAULT_INSERT_BYTE_PER_MILLE: u16 = 30;
 
 #[derive(Clone, Debug)]
 struct Args {

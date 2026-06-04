@@ -8,7 +8,7 @@ use crate::engine::{
     EngineConfig, ReceiveReport,
     codec::packet::{PacketBytes, PacketDecode},
     config::MAX_INGRESS_BYTES,
-    state::{EngineOutput, EngineState},
+    state::EngineState,
 };
 
 /// Incoming byte stream decode state.
@@ -106,9 +106,7 @@ impl EngineState {
                 match self.reassembly.observe(fragment, self.clock.now_ms()) {
                     Ok(Some(mut message)) => {
                         message.profile = config.channel_profile(message.channel_id);
-                        if self.scheduler.push(EngineOutput::Message(message)).is_err() {
-                            return ReceiveReport::Error(Error::new(ErrorKind::Engine));
-                        }
+                        self.message.push(message);
                         ReceiveReport::Packet { packet_number }
                     }
                     Ok(None) => ReceiveReport::Packet { packet_number },
