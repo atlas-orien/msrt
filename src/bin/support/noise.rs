@@ -8,6 +8,9 @@ pub(crate) struct NoiseConfig {
     pub(crate) corrupt_per_mille: u16,
     pub(crate) drop_byte_per_mille: u16,
     pub(crate) insert_byte_per_mille: u16,
+    pub(crate) burst_corrupt_per_mille: u16,
+    pub(crate) burst_drop_per_mille: u16,
+    pub(crate) packet_drop_per_mille: u16,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -15,6 +18,9 @@ pub(crate) struct NoiseStats {
     pub(crate) corrupted: usize,
     pub(crate) dropped: usize,
     pub(crate) inserted: usize,
+    pub(crate) burst_corrupted: usize,
+    pub(crate) burst_dropped: usize,
+    pub(crate) packet_dropped: usize,
 }
 
 impl NoiseLcg {
@@ -46,6 +52,27 @@ impl NoiseLcg {
         let mut out = bytes.to_vec();
         let mut stats = NoiseStats::default();
 
+        if self.roll_per_mille(config.packet_drop_per_mille) {
+            stats.packet_dropped += 1;
+            return (Vec::new(), stats);
+        }
+
+        if self.roll_per_mille(config.burst_corrupt_per_mille) && !out.is_empty() {
+            let len = self.burst_len(out.len());
+            let start = self.next_byte() as usize % (out.len() - len + 1);
+            for byte in &mut out[start..start + len] {
+                *byte ^= self.next_byte() | 1;
+            }
+            stats.burst_corrupted += 1;
+        }
+
+        if self.roll_per_mille(config.burst_drop_per_mille) && !out.is_empty() {
+            let len = self.burst_len(out.len());
+            let start = self.next_byte() as usize % (out.len() - len + 1);
+            out.drain(start..start + len);
+            stats.burst_dropped += 1;
+        }
+
         match self.choose_action(config) {
             NoiseAction::Corrupt if !out.is_empty() => {
                 let pos = self.next_byte() as usize % out.len();
@@ -70,6 +97,15 @@ impl NoiseLcg {
         }
 
         (out, stats)
+    }
+
+    fn roll_per_mille(&mut self, threshold: u16) -> bool {
+        threshold != 0 && self.next_u16() % 1000 < threshold
+    }
+
+    fn burst_len(&mut self, max_len: usize) -> usize {
+        let cap = core::cmp::min(max_len, 16);
+        1 + self.next_byte() as usize % cap
     }
 
     fn choose_action(&mut self, config: NoiseConfig) -> NoiseAction {
@@ -114,6 +150,9 @@ pub(crate) fn has_noise(config: NoiseConfig) -> bool {
     config.corrupt_per_mille != 0
         || config.drop_byte_per_mille != 0
         || config.insert_byte_per_mille != 0
+        || config.burst_corrupt_per_mille != 0
+        || config.burst_drop_per_mille != 0
+        || config.packet_drop_per_mille != 0
 }
 
 #[allow(dead_code)]

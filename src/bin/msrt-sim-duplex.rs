@@ -19,9 +19,12 @@ const TX_BUF_BYTES: usize = 256;
 const MAX_MESSAGE_BYTES: usize = 256;
 const DEFAULT_MESSAGE_BYTES: usize = 240;
 const TEST_FRAGMENT_BYTES: usize = 48;
-const DEFAULT_CORRUPT_PER_MILLE: u16 = 10;
-const DEFAULT_DROP_BYTE_PER_MILLE: u16 = 10;
-const DEFAULT_INSERT_BYTE_PER_MILLE: u16 = 10;
+const DEFAULT_CORRUPT_PER_MILLE: u16 = 30;
+const DEFAULT_DROP_BYTE_PER_MILLE: u16 = 30;
+const DEFAULT_INSERT_BYTE_PER_MILLE: u16 = 30;
+const DEFAULT_BURST_CORRUPT_PER_MILLE: u16 = 5;
+const DEFAULT_BURST_DROP_PER_MILLE: u16 = 5;
+const DEFAULT_PACKET_DROP_PER_MILLE: u16 = 5;
 const EVENT_LOG_LEN: usize = 512;
 const DEFAULT_LOG_FILE: &str = "log/msrt-sim-duplex.log";
 const STATUS_INTERVAL: Duration = Duration::from_secs(60);
@@ -39,7 +42,7 @@ impl Args {
     fn parse() -> Result<Self, String> {
         let mut args = env::args().skip(1);
         let mut parsed = Self {
-            interval_ms: 10,
+            interval_ms: 1,
             duration_ms: u64::MAX,
             message: make_message(DEFAULT_MESSAGE_BYTES),
             log_file: PathBuf::from(DEFAULT_LOG_FILE),
@@ -47,6 +50,9 @@ impl Args {
                 corrupt_per_mille: DEFAULT_CORRUPT_PER_MILLE,
                 drop_byte_per_mille: DEFAULT_DROP_BYTE_PER_MILLE,
                 insert_byte_per_mille: DEFAULT_INSERT_BYTE_PER_MILLE,
+                burst_corrupt_per_mille: DEFAULT_BURST_CORRUPT_PER_MILLE,
+                burst_drop_per_mille: DEFAULT_BURST_DROP_PER_MILLE,
+                packet_drop_per_mille: DEFAULT_PACKET_DROP_PER_MILLE,
             },
         };
 
@@ -88,6 +94,24 @@ impl Args {
                     parsed.noise.insert_byte_per_mille = parse_percent_per_mille(
                         next_value(&mut args, "--insert-byte-percent")?,
                         "--insert-byte-percent",
+                    )?;
+                }
+                "--burst-corrupt-percent" => {
+                    parsed.noise.burst_corrupt_per_mille = parse_percent_per_mille(
+                        next_value(&mut args, "--burst-corrupt-percent")?,
+                        "--burst-corrupt-percent",
+                    )?;
+                }
+                "--burst-drop-percent" => {
+                    parsed.noise.burst_drop_per_mille = parse_percent_per_mille(
+                        next_value(&mut args, "--burst-drop-percent")?,
+                        "--burst-drop-percent",
+                    )?;
+                }
+                "--packet-drop-percent" => {
+                    parsed.noise.packet_drop_per_mille = parse_percent_per_mille(
+                        next_value(&mut args, "--packet-drop-percent")?,
+                        "--packet-drop-percent",
                     )?;
                 }
                 "--help" | "-h" => return Err(usage()),
@@ -163,12 +187,10 @@ impl Sim {
         }
 
         println!(
-            "msrt sim duplex interval={}ms message_len={} noise={} drop_byte={} insert_byte={} log_file={}",
+            "msrt sim duplex interval={}ms message_len={} {} log_file={}",
             self.args.interval_ms,
             self.args.message.len(),
-            self.args.noise.corrupt_per_mille,
-            self.args.noise.drop_byte_per_mille,
-            self.args.noise.insert_byte_per_mille,
+            noise_config_summary(self.args.noise),
             self.args.log_file.display()
         );
 
@@ -185,15 +207,13 @@ impl Sim {
         }
 
         let summary = format!(
-            "sim complete elapsed={}ms host_sent={} mcu_sent={} host_received={} mcu_received={} corrupted={} dropped={} inserted={}",
+            "sim complete elapsed={}ms host_sent={} mcu_sent={} host_received={} mcu_received={} {}",
             self.args.duration_ms,
             self.host_sent,
             self.mcu_sent,
             self.host_received,
             self.mcu_received,
-            self.noise_stats.corrupted,
-            self.noise_stats.dropped,
-            self.noise_stats.inserted,
+            noise_stats_summary(self.noise_stats),
         );
         println!("{summary}");
         if let Err(error) = self.write_log("complete", &summary) {
@@ -213,12 +233,10 @@ impl Sim {
         writeln!(file, "status=running")?;
         writeln!(
             file,
-            "config interval={}ms message_len={} noise={} drop_byte={} insert_byte={}",
+            "config interval={}ms message_len={} {}",
             self.args.interval_ms,
             self.args.message.len(),
-            self.args.noise.corrupt_per_mille,
-            self.args.noise.drop_byte_per_mille,
-            self.args.noise.insert_byte_per_mille
+            noise_config_summary(self.args.noise)
         )
     }
 
@@ -319,21 +337,35 @@ impl Sim {
         self.noise_stats.corrupted += stats.corrupted;
         self.noise_stats.dropped += stats.dropped;
         self.noise_stats.inserted += stats.inserted;
+        self.noise_stats.burst_corrupted += stats.burst_corrupted;
+        self.noise_stats.burst_dropped += stats.burst_dropped;
+        self.noise_stats.packet_dropped += stats.packet_dropped;
         bytes
     }
 
     fn receive_host(&mut self, now_ms: u64, bytes: &[u8]) {
-        for byte in bytes {
-            let report = self.host.receive(now_ms, std::slice::from_ref(byte));
+        let mut index = 0;
+        while index < bytes.len() {
+            let chunk_len = self.receive_chunk_len(bytes.len() - index);
+            let report = self.host.receive(now_ms, &bytes[index..index + chunk_len]);
             self.log_receive(now_ms, "host<-mcu", report);
+            index += chunk_len;
         }
     }
 
     fn receive_mcu(&mut self, now_ms: u64, bytes: &[u8]) {
-        for byte in bytes {
-            let report = self.mcu.receive(now_ms, std::slice::from_ref(byte));
+        let mut index = 0;
+        while index < bytes.len() {
+            let chunk_len = self.receive_chunk_len(bytes.len() - index);
+            let report = self.mcu.receive(now_ms, &bytes[index..index + chunk_len]);
             self.log_receive(now_ms, "mcu<-host", report);
+            index += chunk_len;
         }
+    }
+
+    fn receive_chunk_len(&mut self, remaining: usize) -> usize {
+        let max = remaining.min(16);
+        1 + self.noise.next_byte() as usize % max
     }
 
     fn log_receive(&mut self, now_ms: u64, side: &'static str, report: ReceiveReport) {
@@ -450,7 +482,7 @@ impl Sim {
 
         self.last_status_at = Instant::now();
         let status = format!(
-            "sim stats elapsed={}s host_state={:?} mcu_state={:?} host_sent={} mcu_sent={} host_received={} mcu_received={} corrupted={} dropped={} inserted={}",
+            "sim stats elapsed={}s host_state={:?} mcu_state={:?} host_sent={} mcu_sent={} host_received={} mcu_received={} {}",
             now_ms / 1000,
             self.host.peer().state(),
             self.mcu.peer().state(),
@@ -458,9 +490,7 @@ impl Sim {
             self.mcu_sent,
             self.host_received,
             self.mcu_received,
-            self.noise_stats.corrupted,
-            self.noise_stats.dropped,
-            self.noise_stats.inserted,
+            noise_stats_summary(self.noise_stats),
         );
         println!("{status}");
         self.log.push(now_ms, "sim", status.clone());
@@ -479,7 +509,7 @@ impl Sim {
 
     fn log_failure(&mut self, now_ms: u64, side: &'static str, failed: SendFailedEvent) {
         let summary = format!(
-            "sim send_failed now={} side={} ch={} msg={} host_state={:?} mcu_state={:?} host_sent={} mcu_sent={} host_received={} mcu_received={} corrupted={} dropped={} inserted={}",
+            "sim send_failed now={} side={} ch={} msg={} host_state={:?} mcu_state={:?} host_sent={} mcu_sent={} host_received={} mcu_received={} {}",
             now_ms,
             side,
             failed.channel_id.get(),
@@ -490,9 +520,7 @@ impl Sim {
             self.mcu_sent,
             self.host_received,
             self.mcu_received,
-            self.noise_stats.corrupted,
-            self.noise_stats.dropped,
-            self.noise_stats.inserted,
+            noise_stats_summary(self.noise_stats),
         );
         eprintln!("{summary}");
         if let Err(error) = self.write_log("send_failed", &summary) {
@@ -515,12 +543,10 @@ impl Sim {
         writeln!(file, "{summary}")?;
         writeln!(
             file,
-            "config interval={}ms message_len={} noise={} drop_byte={} insert_byte={}",
+            "config interval={}ms message_len={} {}",
             self.args.interval_ms,
             self.args.message.len(),
-            self.args.noise.corrupt_per_mille,
-            self.args.noise.drop_byte_per_mille,
-            self.args.noise.insert_byte_per_mille
+            noise_config_summary(self.args.noise)
         )?;
         self.log.dump_to(&mut file)
     }
@@ -656,12 +682,36 @@ fn make_message(len: usize) -> Vec<u8> {
     message
 }
 
+fn noise_config_summary(noise: NoiseConfig) -> String {
+    format!(
+        "noise={} drop_byte={} insert_byte={} burst_corrupt={} burst_drop={} packet_drop={}",
+        noise.corrupt_per_mille,
+        noise.drop_byte_per_mille,
+        noise.insert_byte_per_mille,
+        noise.burst_corrupt_per_mille,
+        noise.burst_drop_per_mille,
+        noise.packet_drop_per_mille,
+    )
+}
+
+fn noise_stats_summary(stats: NoiseStats) -> String {
+    format!(
+        "corrupted={} dropped={} inserted={} burst_corrupted={} burst_dropped={} packet_dropped={}",
+        stats.corrupted,
+        stats.dropped,
+        stats.inserted,
+        stats.burst_corrupted,
+        stats.burst_dropped,
+        stats.packet_dropped,
+    )
+}
+
 fn next_value(args: &mut impl Iterator<Item = String>, name: &str) -> Result<String, String> {
     args.next()
         .ok_or_else(|| format!("{name} requires a value\n\n{}", usage()))
 }
 
 fn usage() -> String {
-    "usage: msrt-sim-duplex [--interval-ms N] [--duration-sec N] [--message-size N] [--log-file PATH] [--noise-percent N] [--drop-byte-percent N] [--insert-byte-percent N]"
+    "usage: msrt-sim-duplex [--interval-ms N] [--duration-sec N] [--message-size N] [--log-file PATH] [--noise-percent N] [--drop-byte-percent N] [--insert-byte-percent N] [--burst-corrupt-percent N] [--burst-drop-percent N] [--packet-drop-percent N]"
         .to_string()
 }

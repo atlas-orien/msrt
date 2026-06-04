@@ -49,6 +49,9 @@ impl Args {
                 corrupt_per_mille: DEFAULT_CORRUPT_PER_MILLE,
                 drop_byte_per_mille: DEFAULT_DROP_BYTE_PER_MILLE,
                 insert_byte_per_mille: DEFAULT_INSERT_BYTE_PER_MILLE,
+                burst_corrupt_per_mille: 0,
+                burst_drop_per_mille: 0,
+                packet_drop_per_mille: 0,
             },
         };
 
