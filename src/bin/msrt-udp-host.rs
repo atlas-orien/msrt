@@ -158,7 +158,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     log_state_change("host", &mut last_state, endpoint.peer().state());
     let mut last_send = Instant::now() - args.interval;
     let mut sent_messages = 0;
-    let mut noise_state = NoiseLcg::new();
+    let mut noise_state = NoiseLcg::with_seed(0x484f5354);
     let mut last_connect_attempt = Instant::now();
 
     loop {

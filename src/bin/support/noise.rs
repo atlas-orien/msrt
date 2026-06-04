@@ -22,6 +22,10 @@ impl NoiseLcg {
         Self { state: 0x4d535254 }
     }
 
+    pub(crate) const fn with_seed(seed: u32) -> Self {
+        Self { state: seed }
+    }
+
     pub(crate) fn next_byte(&mut self) -> u8 {
         self.state = self
             .state

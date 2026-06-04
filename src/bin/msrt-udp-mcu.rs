@@ -139,7 +139,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut sent_messages = 0;
     let mut receive_done = false;
     let mut last_send = Instant::now() - args.interval;
-    let mut noise_state = NoiseLcg::new();
+    let mut noise_state = NoiseLcg::with_seed(0x4d435520);
     let mut last_state = PeerState::Disconnected;
 
     loop {
