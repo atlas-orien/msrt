@@ -22,9 +22,7 @@ const TEST_FRAGMENT_BYTES: usize = 48;
 const DEFAULT_CORRUPT_PER_MILLE: u16 = 30;
 const DEFAULT_DROP_BYTE_PER_MILLE: u16 = 30;
 const DEFAULT_INSERT_BYTE_PER_MILLE: u16 = 30;
-const DEFAULT_BURST_CORRUPT_PER_MILLE: u16 = 5;
-const DEFAULT_BURST_DROP_PER_MILLE: u16 = 5;
-const DEFAULT_PACKET_DROP_PER_MILLE: u16 = 5;
+const PROFILE_NOISE_PER_MILLE: u16 = 30;
 const EVENT_LOG_LEN: usize = 512;
 const DEFAULT_LOG_FILE: &str = "log/msrt-sim-duplex.log";
 const STATUS_INTERVAL: Duration = Duration::from_secs(60);
@@ -50,9 +48,9 @@ impl Args {
                 corrupt_per_mille: DEFAULT_CORRUPT_PER_MILLE,
                 drop_byte_per_mille: DEFAULT_DROP_BYTE_PER_MILLE,
                 insert_byte_per_mille: DEFAULT_INSERT_BYTE_PER_MILLE,
-                burst_corrupt_per_mille: DEFAULT_BURST_CORRUPT_PER_MILLE,
-                burst_drop_per_mille: DEFAULT_BURST_DROP_PER_MILLE,
-                packet_drop_per_mille: DEFAULT_PACKET_DROP_PER_MILLE,
+                burst_corrupt_per_mille: 0,
+                burst_drop_per_mille: 0,
+                packet_drop_per_mille: 0,
             },
         };
 
@@ -112,6 +110,12 @@ impl Args {
                     parsed.noise.packet_drop_per_mille = parse_percent_per_mille(
                         next_value(&mut args, "--packet-drop-percent")?,
                         "--packet-drop-percent",
+                    )?;
+                }
+                "--noise-profile" => {
+                    apply_noise_profile(
+                        &mut parsed.noise,
+                        &next_value(&mut args, "--noise-profile")?,
                     )?;
                 }
                 "--help" | "-h" => return Err(usage()),
@@ -694,6 +698,45 @@ fn noise_config_summary(noise: NoiseConfig) -> String {
     )
 }
 
+fn apply_noise_profile(noise: &mut NoiseConfig, profile: &str) -> Result<(), String> {
+    noise.corrupt_per_mille = 0;
+    noise.drop_byte_per_mille = 0;
+    noise.insert_byte_per_mille = 0;
+    noise.burst_corrupt_per_mille = 0;
+    noise.burst_drop_per_mille = 0;
+    noise.packet_drop_per_mille = 0;
+
+    match profile {
+        "none" => {}
+        "corrupt" => noise.corrupt_per_mille = PROFILE_NOISE_PER_MILLE,
+        "drop-byte" => noise.drop_byte_per_mille = PROFILE_NOISE_PER_MILLE,
+        "insert-byte" => noise.insert_byte_per_mille = PROFILE_NOISE_PER_MILLE,
+        "burst-corrupt" => noise.burst_corrupt_per_mille = PROFILE_NOISE_PER_MILLE,
+        "burst-drop" => noise.burst_drop_per_mille = PROFILE_NOISE_PER_MILLE,
+        "packet-drop" => noise.packet_drop_per_mille = PROFILE_NOISE_PER_MILLE,
+        "byte-random" => {
+            noise.corrupt_per_mille = PROFILE_NOISE_PER_MILLE;
+            noise.drop_byte_per_mille = PROFILE_NOISE_PER_MILLE;
+            noise.insert_byte_per_mille = PROFILE_NOISE_PER_MILLE;
+        }
+        "all" => {
+            noise.corrupt_per_mille = PROFILE_NOISE_PER_MILLE;
+            noise.drop_byte_per_mille = PROFILE_NOISE_PER_MILLE;
+            noise.insert_byte_per_mille = PROFILE_NOISE_PER_MILLE;
+            noise.burst_corrupt_per_mille = PROFILE_NOISE_PER_MILLE;
+            noise.burst_drop_per_mille = PROFILE_NOISE_PER_MILLE;
+            noise.packet_drop_per_mille = PROFILE_NOISE_PER_MILLE;
+        }
+        other => {
+            return Err(format!(
+                "unknown --noise-profile: {other}; expected none, corrupt, drop-byte, insert-byte, burst-corrupt, burst-drop, packet-drop, byte-random, or all"
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 fn noise_stats_summary(stats: NoiseStats) -> String {
     format!(
         "corrupted={} dropped={} inserted={} burst_corrupted={} burst_dropped={} packet_dropped={}",
@@ -712,6 +755,6 @@ fn next_value(args: &mut impl Iterator<Item = String>, name: &str) -> Result<Str
 }
 
 fn usage() -> String {
-    "usage: msrt-sim-duplex [--interval-ms N] [--duration-sec N] [--message-size N] [--log-file PATH] [--noise-percent N] [--drop-byte-percent N] [--insert-byte-percent N] [--burst-corrupt-percent N] [--burst-drop-percent N] [--packet-drop-percent N]"
+    "usage: msrt-sim-duplex [--interval-ms N] [--duration-sec N] [--message-size N] [--log-file PATH] [--noise-percent N] [--drop-byte-percent N] [--insert-byte-percent N] [--burst-corrupt-percent N] [--burst-drop-percent N] [--packet-drop-percent N] [--noise-profile none|corrupt|drop-byte|insert-byte|burst-corrupt|burst-drop|packet-drop|byte-random|all]"
         .to_string()
 }
