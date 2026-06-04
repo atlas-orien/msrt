@@ -19,6 +19,10 @@ impl Machine {
         let mut failed_message_len = 0;
 
         for packet in self.in_flight.packets() {
+            if !packet.sent {
+                continue;
+            }
+
             if now_ms.saturating_sub(packet.last_sent_ms) < config.retransmit_timeout_ms {
                 continue;
             }
@@ -63,7 +67,6 @@ impl Machine {
                 continue;
             }
 
-            self.in_flight.note_retransmit(packet.packet_number, now_ms);
             let _ = self.events.push(EngineOutput::Write(WriteEvent {
                 packet_number: packet.packet_number,
                 bytes: packet.bytes,

@@ -32,6 +32,7 @@ pub(crate) struct Machine {
     pub(crate) events: EventQueue,
     pub(crate) in_flight: InFlightPackets,
     pub(crate) ack_ranges: AckRanges,
+    pub(crate) ack_pending: bool,
     pub(crate) ingress: StreamingDecoder<MAX_INGRESS_BYTES>,
     pub(crate) dedup: PacketDedup<MAX_IN_FLIGHT_PACKETS>,
     pub(crate) reassembly: ReassemblyBuffer,
@@ -49,6 +50,7 @@ impl Machine {
             events: EventQueue::new(),
             in_flight: InFlightPackets::new(),
             ack_ranges: AckRanges::new(),
+            ack_pending: false,
             ingress: StreamingDecoder::new(),
             dedup: PacketDedup::new(),
             reassembly: ReassemblyBuffer::new(),
@@ -63,6 +65,10 @@ impl Machine {
     ) -> Result<EnginePoll<'a>> {
         self.tick_retransmit(config, now_ms);
 
+        if self.ack_pending {
+            return self.poll_pending_ack(tx_buf);
+        }
+
         let Some(event) = self.events.pop() else {
             return Ok(EnginePoll::Idle);
         };
@@ -73,7 +79,15 @@ impl Machine {
                     return Err(Error::buffer_too_small());
                 }
 
-                self.in_flight.note_sent(write.packet_number, now_ms);
+                match write.priority {
+                    WritePriority::Retransmit => {
+                        self.in_flight
+                            .note_retransmit_sent(write.packet_number, now_ms);
+                    }
+                    WritePriority::Control | WritePriority::NewData => {
+                        self.in_flight.note_sent(write.packet_number, now_ms);
+                    }
+                }
                 tx_buf[..write.len].copy_from_slice(write.as_bytes());
                 Ok(EnginePoll::Transmit {
                     bytes: &tx_buf[..write.len],
@@ -100,6 +114,24 @@ impl Machine {
 
     pub(crate) fn receive(&mut self, config: &EngineConfig, bytes: &[u8]) -> ReceiveReport {
         self.receive_ingress(config, bytes)
+    }
+
+    fn poll_pending_ack<'a>(&mut self, tx_buf: &'a mut [u8]) -> Result<EnginePoll<'a>> {
+        let packet_number = self.next_packet_number;
+        let written = outgoing::encode_ack_packet(
+            packet_number,
+            self.ack_ranges.ack(),
+            tx_buf,
+            &crate::wire::Crc16,
+        )?;
+
+        self.ack_pending = false;
+        self.next_packet_number = self.next_packet_number.next();
+
+        Ok(EnginePoll::Transmit {
+            bytes: &tx_buf[..written],
+            attempts: 0,
+        })
     }
 
     #[cfg(test)]

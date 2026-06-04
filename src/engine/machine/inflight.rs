@@ -14,6 +14,7 @@ pub(crate) struct InFlightPacket {
     pub(crate) len: usize,
     pub(crate) attempts: u8,
     pub(crate) last_sent_ms: u64,
+    pub(crate) sent: bool,
 }
 
 /// Fixed-capacity in-flight packet set.
@@ -75,6 +76,10 @@ impl InFlightPackets {
         self.len
     }
 
+    pub(crate) const fn available(&self) -> usize {
+        MAX_IN_FLIGHT_PACKETS - self.len
+    }
+
     pub(crate) fn remove_message(&mut self, channel_id: ChannelId, message_id: MessageId) {
         for slot in &mut self.packets {
             if slot
@@ -87,19 +92,21 @@ impl InFlightPackets {
         }
     }
 
-    pub(crate) fn note_retransmit(&mut self, packet_number: PacketNumber, now_ms: u64) {
+    pub(crate) fn note_sent(&mut self, packet_number: PacketNumber, now_ms: u64) {
         for packet in self.packets.iter_mut().flatten() {
             if packet.packet_number == packet_number {
-                packet.attempts = packet.attempts.saturating_add(1);
+                packet.sent = true;
                 packet.last_sent_ms = now_ms;
                 return;
             }
         }
     }
 
-    pub(crate) fn note_sent(&mut self, packet_number: PacketNumber, now_ms: u64) {
+    pub(crate) fn note_retransmit_sent(&mut self, packet_number: PacketNumber, now_ms: u64) {
         for packet in self.packets.iter_mut().flatten() {
             if packet.packet_number == packet_number {
+                packet.sent = true;
+                packet.attempts = packet.attempts.saturating_add(1);
                 packet.last_sent_ms = now_ms;
                 return;
             }

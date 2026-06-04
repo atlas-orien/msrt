@@ -99,8 +99,9 @@ mod tests {
         assert!(passive.peer().has_session());
         assert_eq!(passive.peer().state(), PeerState::Connected);
 
-        let EndpointPoll::Transmit { bytes: ack_bytes, .. } =
-            passive.poll(2, &mut passive_tx).unwrap()
+        let EndpointPoll::Transmit {
+            bytes: ack_bytes, ..
+        } = passive.poll(2, &mut passive_tx).unwrap()
         else {
             panic!("passive endpoint should transmit ack");
         };

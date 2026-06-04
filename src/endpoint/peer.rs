@@ -209,9 +209,7 @@ impl PeerSlot {
 
     /// Drops the peer session if it has been idle for at least `timeout_ms`.
     pub fn disconnect_if_idle(&mut self, now_ms: u64, timeout_ms: u64) -> bool {
-        if self.engine.is_some()
-            && now_ms.saturating_sub(self.last_seen_ms) >= timeout_ms
-        {
+        if self.engine.is_some() && now_ms.saturating_sub(self.last_seen_ms) >= timeout_ms {
             self.disconnect();
             return true;
         }

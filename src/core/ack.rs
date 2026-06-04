@@ -8,9 +8,8 @@ pub const MAX_ACK_RANGES: usize = 4;
 /// Encoded ACK range count length in bytes.
 pub(crate) const ACK_RANGE_COUNT_LEN: usize = core::mem::size_of::<u8>();
 /// Encoded ACK payload length in bytes.
-pub(crate) const ACK_LEN: usize = PACKET_NUMBER_LEN
-    + ACK_RANGE_COUNT_LEN
-    + MAX_ACK_RANGES * 2 * PACKET_NUMBER_LEN;
+pub(crate) const ACK_LEN: usize =
+    PACKET_NUMBER_LEN + ACK_RANGE_COUNT_LEN + MAX_ACK_RANGES * 2 * PACKET_NUMBER_LEN;
 
 /// Inclusive packet number range carried by an ACK.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -4,9 +4,7 @@ const TX_BUF_BYTES: usize = 128;
 
 use msrt::{
     Engine,
-    core::{
-        ChannelId, Flags, MessageFlags, MessageId, Packet, PacketHeader, PacketNumber,
-    },
+    core::{ChannelId, Flags, MessageFlags, MessageId, Packet, PacketHeader, PacketNumber},
     engine::EnginePoll,
     reliability::{
         ChannelReliability, FragmentRange, MessageFragment, MessageKey, ReliabilityMode,

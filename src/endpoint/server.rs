@@ -1,7 +1,7 @@
 //! Server-side endpoint manager.
 
-use crate::endpoint::{EndpointPoll, PeerSlot};
 use crate::core::Error;
+use crate::endpoint::{EndpointPoll, PeerSlot};
 use crate::engine::{Engine, EngineConfig, ReceiveReport};
 
 /// Error returned when a server endpoint cannot accept a peer.
@@ -96,7 +96,10 @@ where
     ) -> core::result::Result<&mut Engine, AcceptError> {
         if let Some(index) = self.find_index(peer_id) {
             let entry = self.peers[index].as_mut().expect("peer index exists");
-            return entry.slot.engine_or_connect(now_ms).map_err(AcceptError::Engine);
+            return entry
+                .slot
+                .engine_or_connect(now_ms)
+                .map_err(AcceptError::Engine);
         }
 
         self.accept(peer_id, now_ms)

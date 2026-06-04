@@ -1,7 +1,7 @@
 //! Client-side endpoint manager.
 
-use crate::endpoint::{EndpointPoll, PeerSlot};
 use crate::core::{MessageId, Result};
+use crate::endpoint::{EndpointPoll, PeerSlot};
 use crate::engine::{Engine, EngineConfig, ReceiveReport};
 
 /// Client-side endpoint with at most one active peer session.
@@ -108,13 +108,11 @@ mod tests {
 
         server.engine_or_accept(7, 1).unwrap();
         server.receive(7, 2, hello_bytes).unwrap();
-        assert_eq!(
-            server.peer_mut(7).unwrap().state(),
-            PeerState::Connected
-        );
+        assert_eq!(server.peer_mut(7).unwrap().state(), PeerState::Connected);
 
-        let EndpointPoll::Transmit { bytes: ack_bytes, .. } =
-            server.poll(7, 2, &mut server_tx).unwrap().unwrap()
+        let EndpointPoll::Transmit {
+            bytes: ack_bytes, ..
+        } = server.poll(7, 2, &mut server_tx).unwrap().unwrap()
         else {
             panic!("server should transmit ack");
         };

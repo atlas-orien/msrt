@@ -10,10 +10,10 @@
 
 /// Core protocol primitives.
 pub mod core;
-/// Protocol engine boundaries.
-pub mod engine;
 /// Endpoint session lifecycle helpers.
 pub mod endpoint;
+/// Protocol engine boundaries.
+pub mod engine;
 /// Shared protocol errors.
 pub mod error;
 /// Reliability policy boundaries.

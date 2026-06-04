@@ -197,12 +197,20 @@ fn engine_ack_range_clears_multiple_in_flight_packets() {
         ));
     }
 
-    while let Some(event) = Machine::poll_event(&mut b.machine) {
-        let EngineOutput::Write(write) = event else {
-            continue;
-        };
-
-        last_ack = Some(write);
+    if let EnginePoll::Transmit { bytes, attempts } = b.poll(1, &mut [0; 128]).unwrap() {
+        let mut stored = [0; crate::engine::config::MAX_WIRE_BYTES];
+        stored[..bytes.len()].copy_from_slice(bytes);
+        last_ack = Some(WriteEvent {
+            packet_number: crate::core::PacketNumber::new(u32::from_le_bytes(
+                bytes[crate::wire::WIRE_HEADER_LEN + 2..crate::wire::WIRE_HEADER_LEN + 6]
+                    .try_into()
+                    .unwrap(),
+            )),
+            bytes: stored,
+            len: bytes.len(),
+            attempts,
+            priority: crate::engine::machine::WritePriority::Control,
+        });
     }
 
     let last_ack = last_ack.expect("receiver should emit ACK range");
@@ -700,11 +708,7 @@ fn channel_id_from_wire(bytes: &[u8]) -> u8 {
 }
 
 fn next_write(engine: &mut Engine) -> WriteEvent {
-    let Some(EngineOutput::Write(write)) = Machine::poll_event(&mut engine.machine) else {
-        panic!("engine should produce a write event");
-    };
-
-    write
+    next_polled_write(engine, 0)
 }
 
 fn next_polled_write(engine: &mut Engine, now_ms: u64) -> WriteEvent {

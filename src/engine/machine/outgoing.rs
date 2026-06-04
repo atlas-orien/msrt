@@ -14,7 +14,7 @@ use crate::wire::{
 
 use crate::engine::{
     EngineConfig,
-    config::{MAX_MESSAGE_BYTES, MAX_WIRE_BYTES},
+    config::{MAX_EVENTS, MAX_MESSAGE_BYTES, MAX_WIRE_BYTES},
     machine::{
         EngineOutput, Machine, WriteEvent, inflight::InFlightPacket, packet::fragment_flags,
     },
@@ -33,27 +33,35 @@ impl Machine {
         let fragment_bytes = config.fragment_bytes.clamp(1, max_fragment_bytes());
         let message_id = self.next_message_id;
         let mode = config.reliability_mode(channel_id);
+        self.ensure_can_queue_message(message.len(), fragment_bytes, mode)?;
         self.send_message_fragments(channel_id, message_id, message, fragment_bytes, mode)?;
         self.next_message_id = MessageId::new(self.next_message_id.get().wrapping_add(1));
 
         Ok(message_id)
     }
 
+    fn ensure_can_queue_message(
+        &self,
+        message_len: usize,
+        fragment_bytes: usize,
+        mode: ReliabilityMode,
+    ) -> Result<()> {
+        let fragments = fragment_count(message_len, fragment_bytes);
+
+        if fragments > MAX_EVENTS || self.events.available() < fragments {
+            return Err(Error::new(ErrorKind::Engine));
+        }
+
+        if matches!(mode, ReliabilityMode::Reliable) && self.in_flight.available() < fragments {
+            return Err(Error::new(ErrorKind::Engine));
+        }
+
+        Ok(())
+    }
+
     pub(super) fn queue_ack(&mut self, acknowledged: PacketNumber) -> Result<()> {
         self.ack_ranges.observe(acknowledged);
-        let ack = self.ack_ranges.ack();
-        let packet_number = self.next_packet_number;
-        let mut wire = [0; MAX_WIRE_BYTES];
-        let written = encode_ack_packet(packet_number, ack, &mut wire, &Crc16)?;
-
-        self.events.push(EngineOutput::Write(WriteEvent {
-            packet_number,
-            bytes: wire,
-            len: written,
-            attempts: 0,
-            priority: crate::engine::machine::WritePriority::Control,
-        }))?;
-        self.next_packet_number = self.next_packet_number.next();
+        self.ack_pending = true;
 
         Ok(())
     }
@@ -83,6 +91,7 @@ impl Machine {
             len: written,
             attempts: 0,
             last_sent_ms: self.now_ms,
+            sent: false,
         })?;
         self.next_packet_number = self.next_packet_number.next();
         self.next_message_id = MessageId::new(self.next_message_id.get().wrapping_add(1));
@@ -163,6 +172,7 @@ impl Machine {
                     len: written,
                     attempts: 0,
                     last_sent_ms: self.now_ms,
+                    sent: false,
                 })?;
             }
             self.next_packet_number = self.next_packet_number.next();
@@ -217,8 +227,8 @@ fn encode_message_fragment(
     Ok(total_len)
 }
 
-fn encode_ack_packet(
-    packet_number: PacketNumber,
+pub(super) fn encode_ack_packet(
+    packet_number: crate::core::PacketNumber,
     ack: Ack,
     out: &mut [u8],
     checksum: &impl Checksum,
@@ -298,4 +308,12 @@ fn encode_liveness_packet(
 
 const fn max_fragment_bytes() -> usize {
     MAX_WIRE_BYTES - crate::wire::WIRE_HEADER_LEN - PACKET_HEADER_LEN - CHECKSUM_LEN
+}
+
+const fn fragment_count(message_len: usize, fragment_bytes: usize) -> usize {
+    if message_len == 0 {
+        return 1;
+    }
+
+    message_len.div_ceil(fragment_bytes)
 }

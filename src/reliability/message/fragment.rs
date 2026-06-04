@@ -1,6 +1,6 @@
 //! Message fragment identifiers and ranges.
 
-use crate::core::{ChannelId, Error, ErrorKind, PacketHeader, MessageId, Result};
+use crate::core::{ChannelId, Error, ErrorKind, MessageId, PacketHeader, Result};
 
 /// Key that identifies one message on one channel.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]

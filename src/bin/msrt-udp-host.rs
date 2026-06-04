@@ -23,9 +23,9 @@ const CHAOS_NOISE_CHUNK_BYTES: usize = 512;
 const MAX_MESSAGE_BYTES: usize = 256;
 const DEFAULT_MESSAGE_BYTES: usize = 240;
 const TEST_FRAGMENT_BYTES: usize = 48;
-const DEFAULT_CORRUPT_PER_MILLE: u16 = 5;
-const DEFAULT_DROP_BYTE_PER_MILLE: u16 = 5;
-const DEFAULT_INSERT_BYTE_PER_MILLE: u16 = 5;
+const DEFAULT_CORRUPT_PER_MILLE: u16 = 10;
+const DEFAULT_DROP_BYTE_PER_MILLE: u16 = 10;
+const DEFAULT_INSERT_BYTE_PER_MILLE: u16 = 10;
 
 #[derive(Clone, Debug)]
 struct Args {
@@ -164,13 +164,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let now = elapsed_ms(start);
         let apply_noise = endpoint.peer().is_connected();
 
-        if !endpoint.peer().has_session() {
-            if last_connect_attempt.elapsed() >= args.interval {
-                if endpoint.connect(now).is_err() {
-                    std::process::exit(1);
-                }
-                last_connect_attempt = Instant::now();
+        if !endpoint.peer().has_session() && last_connect_attempt.elapsed() >= args.interval {
+            if endpoint.connect(now).is_err() {
+                std::process::exit(1);
             }
+            last_connect_attempt = Instant::now();
         }
 
         if endpoint.peer().is_connected() && should_send(&args, sent_messages, last_send) {
