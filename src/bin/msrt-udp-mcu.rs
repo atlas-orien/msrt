@@ -1,6 +1,7 @@
 use std::{
     env, io,
     net::{SocketAddr, UdpSocket},
+    sync::mpsc::{self, Receiver},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -40,7 +41,7 @@ impl Args {
         let mut parsed = Self {
             bind: "127.0.0.1:9002".parse().expect("valid default bind addr"),
             peer: "127.0.0.1:9001".parse().expect("valid default peer addr"),
-            interval: Duration::from_millis(20),
+            interval: Duration::from_millis(10),
             message: make_message(DEFAULT_MESSAGE_BYTES),
             count: None,
             duration: None,
@@ -131,11 +132,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
     let socket = UdpSocket::bind(args.bind)?;
-    socket.set_nonblocking(true)?;
+    let rx_packets = spawn_udp_rx(&socket)?;
 
     let start = Instant::now();
     let mut endpoint = PassiveEndpoint::new(test_config());
-    let mut rx_buf = [0; RX_BUF_BYTES];
     let mut sent_messages = 0;
     let mut receive_done = false;
     let mut last_send = Instant::now() - args.interval;
@@ -144,21 +144,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     loop {
         let now = elapsed_ms(start);
-        let apply_noise = endpoint.peer().is_connected();
 
-        if endpoint.peer().is_connected() && should_send(&args, sent_messages, last_send, start) {
-            match endpoint.send(&args.message) {
-                Ok(Some(_)) => {
-                    sent_messages += 1;
-                    last_send = Instant::now();
-                }
-                Ok(None) => {}
-                Err(_) => {}
-            }
-        }
-
-        recv_udp(&socket, &mut endpoint, now, &mut rx_buf)?;
-        let noise = if apply_noise {
+        recv_udp(
+            &rx_packets,
+            &socket,
+            &args.peer,
+            &mut endpoint,
+            now,
+            args.noise,
+            &mut noise_state,
+        )?;
+        let noise = if endpoint.peer().is_connected() {
             args.noise
         } else {
             NoiseConfig::default()
@@ -172,6 +168,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &mut noise_state,
         )?;
         log_state_change("mcu", &mut last_state, endpoint.peer().state());
+
+        if endpoint.peer().is_connected() && should_send(&args, sent_messages, last_send, start) {
+            match endpoint.send(&args.message) {
+                Ok(Some(_)) => {
+                    sent_messages += 1;
+                    last_send = Instant::now();
+                }
+                Ok(None) => {}
+                Err(_) => {}
+            }
+        }
 
         if let Some(count) = args.count
             && sent_messages >= count
@@ -195,31 +202,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn recv_udp(
+    rx_packets: &Receiver<Vec<u8>>,
     socket: &UdpSocket,
+    peer: &SocketAddr,
     endpoint: &mut PassiveEndpoint,
     now_ms: u64,
-    rx_buf: &mut [u8],
+    noise: NoiseConfig,
+    noise_state: &mut NoiseLcg,
 ) -> io::Result<()> {
-    loop {
-        match socket.recv_from(rx_buf) {
-            Ok((len, _from)) => {
-                for byte in &rx_buf[..len] {
-                    let report = endpoint.receive(now_ms, std::slice::from_ref(byte));
-                    let _ = matches!(
-                        report,
-                        ReceiveReport::Packet { .. }
-                            | ReceiveReport::Duplicate { .. }
-                            | ReceiveReport::Ack { .. }
-                            | ReceiveReport::Ping { .. }
-                            | ReceiveReport::Pong { .. }
-                            | ReceiveReport::Incomplete { .. }
-                    );
-                }
-            }
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(()),
-            Err(error) => return Err(error),
+    while let Ok(packet) = rx_packets.try_recv() {
+        let tx_noise = if endpoint.peer().is_connected() {
+            noise
+        } else {
+            NoiseConfig::default()
+        };
+        // Keep the UART/ISR model: UDP only carries test bytes, the engine is fed one byte at a time.
+        for byte in &packet {
+            let report = endpoint.receive(now_ms, std::slice::from_ref(byte));
+            let _ = matches!(
+                report,
+                ReceiveReport::Packet { .. }
+                    | ReceiveReport::Duplicate { .. }
+                    | ReceiveReport::Ack { .. }
+                    | ReceiveReport::Ping { .. }
+                    | ReceiveReport::Pong { .. }
+                    | ReceiveReport::Incomplete { .. }
+            );
         }
+
+        pump_endpoint(socket, peer, endpoint, now_ms, tx_noise, noise_state)?;
     }
+
+    Ok(())
 }
 
 fn should_send(args: &Args, sent_messages: usize, last_send: Instant, start: Instant) -> bool {
@@ -274,6 +288,23 @@ fn log_state_change(prefix: &str, last: &mut PeerState, current: PeerState) {
 
 fn elapsed_ms(start: Instant) -> u64 {
     start.elapsed().as_millis().try_into().unwrap_or(u64::MAX)
+}
+
+fn spawn_udp_rx(socket: &UdpSocket) -> io::Result<Receiver<Vec<u8>>> {
+    let socket = socket.try_clone()?;
+    let (tx, rx) = mpsc::channel();
+
+    thread::spawn(move || {
+        let mut rx_buf = [0; RX_BUF_BYTES];
+
+        while let Ok((len, _from)) = socket.recv_from(&mut rx_buf) {
+            if tx.send(rx_buf[..len].to_vec()).is_err() {
+                break;
+            }
+        }
+    });
+
+    Ok(rx)
 }
 
 fn process_session_id() -> u32 {

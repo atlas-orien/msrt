@@ -1,6 +1,7 @@
 use std::{
     env, io,
     net::{SocketAddr, UdpSocket},
+    sync::mpsc::{self, Receiver},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -45,7 +46,7 @@ impl Args {
         let mut parsed = Self {
             bind: "127.0.0.1:9001".parse().expect("valid default bind addr"),
             peer: "127.0.0.1:9002".parse().expect("valid default peer addr"),
-            interval: Duration::from_millis(20),
+            interval: Duration::from_millis(10),
             message: make_message(DEFAULT_MESSAGE_BYTES),
             count: None,
             wire_chaos: false,
@@ -140,12 +141,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
     let socket = UdpSocket::bind(args.bind)?;
-    socket.set_nonblocking(true)?;
 
     if args.wire_chaos {
+        socket.set_nonblocking(true)?;
         return run_wire_chaos(socket, args);
     }
 
+    let rx_packets = spawn_udp_rx(&socket)?;
     let start = Instant::now();
     let mut endpoint = ClientEndpoint::new(test_config());
     let mut last_state = PeerState::Disconnected;
@@ -154,7 +156,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(1);
     }
     log_state_change("host", &mut last_state, endpoint.peer().state());
-    let mut rx_buf = [0; RX_BUF_BYTES];
     let mut last_send = Instant::now() - args.interval;
     let mut sent_messages = 0;
     let mut noise_state = NoiseLcg::new();
@@ -162,7 +163,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     loop {
         let now = elapsed_ms(start);
-        let apply_noise = endpoint.peer().is_connected();
+        let link_connected = start.elapsed() >= args.drop_tx;
+        recv_udp_endpoint(
+            &rx_packets,
+            &socket,
+            &args.peer,
+            &mut endpoint,
+            now,
+            link_connected,
+            args.noise,
+            &mut noise_state,
+        )?;
 
         if !endpoint.peer().has_session() && last_connect_attempt.elapsed() >= args.interval {
             if endpoint.connect(now).is_err() {
@@ -171,20 +182,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             last_connect_attempt = Instant::now();
         }
 
-        if endpoint.peer().is_connected() && should_send(&args, sent_messages, last_send) {
-            match endpoint.peer_mut().send(&args.message) {
-                Ok(Some(_)) => {
-                    sent_messages += 1;
-                    last_send = Instant::now();
-                }
-                Ok(None) => {}
-                Err(_) => {}
-            }
-        }
-
-        recv_udp_endpoint(&socket, &mut endpoint, now, &mut rx_buf)?;
-        let link_connected = start.elapsed() >= args.drop_tx;
-        let noise = if apply_noise {
+        let noise = if endpoint.peer().is_connected() {
             args.noise
         } else {
             NoiseConfig::default()
@@ -199,6 +197,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &mut noise_state,
         )?;
         log_state_change("host", &mut last_state, endpoint.peer().state());
+
+        if endpoint.peer().is_connected() && should_send(&args, sent_messages, last_send) {
+            match endpoint.peer_mut().send(&args.message) {
+                Ok(Some(_)) => {
+                    sent_messages += 1;
+                    last_send = Instant::now();
+                }
+                Ok(None) => {}
+                Err(_) => {}
+            }
+        }
 
         if let Some(count) = args.count
             && sent_messages >= count
@@ -275,32 +284,49 @@ fn should_send(args: &Args, sent_messages: usize, last_send: Instant) -> bool {
     last_send.elapsed() >= args.interval
 }
 
+#[allow(clippy::too_many_arguments)]
 fn recv_udp_endpoint(
+    rx_packets: &Receiver<Vec<u8>>,
     socket: &UdpSocket,
+    peer: &SocketAddr,
     endpoint: &mut ClientEndpoint,
     now_ms: u64,
-    rx_buf: &mut [u8],
+    link_connected: bool,
+    noise: NoiseConfig,
+    noise_state: &mut NoiseLcg,
 ) -> io::Result<()> {
-    loop {
-        match socket.recv_from(rx_buf) {
-            Ok((len, _from)) => {
-                for byte in &rx_buf[..len] {
-                    let report = endpoint.receive(now_ms, std::slice::from_ref(byte));
-                    let _ = matches!(
-                        report,
-                        ReceiveReport::Packet { .. }
-                            | ReceiveReport::Duplicate { .. }
-                            | ReceiveReport::Ack { .. }
-                            | ReceiveReport::Ping { .. }
-                            | ReceiveReport::Pong { .. }
-                            | ReceiveReport::Incomplete { .. }
-                    );
-                }
-            }
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(()),
-            Err(error) => return Err(error),
+    while let Ok(packet) = rx_packets.try_recv() {
+        let tx_noise = if endpoint.peer().is_connected() {
+            noise
+        } else {
+            NoiseConfig::default()
+        };
+        // Keep the UART/ISR model: UDP only carries test bytes, the engine is fed one byte at a time.
+        for byte in &packet {
+            let report = endpoint.receive(now_ms, std::slice::from_ref(byte));
+            let _ = matches!(
+                report,
+                ReceiveReport::Packet { .. }
+                    | ReceiveReport::Duplicate { .. }
+                    | ReceiveReport::Ack { .. }
+                    | ReceiveReport::Ping { .. }
+                    | ReceiveReport::Pong { .. }
+                    | ReceiveReport::Incomplete { .. }
+            );
         }
+
+        pump_endpoint(
+            socket,
+            peer,
+            endpoint,
+            now_ms,
+            link_connected,
+            tx_noise,
+            noise_state,
+        )?;
     }
+
+    Ok(())
 }
 
 fn recv_udp(socket: &UdpSocket, engine: &mut Engine, rx_buf: &mut [u8]) -> io::Result<()> {
@@ -386,6 +412,23 @@ fn make_message(len: usize) -> Vec<u8> {
 
 fn elapsed_ms(start: Instant) -> u64 {
     start.elapsed().as_millis().try_into().unwrap_or(u64::MAX)
+}
+
+fn spawn_udp_rx(socket: &UdpSocket) -> io::Result<Receiver<Vec<u8>>> {
+    let socket = socket.try_clone()?;
+    let (tx, rx) = mpsc::channel();
+
+    thread::spawn(move || {
+        let mut rx_buf = [0; RX_BUF_BYTES];
+
+        while let Ok((len, _from)) = socket.recv_from(&mut rx_buf) {
+            if tx.send(rx_buf[..len].to_vec()).is_err() {
+                break;
+            }
+        }
+    });
+
+    Ok(rx)
 }
 
 fn process_session_id() -> u32 {
