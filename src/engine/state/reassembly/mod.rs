@@ -1,6 +1,6 @@
 //! Message reassembly table.
 
-use crate::core::{ChannelId, Error, ErrorKind, MessageFlags, MessageId, Result};
+use crate::core::{ChannelId, Error, ErrorKind, MessageId, Result};
 
 use crate::engine::{
     MessageEvent,
@@ -146,7 +146,7 @@ impl ReassemblySlot {
             *received = true;
         }
 
-        if MessageFlags::from_bits(fragment.flags).contains(MessageFlags::LAST) {
+        if end == self.expected_len {
             self.last_seen = true;
         }
 

@@ -1,7 +1,7 @@
 //! Outgoing message fragmentation and packet encoding.
 
 use crate::core::{
-    ChannelId, Error, ErrorKind, Flags, MessageFlags, MessageId, PacketIndex, PacketKey, Result,
+    ChannelId, Error, ErrorKind, Flags, MessageId, PacketIndex, PacketKey, Result,
     packet::header::{PACKET_HEADER_LEN, PacketHeader},
 };
 use crate::reliability::ReliabilityMode;
@@ -15,7 +15,6 @@ use crate::{
 
 use crate::engine::{
     EngineConfig,
-    codec::packet::fragment_flags,
     config::{MAX_EVENTS, MAX_MESSAGE_BYTES, MAX_WIRE_BYTES},
     state::{EngineOutput, EngineState, WriteEvent, recovery::inflight::InFlightPacket},
 };
@@ -148,8 +147,6 @@ impl EngineState {
             let end = core::cmp::min(offset + fragment_bytes, message.len());
             let fragment = &message[offset..end];
             let mut wire = [0; MAX_WIRE_BYTES];
-            let fragment_flags =
-                MessageFlags::from_bits(fragment_flags(offset, end, message.len()));
             let key = PacketKey::new(channel_id, message_id, packet_index);
             let header = PacketHeader::data(
                 packet_index,
@@ -162,7 +159,6 @@ impl EngineState {
                 message_id,
                 message.len(),
                 offset,
-                fragment_flags,
             );
             let written = encode_message_fragment(header, fragment, &mut wire, integrity)?;
 
@@ -229,7 +225,6 @@ fn encode_message_fragment(
     packet[7..9].copy_from_slice(&header.packet_index.get().to_le_bytes());
     packet[9..11].copy_from_slice(&message_len.to_le_bytes());
     packet[11..13].copy_from_slice(&fragment_offset.to_le_bytes());
-    packet[13] = header.fragment_flags.bits();
     packet[PACKET_HEADER_LEN..PACKET_HEADER_LEN + fragment.len()].copy_from_slice(fragment);
 
     let (authenticated, tag) = out[..total_len].split_at_mut(total_len - integrity_tag_len);
@@ -264,7 +259,6 @@ pub(crate) fn encode_ack_packet(
     packet[7..9].copy_from_slice(&header.packet_index.get().to_le_bytes());
     packet[9..11].copy_from_slice(&(header.message_len as u16).to_le_bytes());
     packet[11..13].copy_from_slice(&(header.fragment_offset as u16).to_le_bytes());
-    packet[13] = header.fragment_flags.bits();
 
     let (authenticated, tag) = out[..total_len].split_at_mut(total_len - integrity_tag_len);
     integrity.seal(authenticated, tag);
@@ -298,7 +292,6 @@ fn encode_liveness_packet(
     packet[7..9].copy_from_slice(&header.packet_index.get().to_le_bytes());
     packet[9..11].copy_from_slice(&(header.message_len as u16).to_le_bytes());
     packet[11..13].copy_from_slice(&(header.fragment_offset as u16).to_le_bytes());
-    packet[13] = header.fragment_flags.bits();
 
     let (authenticated, tag) = out[..total_len].split_at_mut(total_len - integrity_tag_len);
     integrity.seal(authenticated, tag);

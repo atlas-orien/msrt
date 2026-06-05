@@ -8,8 +8,7 @@ pub(crate) const MESSAGE_ID_LEN: usize = core::mem::size_of::<u32>();
 pub(crate) const MESSAGE_LEN_LEN: usize = core::mem::size_of::<u16>();
 /// Encoded fragment offset field size in bytes.
 pub(crate) const FRAGMENT_OFFSET_LEN: usize = core::mem::size_of::<u16>();
-/// Encoded fragment flags field size in bytes.
-pub(crate) const FRAGMENT_FLAGS_LEN: usize = core::mem::size_of::<u8>();
+
 /// A logical channel identifier.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ChannelId(pub u8);
@@ -82,54 +81,13 @@ impl MessageId {
     }
 }
 
-/// Message fragment flags carried in packet headers.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct MessageFlags(pub u8);
-
-impl MessageFlags {
-    /// Empty flag set.
-    pub const EMPTY: Self = Self(0);
-
-    /// First fragment of a message.
-    pub const FIRST: Self = Self(1 << 0);
-
-    /// Last fragment of a message.
-    pub const LAST: Self = Self(1 << 1);
-
-    /// Creates flags from raw bits.
-    #[must_use]
-    pub const fn from_bits(bits: u8) -> Self {
-        Self(bits)
-    }
-
-    /// Returns the raw flag bits.
-    #[must_use]
-    pub const fn bits(self) -> u8 {
-        self.0
-    }
-
-    /// Returns whether all bits from `other` are set.
-    #[must_use]
-    pub const fn contains(self, other: Self) -> bool {
-        (self.0 & other.0) == other.0
-    }
-
-    /// Returns a new flag set with `other` included.
-    #[must_use]
-    pub const fn union(self, other: Self) -> Self {
-        Self(self.0 | other.0)
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{ChannelId, MessageFlags, MessageId};
+    use super::{ChannelId, MessageId};
 
     #[test]
     fn message_identity_primitives_expose_raw_values() {
         assert_eq!(ChannelId::new(9).get(), 9);
         assert_eq!(MessageId::new(7).get(), 7);
-        assert!(MessageFlags::FIRST.contains(MessageFlags::FIRST));
-        assert!(!MessageFlags::FIRST.contains(MessageFlags::LAST));
     }
 }

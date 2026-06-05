@@ -54,7 +54,7 @@ impl<'a> Packet<'a> {
 #[cfg(test)]
 mod tests {
     use super::{Flags, Packet, PacketHeader, PacketIndex};
-    use crate::core::{ChannelId, MessageFlags, MessageId};
+    use crate::core::{ChannelId, MessageId};
 
     #[test]
     fn packet_payload_contains_bytes() {
@@ -66,7 +66,6 @@ mod tests {
             MessageId::new(7),
             3,
             0,
-            MessageFlags::FIRST,
         );
         let packet = Packet::new(header, &payload);
 

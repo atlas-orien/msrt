@@ -7,10 +7,8 @@ pub use flags::Flags;
 use super::{PacketIndex, PacketKey, PacketType};
 
 use crate::core::{
-    ChannelId, MessageFlags, MessageId,
-    message::{
-        CHANNEL_ID_LEN, FRAGMENT_FLAGS_LEN, FRAGMENT_OFFSET_LEN, MESSAGE_ID_LEN, MESSAGE_LEN_LEN,
-    },
+    ChannelId, MessageId,
+    message::{CHANNEL_ID_LEN, FRAGMENT_OFFSET_LEN, MESSAGE_ID_LEN, MESSAGE_LEN_LEN},
 };
 
 /// Encoded packet type length in bytes.
@@ -26,8 +24,7 @@ pub(crate) const PACKET_HEADER_LEN: usize = PACKET_TYPE_LEN
     + MESSAGE_ID_LEN
     + PACKET_INDEX_LEN
     + MESSAGE_LEN_LEN
-    + FRAGMENT_OFFSET_LEN
-    + FRAGMENT_FLAGS_LEN;
+    + FRAGMENT_OFFSET_LEN;
 
 /// Metadata shared by every protocol packet.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -46,8 +43,6 @@ pub struct PacketHeader {
     pub message_len: usize,
     /// Offset of this fragment inside the complete message.
     pub fragment_offset: usize,
-    /// Message fragment flags.
-    pub fragment_flags: MessageFlags,
 }
 
 impl PacketHeader {
@@ -60,7 +55,6 @@ impl PacketHeader {
         message_id: MessageId,
         message_len: usize,
         fragment_offset: usize,
-        fragment_flags: MessageFlags,
     ) -> Self {
         Self {
             packet_type: PacketType::Data,
@@ -70,7 +64,6 @@ impl PacketHeader {
             message_id,
             message_len,
             fragment_offset,
-            fragment_flags,
         }
     }
 
@@ -85,7 +78,6 @@ impl PacketHeader {
             packet_index: key.packet_index,
             message_len: 0,
             fragment_offset: 0,
-            fragment_flags: MessageFlags::EMPTY,
         }
     }
 
@@ -116,7 +108,6 @@ impl PacketHeader {
             packet_index: PacketIndex::ZERO,
             message_len: 0,
             fragment_offset: 0,
-            fragment_flags: MessageFlags::EMPTY,
         }
     }
 

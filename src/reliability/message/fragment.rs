@@ -102,7 +102,7 @@ impl MessageFragment {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::{ChannelId, Flags, MessageFlags, MessageId, PacketHeader, PacketIndex};
+    use crate::core::{ChannelId, Flags, MessageId, PacketHeader, PacketIndex};
 
     use super::{FragmentRange, MessageFragment, MessageKey};
 
@@ -121,7 +121,6 @@ mod tests {
             MessageId::new(9),
             8,
             2,
-            MessageFlags::EMPTY,
         );
 
         let fragment = MessageFragment::try_from_packet_header(header, 3).unwrap();

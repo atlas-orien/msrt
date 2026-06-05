@@ -1,7 +1,7 @@
 //! v1 draft packet byte layout glue.
 
 use crate::core::{
-    ChannelId, Error, Flags, MessageFlags, MessageId, PacketIndex, PacketType, Result,
+    ChannelId, Error, Flags, MessageId, PacketIndex, PacketType, Result,
     packet::header::{PACKET_HEADER_LEN, PacketHeader},
 };
 
@@ -42,7 +42,6 @@ pub(crate) struct DecodedFragment<'a> {
     pub(crate) message_id: MessageId,
     pub(crate) message_len: usize,
     pub(crate) fragment_offset: usize,
-    pub(crate) flags: u8,
     pub(crate) bytes: &'a [u8],
 }
 
@@ -100,20 +99,6 @@ fn decode_packet_bytes(bytes: &[u8]) -> PacketDecode<'_> {
     }
 }
 
-pub(crate) const fn fragment_flags(offset: usize, end: usize, message_len: usize) -> u8 {
-    let mut flags = 0;
-
-    if offset == 0 {
-        flags |= MessageFlags::FIRST.bits();
-    }
-
-    if end == message_len {
-        flags |= MessageFlags::LAST.bits();
-    }
-
-    flags
-}
-
 fn packet_header_from_bytes(bytes: &[u8]) -> Option<PacketHeader> {
     if bytes.len() < PACKET_HEADER_LEN {
         return None;
@@ -127,7 +112,6 @@ fn packet_header_from_bytes(bytes: &[u8]) -> Option<PacketHeader> {
         packet_index: PacketIndex::new(u16::from_le_bytes(bytes.get(7..9)?.try_into().ok()?)),
         message_len: u16::from_le_bytes(bytes.get(9..11)?.try_into().ok()?) as usize,
         fragment_offset: u16::from_le_bytes(bytes.get(11..13)?.try_into().ok()?) as usize,
-        fragment_flags: MessageFlags::from_bits(*bytes.get(13)?),
     })
 }
 
@@ -136,7 +120,6 @@ fn ack_from_packet_bytes(header: PacketHeader, bytes: &[u8]) -> Option<DecodedAc
         || header.flags != Flags::EMPTY
         || header.message_len != 0
         || header.fragment_offset != 0
-        || header.fragment_flags != MessageFlags::EMPTY
     {
         return None;
     }
@@ -163,7 +146,6 @@ fn fragment_from_packet_bytes(header: PacketHeader, bytes: &[u8]) -> Option<Deco
         message_id: header.message_id,
         message_len: header.message_len,
         fragment_offset: header.fragment_offset,
-        flags: header.fragment_flags.bits(),
         bytes: fragment,
     })
 }
@@ -173,7 +155,6 @@ fn liveness_from_packet_bytes(header: PacketHeader, bytes: &[u8]) -> Option<Deco
         || !header.channel_id.is_liveness()
         || header.message_len != 0
         || header.fragment_offset != 0
-        || header.fragment_flags != MessageFlags::EMPTY
     {
         return None;
     }

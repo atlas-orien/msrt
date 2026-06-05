@@ -525,7 +525,8 @@ fn engine_encodes_v1_draft_packet_and_frame_headers() {
     let write = next_write(&mut engine);
     let bytes = write.as_bytes();
 
-    let packet = &bytes[crate::wire::WIRE_HEADER_LEN..];
+    let packet_len = usize::from(bytes[crate::wire::WIRE_PACKET_LEN_OFFSET]);
+    let packet = &bytes[crate::wire::WIRE_HEADER_LEN..crate::wire::WIRE_HEADER_LEN + packet_len];
 
     assert_eq!(
         &bytes[..crate::wire::WIRE_MAGIC_LEN],
@@ -542,9 +543,11 @@ fn engine_encodes_v1_draft_packet_and_frame_headers() {
         u16::from_le_bytes(packet[7..9].try_into().unwrap()),
         write.key.packet_index.get()
     );
+    assert_eq!(u16::from_le_bytes(packet[9..11].try_into().unwrap()), 5);
+    assert_eq!(u16::from_le_bytes(packet[11..13].try_into().unwrap()), 0);
     assert_eq!(
-        packet[13],
-        crate::core::MessageFlags::FIRST.bits() | crate::core::MessageFlags::LAST.bits()
+        &packet[crate::core::packet::header::PACKET_HEADER_LEN..],
+        b"hello"
     );
 }
 
@@ -885,7 +888,6 @@ fn ack_packet_for_key(key: crate::core::PacketKey) -> WriteEvent {
     packet[7..9].copy_from_slice(&key.packet_index.get().to_le_bytes());
     packet[9..11].copy_from_slice(&0u16.to_le_bytes());
     packet[11..13].copy_from_slice(&0u16.to_le_bytes());
-    packet[13] = crate::core::MessageFlags::EMPTY.bits();
 
     let (authenticated, tag) = bytes[..total_len].split_at_mut(total_len - tag_len);
     crate::integrity::Integrity::seal(&integrity, authenticated, tag);
