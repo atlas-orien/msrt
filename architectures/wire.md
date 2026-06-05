@@ -1,6 +1,6 @@
 # Wire
 
-`wire` 负责 MSRT 在连续字节流上的边界、校验和恢复。它不是 protocol frame 层。
+`wire` 负责 MSRT 在连续字节流上的边界、完整性校验和恢复。它不是 protocol frame 层。
 
 ## 职责
 
@@ -9,7 +9,8 @@ wire 负责：
 - envelope magic
 - envelope header
 - packet length
-- checksum
+- header CRC-8
+- integrity tag
 - streaming decode
 - half packet buffering
 - sticky packet splitting
@@ -70,12 +71,12 @@ decoder 也不能假设上层每次只传入一个串口中断字节。上层可
 
 ## Resync 原则
 
-wire 层面对的是不可信 byte stream。magic、length、header checksum 和 body checksum 都可能因为噪声或丢字节而失效。
+wire 层面对的是不可信 byte stream。magic、length、header CRC-8 和 envelope integrity tag 都可能因为噪声或丢字节而失效。
 
 当 header 校验失败时，decoder 不应该清空整个 buffer。因为 header 失败只说明当前位置的 magic 不能作为合法 envelope 起点，不能说明后面的 bytes 全部无效。
 
 ```text
-A5 bad_len bad_crc A5 good_len good_crc packet crc16
+A5 bad_len bad_crc A5 good_len good_crc packet integrity_tag
 ^ fake magic
                  ^ next candidate magic
 ```
@@ -87,18 +88,20 @@ A5 bad_len bad_crc A5 good_len good_crc packet crc16
 继续在剩余 buffer 中扫描下一个 magic
 ```
 
-这样可以保留已经到达的后续合法 envelope。只有当一个完整候选 envelope 的 checksum 失败时，decoder 才可以丢掉这个候选 envelope 对应的 bytes。
+这样可以保留已经到达的后续合法 envelope。只有当一个完整候选 envelope 的 integrity tag 失败时，decoder 才可以丢掉这个候选 envelope 对应的 bytes。
 
 因此 wire decoder 的丢弃粒度应该按“已经确定无效的范围”决定：
 
 - magic 前面的 bytes：确定是 noise，可以丢弃。
 - header 校验失败：只确定当前位置 magic 无效，丢 1 byte 后 resync。
 - length 超过 decoder capacity：当前位置 magic 不可信，丢 1 byte 后 resync。
-- body checksum 失败：完整候选 envelope 无效，丢弃这个候选 envelope。
+- integrity tag 失败：完整候选 envelope 无效，丢弃这个候选 envelope。
 - packet 不完整：不丢弃，等待后续 bytes。
 
-## Checksum
+## Integrity
 
-checksum 只验证 wire bytes 是否损坏。它不表达可靠传输语义，也不替代 ACK。
+integrity tag 只验证 wire bytes 是否损坏或不合法。它不表达可靠传输语义，也不替代 ACK。
 
-当前 checksum 使用 CRC-16/XMODEM。未来如果 wire envelope 需要升级，checksum 仍然应该属于 wire 层，而不是 core 或 engine。
+默认 `EngineConfig` 使用 CRC-16/XMODEM。CRC-32、CRC-64 和轻量 keyed validation 通过 `EngineConfig::integrity` 选择。不同 integrity backend 的 tag 长度不同，因此 envelope total length 必须根据当前 engine 配置计算，而不是使用全局固定长度。
+
+length 字段仍然使用固定 CRC-8 做第一阶段保护，用于在完整 envelope 尚未到达前验证 packet length。

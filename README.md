@@ -35,9 +35,36 @@ Internal protocol boundaries live as modules:
 - `reliability`: reliability traits and modules.
 - `engine`: protocol engine boundary for send, receive, response, and progress.
 - `endpoint`: connection lifecycle helpers for client, passive single-peer, and multi-peer server use.
+- `integrity`: packet integrity backends selected by `EngineConfig`.
 - `wire`: wire envelope boundaries for byte stream transport.
 
 No MCU HAL, async executor, serial driver, operating-system adapter, simulator, CLI implementation, or separate channel/frame crate is included at this stage.
+
+## Integrity
+
+MSRT selects packet integrity at engine initialization time. No external config file is required.
+
+`EngineConfig::default()` uses CRC-16/XMODEM:
+
+```rust
+use msrt::{Engine, EngineConfig};
+
+let engine = Engine::new(EngineConfig::default());
+```
+
+Applications can choose a stronger backend in code:
+
+```rust
+use msrt::{Engine, EngineConfig};
+use msrt::integrity::IntegrityConfig;
+
+let engine = Engine::new(EngineConfig {
+    integrity: IntegrityConfig::aead(),
+    ..EngineConfig::default()
+});
+```
+
+Both peers must use the same integrity configuration. `IntegrityConfig::aead()` uses a library default key for lightweight data validation; `IntegrityConfig::aead_with_key(...)` allows both peers to share an application-provided key.
 
 ## Development
 

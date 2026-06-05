@@ -18,7 +18,7 @@
 `core` 不负责：
 
 - 字节流同步
-- checksum
+- wire integrity tag
 - ACK 策略
 - 重传策略
 - message reassembly buffer

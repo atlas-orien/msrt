@@ -149,7 +149,7 @@ ACK pending 只表达当前需要确认的 packet key 队列
 原因是 MSRT wire 使用 length-based framing：
 
 ```text
-magic + length + length_crc8 + body + crc16
+magic + length + length_crc8 + body + integrity_tag
 ```
 
 `length_crc8` 能保证 length 字段本身可靠，避免坏 length 导致等待超大包。但如果 body 中间连续丢字节，decoder 仍然会按照原 length 继续收后续字节，于是当前坏包会吞掉后面真实 packet 的一部分。这样一次 `burst-drop` 可能浪费不止一个 packet 的有效数据。

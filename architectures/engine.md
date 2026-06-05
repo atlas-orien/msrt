@@ -42,6 +42,27 @@ engine.poll(now_ms, tx_buf)
 
 `poll_event`、`tick`、内部队列、ACK range、reassembly slot、in-flight table 都不应该暴露给外部 crate。
 
+## EngineConfig
+
+`EngineConfig` 是创建 engine 时的协议配置。它不是外部配置文件，也不要求运行时读取 toml/json。
+
+默认配置使用 CRC-16/XMODEM：
+
+```rust
+Engine::new(EngineConfig::default())
+```
+
+如果应用需要更强的数据合法性验证，可以在初始化 engine 时选择：
+
+```rust
+Engine::new(EngineConfig {
+  integrity: IntegrityConfig::aead(),
+  ..EngineConfig::default()
+})
+```
+
+两端必须使用相同的 `integrity` 配置。`IntegrityConfig::aead()` 使用库内默认 key；如果需要应用自己控制 key，可以使用 `IntegrityConfig::aead_with_key(key)`。
+
 ## Poll 模型
 
 `poll` 是 engine 的统一推进入口。
@@ -191,12 +212,12 @@ bad header + later valid envelope
 ```text
 Engine::receive(bytes)
   -> EngineState::receive(config, bytes)
-    -> ingress.feed(bytes, Crc16)
+    -> ingress.feed(bytes, config.integrity)
       -> append 到 ingress buffer
       -> 查找 envelope magic
       -> 校验 envelope header
       -> 根据 length 等待完整 envelope
-      -> 校验 envelope checksum
+      -> 校验 envelope integrity tag
       -> 输出 packet bytes
     -> decode packet bytes
     -> apply packet to engine state
@@ -235,21 +256,21 @@ poll(now_ms, tx_buf)
 
 - 接收并缓存连续 bytes。
 - 尽可能恢复完整 envelope。
-- 校验 envelope 边界和 checksum。
+- 校验 envelope 边界和 integrity tag。
 - 解出 packet。
 - 将 packet 应用到协议状态。
 - 把需要外部执行的结果排进事件队列。
 
 ## Receive 错误和重同步
 
-incoming bytes 是不可信输入。`receive` 必须能处理噪声、半包、粘包、坏 header、坏 checksum 和重复包。
+incoming bytes 是不可信输入。`receive` 必须能处理噪声、半包、粘包、坏 header、坏 integrity tag 和重复包。
 
 一个重要原则是：不要过度丢弃。
 
 当 wire 发现当前位置的 magic 后续 header 不合法时，只能证明“当前位置这个 magic 不是合法包头”，不能证明后面缓存的所有 bytes 都无效。因此 decoder 应该丢掉当前位置的 magic，然后继续在剩余缓存中寻找下一个 magic。
 
 ```text
-A5 bad_len bad_crc A5 good_len good_crc packet crc16
+A5 bad_len bad_crc A5 good_len good_crc packet integrity_tag
 ^ invalid candidate
                  ^ possible next valid envelope
 ```
@@ -261,7 +282,7 @@ A5 bad_len bad_crc A5 good_len good_crc packet crc16
 - magic 前面的 bytes 是 noise，可以跳过。
 - header 不合法时，丢掉当前位置 magic，然后重新扫描。
 - length 指向的完整 envelope 还没有到齐时，返回 `Incomplete`，继续保留缓存。
-- envelope checksum 错时，丢掉这个完整候选 envelope。
+- envelope integrity tag 错时，丢掉这个完整候选 envelope。
 - envelope 合法但 packet 格式 malformed 时，返回 `Error`，这个 packet 不进入状态机语义处理。
 
 这些行为保证 engine 可以同时支持 byte-by-byte 输入、半包输入和一次收到多个 packet 的输入。

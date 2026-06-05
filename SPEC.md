@@ -47,9 +47,12 @@ Both implementation environments must implement the same protocol. Environment-s
 - `msrt::reliability`: partial-reliability module boundaries.
 - `msrt::engine`: protocol engine boundary that coordinates send, receive, response, and progress.
 - `msrt::endpoint`: connection lifecycle helpers that map peers to engine sessions.
+- `msrt::integrity`: packet integrity backends configured by `EngineConfig`.
 - `msrt::wire`: byte-stream wire envelope boundaries.
 
 The crate enables `std` by default, but it can be built with `default-features = false` so the standard remains portable to MCU environments.
+
+Packet integrity is selected when an `Engine` is initialized. The default `EngineConfig` uses CRC-16/XMODEM. Other backends, such as CRC-32, CRC-64, or lightweight keyed validation, are selected in code through `EngineConfig::integrity`; no runtime configuration file is required by the protocol core.
 
 See [MSRT v1 Stable Protocol Draft](architectures/v1/srt-stable-protocol-draft.md) for the current v1 draft wire and packet model.
 See [MSRT v1 Reliable Transport Plan](architectures/v1/srt-reliable-transport-plan.md) for the remaining v1 reliability work.
