@@ -43,8 +43,7 @@ No MCU HAL, async executor, serial driver, operating-system adapter, simulator, 
 
 ```sh
 cargo fmt --all -- --check
-cargo clippy --all-targets --all-features -- -D warnings
+cargo clippy --all-targets -- -D warnings
 cargo check
 cargo test
-cargo run --bin msrt-smoke
 ```

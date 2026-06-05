@@ -38,6 +38,6 @@ pub trait Decoder {
 
     /// Returns the expected complete envelope length once a header is known.
     fn expected_len(&self, header: EnvelopeHeader) -> usize {
-        header.total_len()
+        header.total_len(crate::integrity::Crc16::TAG_LEN)
     }
 }

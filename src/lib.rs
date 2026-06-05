@@ -16,6 +16,8 @@ pub mod endpoint;
 pub mod engine;
 /// Shared protocol errors.
 pub mod error;
+/// Packet integrity backends.
+pub mod integrity;
 /// Reliability policy boundaries.
 pub mod reliability;
 /// Wire envelope boundaries.

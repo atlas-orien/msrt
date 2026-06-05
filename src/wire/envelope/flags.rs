@@ -8,7 +8,7 @@ impl WireFlags {
     /// Empty wire flags.
     pub const EMPTY: Self = Self(0);
 
-    /// The envelope checksum is present.
+    /// The envelope integrity tag is present.
     pub const CHECKSUM_PRESENT: Self = Self(1 << 0);
 
     /// Creates wire flags from raw bits.

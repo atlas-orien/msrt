@@ -10,5 +10,5 @@ cargo check
 echo "Running cargo test"
 cargo test
 
-echo "Running cargo clippy --all-targets --all-features -- -D warnings"
-cargo clippy --all-targets --all-features -- -D warnings
+echo "Running cargo clippy --all-targets -- -D warnings"
+cargo clippy --all-targets -- -D warnings

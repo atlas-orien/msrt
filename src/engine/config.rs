@@ -1,6 +1,7 @@
 //! Engine configuration.
 
 use crate::core::{ChannelId, MessageId};
+use crate::integrity::IntegrityConfig;
 use crate::reliability::{ChannelReliability, ReliabilityMode};
 
 /// Maximum encoded wire bytes held by one MVP engine event.
@@ -113,6 +114,8 @@ pub struct EngineConfig {
     pub retransmit_timeout_ms: u64,
     /// Ticks after which incomplete reassembly slots are released.
     pub reassembly_timeout_ms: u64,
+    /// Packet integrity backend used by this engine.
+    pub integrity: IntegrityConfig,
     /// Optional per-channel protocol specs.
     pub channel_specs: [Option<ChannelSpec>; 4],
     /// Optional per-channel reliability policies.
@@ -127,6 +130,7 @@ impl Default for EngineConfig {
             max_retransmit_attempts: DEFAULT_MAX_RETRANSMIT_ATTEMPTS,
             retransmit_timeout_ms: DEFAULT_RETRANSMIT_TIMEOUT_MS,
             reassembly_timeout_ms: DEFAULT_REASSEMBLY_TIMEOUT_MS,
+            integrity: IntegrityConfig::DEFAULT,
             channel_specs: [None; MAX_CHANNEL_SPECS],
             channel_policies: [None; MAX_CHANNEL_POLICIES],
         }

@@ -3,7 +3,7 @@
 use crate::core::{Error, ErrorKind, PacketKey, Result};
 
 use crate::engine::{
-    EnginePoll, SendFailedEvent,
+    EngineConfig, EnginePoll, SendFailedEvent,
     config::{MAX_EVENTS, MAX_WIRE_BYTES},
     state::{ack::AckState, numbers::NumberState, recovery::RecoveryState},
 };
@@ -67,11 +67,12 @@ impl SchedulerState {
 
     pub(crate) fn poll_ack<'a>(
         &mut self,
+        config: &EngineConfig,
         ack: &mut AckState,
         _numbers: &mut NumberState,
         tx_buf: &'a mut [u8],
     ) -> Result<EnginePoll<'a>> {
-        poll_pending_ack(ack, _numbers, tx_buf)
+        poll_pending_ack(config, ack, _numbers, tx_buf)
     }
 
     pub(crate) fn pop_urgent(&mut self) -> Option<EngineOutput> {
@@ -244,6 +245,7 @@ const fn queue_for_event(event: &EngineOutput) -> QueueKind {
 }
 
 fn poll_pending_ack<'a>(
+    config: &EngineConfig,
     ack: &mut AckState,
     _numbers: &mut NumberState,
     tx_buf: &'a mut [u8],
@@ -253,7 +255,7 @@ fn poll_pending_ack<'a>(
     };
 
     let written =
-        crate::engine::codec::outgoing::encode_ack_packet(key, tx_buf, &crate::wire::Crc16)?;
+        crate::engine::codec::outgoing::encode_ack_packet(key, tx_buf, &config.integrity)?;
 
     Ok(EnginePoll::Transmit {
         bytes: &tx_buf[..written],

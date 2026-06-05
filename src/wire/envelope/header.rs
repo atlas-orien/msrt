@@ -1,5 +1,7 @@
 //! Wire envelope header.
 
+use crate::integrity::crc::Crc8;
+
 use super::EnvelopeMagic;
 
 /// Fixed first-stage wire magic length.
@@ -13,9 +15,6 @@ pub const WIRE_PACKET_LEN_OFFSET: usize = WIRE_MAGIC_LEN;
 
 /// Offset of the header CRC-8 byte.
 pub const WIRE_HEADER_CRC_OFFSET: usize = WIRE_PACKET_LEN_OFFSET + core::mem::size_of::<u8>();
-
-/// Fixed first-stage wire checksum length.
-pub const CHECKSUM_LEN: usize = core::mem::size_of::<u16>();
 
 /// Wire envelope header.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -45,35 +44,17 @@ impl EnvelopeHeader {
         self.header_crc == header_crc(self.packet_len)
     }
 
-    /// Returns the complete envelope length including checksum bytes.
+    /// Returns the complete envelope length including integrity tag bytes.
     #[must_use]
-    pub const fn total_len(self) -> usize {
-        WIRE_HEADER_LEN + self.packet_len as usize + CHECKSUM_LEN
+    pub const fn total_len(self, integrity_tag_len: usize) -> usize {
+        WIRE_HEADER_LEN + self.packet_len as usize + integrity_tag_len
     }
 }
 
 /// Calculates the CRC-8 over the protected wire length field.
 #[must_use]
 pub const fn header_crc(packet_len: u8) -> u8 {
-    let bytes = [packet_len];
-    let mut checksum = 0_u8;
-    let mut index = 0;
-
-    while index < bytes.len() {
-        checksum ^= bytes[index];
-        let mut bit = 0;
-        while bit < 8 {
-            if checksum & 0x80 != 0 {
-                checksum = (checksum << 1) ^ 0x07;
-            } else {
-                checksum <<= 1;
-            }
-            bit += 1;
-        }
-        index += 1;
-    }
-
-    checksum
+    Crc8.calculate(&[packet_len])
 }
 
 #[cfg(test)]
@@ -81,11 +62,15 @@ mod tests {
     use super::{EnvelopeHeader, WIRE_HEADER_LEN, header_crc};
 
     #[test]
-    fn header_total_len_includes_checksum() {
+    fn header_total_len_includes_integrity_tag() {
         let header = EnvelopeHeader::new(9);
+        let integrity_tag_len = 2;
 
         assert!(header.has_valid_header_crc());
-        assert_eq!(header.total_len(), WIRE_HEADER_LEN + 9 + 2);
+        assert_eq!(
+            header.total_len(integrity_tag_len),
+            WIRE_HEADER_LEN + 9 + integrity_tag_len
+        );
     }
 
     #[test]

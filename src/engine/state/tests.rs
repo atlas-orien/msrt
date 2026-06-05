@@ -3,6 +3,7 @@ use crate::engine::{
     ChannelProfile, ChannelSpec, Engine, EngineConfig, EnginePoll, MessageEvent, ReceiveReport,
     SendFailedEvent, SendFailureReason,
 };
+use crate::integrity::IntegrityConfig;
 use crate::reliability::ChannelReliability;
 
 #[test]
@@ -50,6 +51,42 @@ fn engine_receives_fragments_as_one_message_event() {
     }
 
     assert_message(&mut b, b"hello msrt testing");
+}
+
+#[test]
+fn engine_integrity_config_accepts_aead_packets() {
+    let config = EngineConfig {
+        integrity: IntegrityConfig::aead(),
+        ..EngineConfig::default()
+    };
+    let mut a = Engine::new(config);
+    let mut b = Engine::new(config);
+
+    a.send(b"hello").unwrap();
+    let write = next_write(&mut a);
+
+    assert!(matches!(
+        b.receive(write.as_bytes()),
+        ReceiveReport::Packet { .. }
+    ));
+    assert_message(&mut b, b"hello");
+}
+
+#[test]
+fn engine_integrity_config_rejects_different_aead_keys() {
+    let mut a = Engine::new(EngineConfig {
+        integrity: IntegrityConfig::aead_with_key([1; crate::integrity::Aead::KEY_LEN]),
+        ..EngineConfig::default()
+    });
+    let mut b = Engine::new(EngineConfig {
+        integrity: IntegrityConfig::aead_with_key([2; crate::integrity::Aead::KEY_LEN]),
+        ..EngineConfig::default()
+    });
+
+    a.send(b"hello").unwrap();
+    let write = next_write(&mut a);
+
+    assert_eq!(b.receive(write.as_bytes()), ReceiveReport::Corrupted);
 }
 
 #[test]
@@ -351,6 +388,28 @@ fn engine_receives_half_packet() {
         ReceiveReport::Packet { .. }
     ));
     assert_message(&mut b, b"hello");
+}
+
+#[test]
+fn engine_treats_semantically_malformed_packet_as_corrupted() {
+    let mut engine = Engine::new(EngineConfig::default());
+    let mut malformed = ack_packet_for_key(crate::core::PacketKey::new(
+        crate::core::ChannelId::DEFAULT,
+        crate::core::MessageId::new(7),
+        crate::core::PacketIndex::ZERO,
+    ));
+    let total_len = malformed.len;
+    let packet = &mut malformed.bytes[crate::wire::WIRE_HEADER_LEN..];
+    packet[9..11].copy_from_slice(&1u16.to_le_bytes());
+    let integrity = EngineConfig::default().integrity;
+    let tag_len = crate::integrity::Integrity::tag_len(&integrity);
+    let (authenticated, tag) = malformed.bytes[..total_len].split_at_mut(total_len - tag_len);
+    crate::integrity::Integrity::seal(&integrity, authenticated, tag);
+
+    assert_eq!(
+        engine.receive(malformed.as_bytes()),
+        ReceiveReport::Corrupted
+    );
 }
 
 #[test]
@@ -811,7 +870,9 @@ fn next_send_failed(engine: &mut Engine, now_ms: u64) -> SendFailedEvent {
 fn ack_packet_for_key(key: crate::core::PacketKey) -> WriteEvent {
     let mut bytes = [0; crate::engine::config::MAX_WIRE_BYTES];
     let packet_len = crate::core::packet::header::PACKET_HEADER_LEN as u8;
-    let total_len = crate::wire::WIRE_HEADER_LEN + usize::from(packet_len) + 2;
+    let integrity = EngineConfig::default().integrity;
+    let tag_len = crate::integrity::Integrity::tag_len(&integrity);
+    let total_len = crate::wire::WIRE_HEADER_LEN + usize::from(packet_len) + tag_len;
 
     bytes[..crate::wire::WIRE_MAGIC_LEN].copy_from_slice(&crate::wire::EnvelopeMagic::MSRT.bytes());
     bytes[crate::wire::WIRE_PACKET_LEN_OFFSET] = packet_len;
@@ -826,8 +887,8 @@ fn ack_packet_for_key(key: crate::core::PacketKey) -> WriteEvent {
     packet[11..13].copy_from_slice(&0u16.to_le_bytes());
     packet[13] = crate::core::MessageFlags::EMPTY.bits();
 
-    let checksum = crate::wire::Checksum::calculate(&crate::wire::Crc16, &bytes[..total_len - 2]);
-    bytes[total_len - 2..total_len].copy_from_slice(&checksum.to_le_bytes());
+    let (authenticated, tag) = bytes[..total_len].split_at_mut(total_len - tag_len);
+    crate::integrity::Integrity::seal(&integrity, authenticated, tag);
 
     WriteEvent {
         key,

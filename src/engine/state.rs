@@ -63,7 +63,7 @@ impl EngineState {
         if self.ack.is_pending() {
             return self
                 .scheduler
-                .poll_ack(&mut self.ack, &mut self.numbers, tx_buf);
+                .poll_ack(config, &mut self.ack, &mut self.numbers, tx_buf);
         }
 
         if let Some(event) = self.scheduler.pop_urgent() {
@@ -87,8 +87,8 @@ impl EngineState {
         self.send_on_impl(config, channel_id, message)
     }
 
-    pub(crate) fn send_ping(&mut self) -> Result<MessageId> {
-        self.send_ping_impl()
+    pub(crate) fn send_ping(&mut self, config: &EngineConfig) -> Result<MessageId> {
+        self.send_ping_impl(config)
     }
 
     pub(crate) fn receive(&mut self, config: &EngineConfig, bytes: &[u8]) -> ReceiveReport {

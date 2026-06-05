@@ -58,7 +58,7 @@ impl Engine {
     /// This packet is handled by the protocol and is never delivered as an
     /// application message.
     pub fn send_ping(&mut self) -> Result<MessageId> {
-        self.state.send_ping()
+        self.state.send_ping(&self.config)
     }
 
     /// Feeds already-arrived wire bytes into the engine.
@@ -173,7 +173,7 @@ pub enum ReceiveReport {
         /// Number of bytes treated as noise.
         skipped: usize,
     },
-    /// The envelope checksum failed.
+    /// The envelope integrity check failed.
     Corrupted,
     /// The envelope is incomplete.
     Incomplete {

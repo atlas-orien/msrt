@@ -1,8 +1,9 @@
 //! Incoming wire byte handling.
 
 use crate::core::{ChannelId, Error, ErrorKind};
+use crate::integrity::Integrity;
 use crate::reliability::{Dedup, DedupDecision};
-use crate::wire::{Crc16, StreamDecodeOutcome, StreamingDecoder};
+use crate::wire::{StreamDecodeOutcome, StreamingDecoder};
 
 use crate::engine::{
     EngineConfig, ReceiveReport,
@@ -27,9 +28,9 @@ impl IngressState {
     pub(crate) fn feed(
         &mut self,
         bytes: &[u8],
-        checksum: &impl crate::wire::Checksum,
+        integrity: &impl Integrity,
     ) -> crate::core::Result<StreamDecodeOutcome<'_>> {
-        self.decoder.feed(bytes, checksum)
+        self.decoder.feed(bytes, integrity)
     }
 }
 
@@ -43,7 +44,7 @@ impl EngineState {
         let mut report = ReceiveReport::Incomplete { needed: None };
 
         loop {
-            let outcome = match self.ingress.feed(input, &Crc16) {
+            let outcome = match self.ingress.feed(input, &config.integrity) {
                 Ok(outcome) => outcome,
                 Err(error) => return ReceiveReport::Error(error),
             };
@@ -121,7 +122,7 @@ impl EngineState {
             }
             PacketDecode::Ping(ping) => {
                 let packet_index = ping.header.packet_index;
-                if self.queue_pong(ping.header.message_id).is_err() {
+                if self.queue_pong(config, ping.header.message_id).is_err() {
                     return ReceiveReport::Error(Error::new(ErrorKind::Engine));
                 }
                 ReceiveReport::Ping {
@@ -137,7 +138,7 @@ impl EngineState {
                     message_id: pong.header.message_id,
                 }
             }
-            PacketDecode::Malformed => ReceiveReport::Error(Error::malformed()),
+            PacketDecode::Malformed => ReceiveReport::Corrupted,
         }
     }
 }

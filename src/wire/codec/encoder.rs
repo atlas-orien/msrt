@@ -53,15 +53,14 @@ pub trait Encoder {
 
     /// Returns the number of bytes needed for a packet envelope.
     fn encoded_len(&self, packet: Packet<'_>) -> usize {
-        EnvelopeHeader::new(packet.payload_len() as u8).total_len()
+        EnvelopeHeader::new(packet.payload_len() as u8).total_len(crate::integrity::Crc16::TAG_LEN)
     }
 
     /// Builds a borrowed wire envelope descriptor for a packet payload.
-    fn envelope_for<'a>(&self, packet: Packet<'a>, checksum: u16) -> WireEnvelope<'a> {
+    fn envelope_for<'a>(&self, packet: Packet<'a>) -> WireEnvelope<'a> {
         WireEnvelope::new(
             EnvelopeHeader::new(packet.payload_len() as u8),
             packet.payload.as_bytes(),
-            checksum,
         )
     }
 }

@@ -2,9 +2,12 @@
 
 use crate::core::{Error, Result};
 
-use crate::wire::{
-    CHECKSUM_LEN, Checksum, EnvelopeHeader, EnvelopeMagic, WIRE_HEADER_CRC_OFFSET, WIRE_HEADER_LEN,
-    WIRE_MAGIC_LEN, WIRE_PACKET_LEN_OFFSET,
+use crate::{
+    integrity::Integrity,
+    wire::{
+        EnvelopeHeader, EnvelopeMagic, WIRE_HEADER_CRC_OFFSET, WIRE_HEADER_LEN, WIRE_MAGIC_LEN,
+        WIRE_PACKET_LEN_OFFSET,
+    },
 };
 
 /// Result of feeding bytes into a streaming wire decoder.
@@ -66,11 +69,11 @@ impl<const N: usize> StreamingDecoder<N> {
     pub fn feed<'a>(
         &'a mut self,
         bytes: &[u8],
-        checksum: &impl Checksum,
+        integrity: &impl Integrity,
     ) -> Result<StreamDecodeOutcome<'a>> {
         self.consume_pending();
         self.append(bytes)?;
-        self.decode_buffer(checksum)
+        self.decode_buffer(integrity)
     }
 
     /// Returns the number of buffered bytes.
@@ -105,7 +108,7 @@ impl<const N: usize> StreamingDecoder<N> {
 
     fn decode_buffer<'a>(
         &'a mut self,
-        checksum: &impl Checksum,
+        integrity: &impl Integrity,
     ) -> Result<StreamDecodeOutcome<'a>> {
         if self.len == 0 {
             return Ok(StreamDecodeOutcome::NeedMore { additional: None });
@@ -138,7 +141,8 @@ impl<const N: usize> StreamingDecoder<N> {
             return Ok(StreamDecodeOutcome::Resync { skipped: 1 });
         }
 
-        let total_len = header.total_len();
+        let integrity_tag_len = integrity.tag_len();
+        let total_len = header.total_len(integrity_tag_len);
 
         if total_len > N {
             self.consume(1);
@@ -151,12 +155,10 @@ impl<const N: usize> StreamingDecoder<N> {
             });
         }
 
-        let expected = u16::from_le_bytes([
-            self.bytes[total_len - CHECKSUM_LEN],
-            self.bytes[total_len - CHECKSUM_LEN + 1],
-        ]);
-
-        if !checksum.verify(&self.bytes[..total_len - CHECKSUM_LEN], expected) {
+        if !integrity.verify(
+            &self.bytes[..total_len - integrity_tag_len],
+            &self.bytes[total_len - integrity_tag_len..total_len],
+        ) {
             self.pending_consume = total_len;
             return Ok(StreamDecodeOutcome::Corrupted {
                 consumed: total_len,
@@ -217,12 +219,16 @@ fn header_from_bytes(bytes: &[u8]) -> Option<EnvelopeHeader> {
 #[cfg(test)]
 mod tests {
     use super::{StreamDecodeOutcome, StreamingDecoder};
-    use crate::wire::{
-        Checksum, Crc16, EnvelopeHeader, EnvelopeMagic, WIRE_HEADER_CRC_OFFSET, WIRE_HEADER_LEN,
-        WIRE_MAGIC_LEN, WIRE_PACKET_LEN_OFFSET,
+    use crate::{
+        integrity::{Integrity, IntegrityConfig},
+        wire::{
+            EnvelopeHeader, EnvelopeMagic, WIRE_HEADER_CRC_OFFSET, WIRE_HEADER_LEN, WIRE_MAGIC_LEN,
+            WIRE_PACKET_LEN_OFFSET,
+        },
     };
 
     const BUFFER_BYTES: usize = 64;
+    const INTEGRITY: IntegrityConfig = IntegrityConfig::DEFAULT;
 
     #[test]
     fn decoder_waits_for_half_packet() {
@@ -231,14 +237,18 @@ mod tests {
         let split = WIRE_MAGIC_LEN + 1;
 
         assert_eq!(
-            decoder.feed(&packet.as_bytes()[..split], &Crc16).unwrap(),
+            decoder
+                .feed(&packet.as_bytes()[..split], &INTEGRITY)
+                .unwrap(),
             StreamDecodeOutcome::NeedMore {
                 additional: Some(crate::wire::WIRE_HEADER_LEN - split)
             }
         );
 
         assert_eq!(
-            decoder.feed(&packet.as_bytes()[split..], &Crc16).unwrap(),
+            decoder
+                .feed(&packet.as_bytes()[split..], &INTEGRITY)
+                .unwrap(),
             StreamDecodeOutcome::Packet {
                 packet_bytes: b"hello",
                 consumed: packet.len
@@ -253,14 +263,14 @@ mod tests {
 
         for byte in &packet.as_bytes()[..packet.len - 1] {
             assert!(matches!(
-                decoder.feed(&[*byte], &Crc16).unwrap(),
+                decoder.feed(&[*byte], &INTEGRITY).unwrap(),
                 StreamDecodeOutcome::NeedMore { .. }
             ));
         }
 
         assert_eq!(
             decoder
-                .feed(&[packet.as_bytes()[packet.len - 1]], &Crc16)
+                .feed(&[packet.as_bytes()[packet.len - 1]], &INTEGRITY)
                 .unwrap(),
             StreamDecodeOutcome::Packet {
                 packet_bytes: b"hello",
@@ -280,7 +290,7 @@ mod tests {
 
         assert_eq!(
             decoder
-                .feed(&sticky[..first.len + second.len], &Crc16)
+                .feed(&sticky[..first.len + second.len], &INTEGRITY)
                 .unwrap(),
             StreamDecodeOutcome::Packet {
                 packet_bytes: b"one",
@@ -288,7 +298,7 @@ mod tests {
             }
         );
         assert_eq!(
-            decoder.feed(&[], &Crc16).unwrap(),
+            decoder.feed(&[], &INTEGRITY).unwrap(),
             StreamDecodeOutcome::Packet {
                 packet_bytes: b"two",
                 consumed: second.len
@@ -305,11 +315,11 @@ mod tests {
         bytes[3..3 + packet.len].copy_from_slice(packet.as_bytes());
 
         assert_eq!(
-            decoder.feed(&bytes[..3 + packet.len], &Crc16).unwrap(),
+            decoder.feed(&bytes[..3 + packet.len], &INTEGRITY).unwrap(),
             StreamDecodeOutcome::Noise { skipped: 3 }
         );
         assert_eq!(
-            decoder.feed(&[], &Crc16).unwrap(),
+            decoder.feed(&[], &INTEGRITY).unwrap(),
             StreamDecodeOutcome::Packet {
                 packet_bytes: b"ok",
                 consumed: packet.len
@@ -318,7 +328,7 @@ mod tests {
     }
 
     #[test]
-    fn decoder_reports_crc_error_and_resumes() {
+    fn decoder_reports_integrity_error_and_resumes() {
         let mut decoder = StreamingDecoder::<BUFFER_BYTES>::new();
         let mut first = wire_packet(b"bad");
         let second = wire_packet(b"good");
@@ -329,14 +339,14 @@ mod tests {
 
         assert_eq!(
             decoder
-                .feed(&sticky[..first.len + second.len], &Crc16)
+                .feed(&sticky[..first.len + second.len], &INTEGRITY)
                 .unwrap(),
             StreamDecodeOutcome::Corrupted {
                 consumed: first.len
             }
         );
         assert_eq!(
-            decoder.feed(&[], &Crc16).unwrap(),
+            decoder.feed(&[], &INTEGRITY).unwrap(),
             StreamDecodeOutcome::Packet {
                 packet_bytes: b"good",
                 consumed: second.len
@@ -357,7 +367,8 @@ mod tests {
 
     fn wire_packet(payload: &[u8]) -> TestWirePacket {
         let header = EnvelopeHeader::new(payload.len() as u8);
-        let total_len = header.total_len();
+        let tag_len = INTEGRITY.tag_len();
+        let total_len = header.total_len(tag_len);
         let mut bytes = [0; 32];
 
         bytes[..WIRE_MAGIC_LEN].copy_from_slice(&EnvelopeMagic::MSRT.bytes());
@@ -365,8 +376,8 @@ mod tests {
         bytes[WIRE_HEADER_CRC_OFFSET] = header.header_crc;
         bytes[WIRE_HEADER_LEN..WIRE_HEADER_LEN + payload.len()].copy_from_slice(payload);
 
-        let checksum = Crc16.calculate(&bytes[..total_len - 2]);
-        bytes[total_len - 2..total_len].copy_from_slice(&checksum.to_le_bytes());
+        let (authenticated, tag) = bytes[..total_len].split_at_mut(total_len - tag_len);
+        INTEGRITY.seal(authenticated, tag);
 
         TestWirePacket {
             bytes,

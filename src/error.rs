@@ -7,7 +7,7 @@ pub enum ErrorKind {
     Malformed,
     /// The provided buffer was too small.
     BufferTooSmall,
-    /// A packet boundary or checksum failed.
+    /// A packet boundary or integrity check failed.
     Packet,
     /// A reliability invariant failed.
     Reliability,
