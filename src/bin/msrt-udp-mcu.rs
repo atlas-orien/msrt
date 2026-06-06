@@ -20,9 +20,7 @@ const RX_BUF_BYTES: usize = 2048;
 const MAX_MESSAGE_BYTES: usize = 256;
 const DEFAULT_MESSAGE_BYTES: usize = 240;
 const TEST_FRAGMENT_BYTES: usize = 48;
-const DEFAULT_CORRUPT_PER_MILLE: u16 = 30;
-const DEFAULT_DROP_BYTE_PER_MILLE: u16 = 30;
-const DEFAULT_INSERT_BYTE_PER_MILLE: u16 = 30;
+const DEFAULT_NOISE_PER_MILLE: u16 = 1;
 
 #[derive(Clone, Debug)]
 struct Args {
@@ -46,12 +44,12 @@ impl Args {
             count: None,
             duration: None,
             noise: NoiseConfig {
-                corrupt_per_mille: DEFAULT_CORRUPT_PER_MILLE,
-                drop_byte_per_mille: DEFAULT_DROP_BYTE_PER_MILLE,
-                insert_byte_per_mille: DEFAULT_INSERT_BYTE_PER_MILLE,
-                burst_corrupt_per_mille: 0,
-                burst_drop_per_mille: 0,
-                packet_drop_per_mille: 0,
+                corrupt_per_mille: DEFAULT_NOISE_PER_MILLE,
+                drop_byte_per_mille: DEFAULT_NOISE_PER_MILLE,
+                insert_byte_per_mille: DEFAULT_NOISE_PER_MILLE,
+                burst_corrupt_per_mille: DEFAULT_NOISE_PER_MILLE,
+                burst_drop_per_mille: DEFAULT_NOISE_PER_MILLE,
+                packet_drop_per_mille: DEFAULT_NOISE_PER_MILLE,
             },
         };
 
@@ -96,10 +94,16 @@ impl Args {
                     parsed.duration = Some(Duration::from_secs(secs));
                 }
                 "--noise-percent" => {
-                    parsed.noise.corrupt_per_mille = parse_percent_per_mille(
+                    let value = parse_percent_per_mille(
                         next_value(&mut args, "--noise-percent")?,
                         "--noise-percent",
                     )?;
+                    parsed.noise.corrupt_per_mille = value;
+                    parsed.noise.drop_byte_per_mille = value;
+                    parsed.noise.insert_byte_per_mille = value;
+                    parsed.noise.burst_corrupt_per_mille = value;
+                    parsed.noise.burst_drop_per_mille = value;
+                    parsed.noise.packet_drop_per_mille = value;
                 }
                 "--drop-byte-percent" => {
                     parsed.noise.drop_byte_per_mille = parse_percent_per_mille(
@@ -111,6 +115,24 @@ impl Args {
                     parsed.noise.insert_byte_per_mille = parse_percent_per_mille(
                         next_value(&mut args, "--insert-byte-percent")?,
                         "--insert-byte-percent",
+                    )?;
+                }
+                "--burst-corrupt-percent" => {
+                    parsed.noise.burst_corrupt_per_mille = parse_percent_per_mille(
+                        next_value(&mut args, "--burst-corrupt-percent")?,
+                        "--burst-corrupt-percent",
+                    )?;
+                }
+                "--burst-drop-percent" => {
+                    parsed.noise.burst_drop_per_mille = parse_percent_per_mille(
+                        next_value(&mut args, "--burst-drop-percent")?,
+                        "--burst-drop-percent",
+                    )?;
+                }
+                "--packet-drop-percent" => {
+                    parsed.noise.packet_drop_per_mille = parse_percent_per_mille(
+                        next_value(&mut args, "--packet-drop-percent")?,
+                        "--packet-drop-percent",
                     )?;
                 }
                 "--help" | "-h" => return Err(usage()),
@@ -144,6 +166,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut last_send = Instant::now() - args.interval;
     let mut noise_state = NoiseLcg::with_seed(0x4d435520);
     let mut last_state = PeerState::Disconnected;
+    println!(
+        "msrt udp mcu bind={} peer={} interval={}ms message_len={} {}",
+        args.bind,
+        args.peer,
+        args.interval.as_millis(),
+        args.message.len(),
+        noise_config_summary(args.noise)
+    );
 
     loop {
         let now = elapsed_ms(start);
@@ -348,6 +378,18 @@ fn next_value(args: &mut impl Iterator<Item = String>, name: &str) -> Result<Str
 }
 
 fn usage() -> String {
-    "usage: msrt-udp-mcu [--bind ADDR] [--peer ADDR] [--interval-ms N] [--message TEXT] [--message-size N] [--count N] [--duration-sec N] [--noise-percent N] [--drop-byte-percent N] [--insert-byte-percent N]"
+    "usage: msrt-udp-mcu [--bind ADDR] [--peer ADDR] [--interval-ms N] [--message TEXT] [--message-size N] [--count N] [--duration-sec N] [--noise-percent N] [--drop-byte-percent N] [--insert-byte-percent N] [--burst-corrupt-percent N] [--burst-drop-percent N] [--packet-drop-percent N]"
         .to_string()
+}
+
+fn noise_config_summary(noise: NoiseConfig) -> String {
+    format!(
+        "noise={} drop_byte={} insert_byte={} burst_corrupt={} burst_drop={} packet_drop={}",
+        noise.corrupt_per_mille,
+        noise.drop_byte_per_mille,
+        noise.insert_byte_per_mille,
+        noise.burst_corrupt_per_mille,
+        noise.burst_drop_per_mille,
+        noise.packet_drop_per_mille,
+    )
 }

@@ -27,9 +27,9 @@ pub(crate) const DEFAULT_FRAGMENT_BYTES: usize = 64;
 /// opportunities. With the default 250 ms timeout, a missing ACK is reported
 /// after roughly 1.5 s, which is conservative for UART-like MCU links without
 /// hiding disconnects for too long.
-pub(crate) const DEFAULT_MAX_RETRANSMIT_ATTEMPTS: u8 = 10;
+pub(crate) const DEFAULT_MAX_RETRANSMIT_ATTEMPTS: u8 = 5;
 /// Default retransmission timeout in engine ticks.
-pub(crate) const DEFAULT_RETRANSMIT_TIMEOUT_MS: u64 = 250;
+pub(crate) const DEFAULT_RETRANSMIT_TIMEOUT_MS: u64 = 50;
 /// Default incomplete message reassembly timeout in engine ticks.
 ///
 /// This must outlive the default reliable-send retry window so late

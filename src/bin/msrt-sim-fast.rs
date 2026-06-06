@@ -20,7 +20,7 @@ const DEFAULT_MESSAGE_BYTES: usize = 240;
 const TEST_FRAGMENT_BYTES: usize = 48;
 const DEFAULT_INTERVAL_MS: u64 = 1;
 const DEFAULT_MESSAGES_PER_TICK: usize = 10;
-const DEFAULT_NOISE_PER_MILLE: u16 = 10;
+const DEFAULT_NOISE_PER_MILLE: u16 = 1;
 const DEFAULT_LOG_FILE: &str = "log/msrt-sim-fast.log";
 const STATUS_INTERVAL_MS: u64 = 60 * 60 * 1000;
 const MAX_POLLS_PER_TICK: usize = 256;
@@ -192,6 +192,9 @@ fn run(args: Args) -> Result<(), String> {
         noise_config_summary(args.noise),
         args.log_file.display()
     );
+    io::stdout()
+        .flush()
+        .map_err(|error| format!("stdout flush failed: {error}"))?;
 
     let mut sim = FastSim::new(args);
     sim.run()

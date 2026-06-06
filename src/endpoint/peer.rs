@@ -300,7 +300,6 @@ mod tests {
         let mut peer = PeerSlot::default();
 
         let first_engine = peer.engine_or_connect(1).unwrap();
-        first_engine.send(b"hello").unwrap();
         let expected_after_reconnect = first_engine.send(b"hello").unwrap();
         peer.disconnect();
         let engine = peer.engine_or_connect(2).unwrap();
