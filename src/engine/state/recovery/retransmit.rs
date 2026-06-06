@@ -87,27 +87,28 @@ impl EngineState {
         }
     }
 
-    #[cfg(feature = "std")]
+    #[cfg(feature = "tracing")]
     fn log_send_failed_snapshot(
         &self,
         config: &EngineConfig,
         now_ms: u64,
         failed: &InFlightPacket,
     ) {
-        eprintln!(
-            "msrt in_flight send_failed now={} len={} message_len={} ack_pending={} ack_pending_len={} failed_type={:?} failed_message={} failed_index={} attempts={} age_ms={} retry_limit={} rto_ms={}",
+        tracing::debug!(
+            target: "msrt::recovery",
             now_ms,
-            self.recovery.in_flight_len(),
-            self.message.len(),
-            self.ack.is_pending(),
-            self.ack.pending_len(),
-            failed.packet_type,
-            failed.message_id.get(),
-            failed.key.packet_index.get(),
-            failed.attempts,
-            now_ms.saturating_sub(failed.last_sent_ms),
-            config.max_retransmit_attempts,
-            self.retransmit_timeout_ms(config, failed.attempts),
+            in_flight_len = self.recovery.in_flight_len(),
+            message_len = self.message.len(),
+            ack_pending = self.ack.is_pending(),
+            ack_pending_len = self.ack.pending_len(),
+            failed_type = ?failed.packet_type,
+            failed_message = failed.message_id.get(),
+            failed_index = failed.key.packet_index.get(),
+            attempts = failed.attempts,
+            age_ms = now_ms.saturating_sub(failed.last_sent_ms),
+            retry_limit = config.max_retransmit_attempts,
+            rto_ms = self.retransmit_timeout_ms(config, failed.attempts),
+            "msrt in_flight send_failed",
         );
         self.scheduler.log_snapshot(now_ms, self.ack.is_pending());
         self.log_in_flight_packets(now_ms);
@@ -124,28 +125,29 @@ impl EngineState {
             .dynamic_timeout_ms(config.dynamic_recovery, attempts)
     }
 
-    #[cfg(feature = "std")]
+    #[cfg(feature = "tracing")]
     fn log_in_flight_packets(&self, now_ms: u64) {
         for packet in self.recovery.packets() {
-            eprintln!(
-                "msrt in_flight packet now={} type={:?} msg={} idx={} attempts={} age_ms={} len={} sent={}",
+            tracing::debug!(
+                target: "msrt::recovery",
                 now_ms,
-                packet.packet_type,
-                packet.message_id.get(),
-                packet.key.packet_index.get(),
-                packet.attempts,
-                now_ms.saturating_sub(packet.last_sent_ms),
-                packet.len,
-                packet.sent,
+                packet_type = ?packet.packet_type,
+                message_id = packet.message_id.get(),
+                packet_index = packet.key.packet_index.get(),
+                attempts = packet.attempts,
+                age_ms = now_ms.saturating_sub(packet.last_sent_ms),
+                len = packet.len,
+                sent = packet.sent,
+                "msrt in_flight packet",
             );
         }
     }
 
-    #[cfg(not(feature = "std"))]
+    #[cfg(not(feature = "tracing"))]
     #[allow(dead_code)]
     fn log_in_flight_packets(&self, _now_ms: u64) {}
 
-    #[cfg(not(feature = "std"))]
+    #[cfg(not(feature = "tracing"))]
     fn log_send_failed_snapshot(
         &self,
         _config: &EngineConfig,

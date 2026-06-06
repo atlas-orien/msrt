@@ -60,7 +60,7 @@ impl RecoveryState {
         self.in_flight.packets()
     }
 
-    #[cfg_attr(not(feature = "std"), allow(dead_code))]
+    #[cfg_attr(not(feature = "tracing"), allow(dead_code))]
     pub(crate) const fn in_flight_len(&self) -> usize {
         self.in_flight.len()
     }

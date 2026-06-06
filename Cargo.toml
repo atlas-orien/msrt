@@ -1,6 +1,6 @@
 [package]
 name = "msrt"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2024"
 license = "Apache-2.0"
 authors = ["Atlas Orein <gamesworldcraft@gamil.com>"]
@@ -26,9 +26,11 @@ default = ["std"]
 std = []
 serial = ["std", "dep:serialport"]
 dynamic-recovery = []
+tracing = ["dep:tracing"]
 
 [dependencies]
-serialport = { version = "4.9", optional = true }
+serialport = { version = "4", optional = true }
+tracing = { version = "0.1", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.8" }

@@ -8,27 +8,31 @@ pub(super) fn log_event(now_ms: u64, queue: &str, offset: usize, event: &EngineO
             let packet_type = packet_type(write.as_bytes())
                 .map(|packet_type| packet_type.code())
                 .unwrap_or_default();
-            eprintln!(
-                "msrt scheduler event now={} queue={} offset={} kind=write packet_type={} msg={} idx={} attempts={} len={} priority={:?}",
+            tracing::debug!(
+                target: "msrt::scheduler",
                 now_ms,
                 queue,
                 offset,
+                kind = "write",
                 packet_type,
-                write.key.message_id.get(),
-                write.key.packet_index.get(),
-                write.attempts,
-                write.len,
-                write.priority,
+                message_id = write.key.message_id.get(),
+                packet_index = write.key.packet_index.get(),
+                attempts = write.attempts,
+                len = write.len,
+                priority = ?write.priority,
+                "msrt scheduler event",
             );
         }
         EngineOutput::SendFailed(failed) => {
-            eprintln!(
-                "msrt scheduler event now={} queue={} offset={} kind=send_failed packet_type={:?} msg={}",
+            tracing::debug!(
+                target: "msrt::scheduler",
                 now_ms,
                 queue,
                 offset,
-                failed.packet_type,
-                failed.message_id.get(),
+                kind = "send_failed",
+                packet_type = ?failed.packet_type,
+                message_id = failed.message_id.get(),
+                "msrt scheduler event",
             );
         }
     }

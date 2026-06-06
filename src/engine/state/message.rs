@@ -43,7 +43,7 @@ impl MessageState {
         message
     }
 
-    #[cfg(feature = "std")]
+    #[cfg(feature = "tracing")]
     pub(crate) const fn len(&self) -> usize {
         self.len
     }

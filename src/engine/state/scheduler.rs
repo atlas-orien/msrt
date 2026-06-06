@@ -9,7 +9,7 @@ use crate::engine::{
 };
 
 mod event;
-#[cfg(feature = "std")]
+#[cfg(feature = "tracing")]
 pub(super) mod log;
 mod poll;
 mod queue;
@@ -130,22 +130,27 @@ impl SchedulerState {
         self.local.replace_redundant_write(event)
     }
 
-    #[cfg(feature = "std")]
+    #[cfg(feature = "tracing")]
     pub(crate) fn log_snapshot(&self, now_ms: u64, ack_pending: bool) {
-        eprintln!(
-            "msrt scheduler now={} ack_pending={} control_len={} retransmit_len={} new_data_len={} local_len={}",
+        tracing::debug!(
+            target: "msrt::scheduler",
             now_ms,
             ack_pending,
-            self.control.len(),
-            self.retransmit.len(),
-            self.new_data.len(),
-            self.local.len()
+            control_len = self.control.len(),
+            retransmit_len = self.retransmit.len(),
+            new_data_len = self.new_data.len(),
+            local_len = self.local.len(),
+            "msrt scheduler snapshot",
         );
         self.control.log_snapshot(now_ms, "control");
         self.retransmit.log_snapshot(now_ms, "retransmit");
         self.new_data.log_snapshot(now_ms, "new_data");
         self.local.log_snapshot(now_ms, "local");
     }
+
+    #[cfg(not(feature = "tracing"))]
+    #[allow(dead_code)]
+    pub(crate) fn log_snapshot(&self, _now_ms: u64, _ack_pending: bool) {}
 }
 
 #[cfg(test)]

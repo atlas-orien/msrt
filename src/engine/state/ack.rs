@@ -35,7 +35,7 @@ impl AckState {
         self.len != 0
     }
 
-    #[cfg(feature = "std")]
+    #[cfg(feature = "tracing")]
     pub(crate) const fn pending_len(&self) -> usize {
         self.len
     }

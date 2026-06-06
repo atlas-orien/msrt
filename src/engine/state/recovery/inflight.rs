@@ -80,7 +80,7 @@ impl InFlightPackets {
             .find(|packet| packet.key == key)
     }
 
-    #[cfg_attr(not(feature = "std"), allow(dead_code))]
+    #[cfg_attr(not(feature = "tracing"), allow(dead_code))]
     pub(crate) const fn len(&self) -> usize {
         self.len
     }

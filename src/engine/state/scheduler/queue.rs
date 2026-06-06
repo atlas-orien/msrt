@@ -79,7 +79,7 @@ impl EventQueue {
         self.len
     }
 
-    #[cfg(feature = "std")]
+    #[cfg(feature = "tracing")]
     pub(super) fn log_snapshot(&self, now_ms: u64, name: &str) {
         let mut offset = 0;
         while offset < self.len {
