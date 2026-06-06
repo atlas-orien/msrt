@@ -1,8 +1,8 @@
 //! v1 draft packet byte layout glue.
 
 use crate::core::{
-    ChannelId, Error, Flags, MessageId, PacketIndex, PacketType, Result,
-    packet::header::{PACKET_HEADER_LEN, PacketHeader},
+    ChannelId, Error, Flags, MessageId, PacketIndex, PacketKey, PacketType, Result,
+    packet::header::{ACK_PACKET_HEADER_LEN, PACKET_HEADER_LEN, PacketHeader},
 };
 
 use crate::engine::config::MAX_WIRE_BYTES;
@@ -25,7 +25,7 @@ pub(crate) enum PacketDecode<'a> {
 /// Decoded ACK packet.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct DecodedAck {
-    pub(crate) header: PacketHeader,
+    pub(crate) key: PacketKey,
 }
 
 /// Decoded liveness packet.
@@ -77,6 +77,15 @@ impl PacketBytes {
 }
 
 fn decode_packet_bytes(bytes: &[u8]) -> PacketDecode<'_> {
+    if matches!(
+        bytes.first().and_then(|code| PacketType::from_code(*code)),
+        Some(PacketType::Ack)
+    ) {
+        return ack_from_packet_bytes(bytes)
+            .map(PacketDecode::Ack)
+            .unwrap_or(PacketDecode::Malformed);
+    }
+
     let Some(header) = packet_header_from_bytes(bytes) else {
         return PacketDecode::Malformed;
     };
@@ -88,9 +97,7 @@ fn decode_packet_bytes(bytes: &[u8]) -> PacketDecode<'_> {
             .map(PacketDecode::Data)
             .unwrap_or(PacketDecode::Malformed),
         PacketType::Log => PacketDecode::Malformed,
-        PacketType::Ack => ack_from_packet_bytes(header, payload_bytes)
-            .map(PacketDecode::Ack)
-            .unwrap_or(PacketDecode::Malformed),
+        PacketType::Ack => PacketDecode::Malformed,
         PacketType::Ping => liveness_from_packet_bytes(header, payload_bytes)
             .map(PacketDecode::Ping)
             .unwrap_or(PacketDecode::Malformed),
@@ -123,16 +130,7 @@ fn packet_header_from_bytes(bytes: &[u8]) -> Option<PacketHeader> {
             fragment_offset,
         )),
         PacketType::Log => None,
-        PacketType::Ack => {
-            if flags != Flags::EMPTY || message_len != 0 || fragment_offset != 0 {
-                return None;
-            }
-
-            Some(PacketHeader::ack_on(
-                channel_id,
-                crate::core::PacketKey::new(message_id, packet_index),
-            ))
-        }
+        PacketType::Ack => None,
         PacketType::Ping => {
             if flags != Flags::EMPTY
                 || !channel_id.is_liveness()
@@ -158,16 +156,17 @@ fn packet_header_from_bytes(bytes: &[u8]) -> Option<PacketHeader> {
     }
 }
 
-fn ack_from_packet_bytes(header: PacketHeader, bytes: &[u8]) -> Option<DecodedAck> {
-    if !bytes.is_empty()
-        || header.flags() != Flags::EMPTY
-        || header.message_len() != 0
-        || header.fragment_offset() != 0
-    {
+fn ack_from_packet_bytes(bytes: &[u8]) -> Option<DecodedAck> {
+    if bytes.len() != ACK_PACKET_HEADER_LEN || *bytes.first()? != PacketType::Ack.code() {
         return None;
     }
 
-    Some(DecodedAck { header })
+    Some(DecodedAck {
+        key: PacketKey::new(
+            MessageId::new(u32::from_le_bytes(bytes.get(1..5)?.try_into().ok()?)),
+            PacketIndex::new(u16::from_le_bytes(bytes.get(5..7)?.try_into().ok()?)),
+        ),
+    })
 }
 
 fn fragment_from_packet_bytes(header: PacketHeader, bytes: &[u8]) -> Option<DecodedFragment<'_>> {

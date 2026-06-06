@@ -2,7 +2,7 @@
 
 use crate::core::{
     ChannelId, Error, ErrorKind, Flags, MessageId, PacketIndex, PacketKey, Result,
-    packet::header::{PACKET_HEADER_LEN, PacketHeader},
+    packet::header::{ACK_PACKET_HEADER_LEN, PACKET_HEADER_LEN, PacketHeader},
 };
 use crate::reliability::ReliabilityMode;
 use crate::{
@@ -19,7 +19,7 @@ use crate::engine::{
     state::{EngineOutput, EngineState, WriteEvent, recovery::inflight::InFlightPacket},
 };
 
-const ACK_PACKET_LEN: usize = PACKET_HEADER_LEN;
+const ACK_PACKET_LEN: usize = ACK_PACKET_HEADER_LEN;
 const LIVENESS_PACKET_LEN: usize = PACKET_HEADER_LEN;
 
 impl EngineState {
@@ -238,7 +238,6 @@ pub(crate) fn encode_ack_packet(
     out: &mut [u8],
     integrity: &impl Integrity,
 ) -> Result<usize> {
-    let header = PacketHeader::ack(key);
     let packet_len = u8::try_from(ACK_PACKET_LEN).map_err(|_| Error::new(ErrorKind::Engine))?;
     let envelope_header = EnvelopeHeader::new(packet_len);
     let integrity_tag_len = integrity.tag_len();
@@ -252,13 +251,9 @@ pub(crate) fn encode_ack_packet(
     out[WIRE_PACKET_LEN_OFFSET] = envelope_header.packet_len;
     out[WIRE_HEADER_CRC_OFFSET] = envelope_header.header_crc;
     let packet = &mut out[WIRE_HEADER_LEN..];
-    packet[0] = header.packet_type.code();
-    packet[1] = header.flags().bits();
-    packet[2] = header.channel_id().get();
-    packet[3..7].copy_from_slice(&header.message_id().get().to_le_bytes());
-    packet[7..9].copy_from_slice(&header.packet_index().get().to_le_bytes());
-    packet[9..11].copy_from_slice(&(header.message_len() as u16).to_le_bytes());
-    packet[11..13].copy_from_slice(&(header.fragment_offset() as u16).to_le_bytes());
+    packet[0] = crate::core::PacketType::Ack.code();
+    packet[1..5].copy_from_slice(&key.message_id.get().to_le_bytes());
+    packet[5..7].copy_from_slice(&key.packet_index.get().to_le_bytes());
 
     let (authenticated, tag) = out[..total_len].split_at_mut(total_len - integrity_tag_len);
     integrity.seal(authenticated, tag);

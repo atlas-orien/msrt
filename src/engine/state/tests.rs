@@ -397,11 +397,14 @@ fn engine_treats_semantically_malformed_packet_as_corrupted() {
         crate::core::MessageId::new(7),
         crate::core::PacketIndex::ZERO,
     ));
-    let total_len = malformed.len;
-    let packet = &mut malformed.bytes[crate::wire::WIRE_HEADER_LEN..];
-    packet[9..11].copy_from_slice(&1u16.to_le_bytes());
     let integrity = EngineConfig::default().integrity;
     let tag_len = crate::integrity::Integrity::tag_len(&integrity);
+    let packet_len = (crate::core::ACK_PACKET_HEADER_LEN + 1) as u8;
+    let total_len = crate::wire::WIRE_HEADER_LEN + usize::from(packet_len) + tag_len;
+    malformed.len = total_len;
+    malformed.bytes[crate::wire::WIRE_PACKET_LEN_OFFSET] = packet_len;
+    malformed.bytes[crate::wire::WIRE_HEADER_CRC_OFFSET] = crate::wire::header_crc(packet_len);
+    malformed.bytes[crate::wire::WIRE_HEADER_LEN + crate::core::ACK_PACKET_HEADER_LEN] = 1;
     let (authenticated, tag) = malformed.bytes[..total_len].split_at_mut(total_len - tag_len);
     crate::integrity::Integrity::seal(&integrity, authenticated, tag);
 
@@ -870,7 +873,7 @@ fn next_send_failed(engine: &mut Engine, now_ms: u64) -> SendFailedEvent {
 
 fn ack_packet_for_key(key: crate::core::PacketKey) -> WriteEvent {
     let mut bytes = [0; crate::engine::config::MAX_WIRE_BYTES];
-    let packet_len = crate::core::packet::header::PACKET_HEADER_LEN as u8;
+    let packet_len = crate::core::ACK_PACKET_HEADER_LEN as u8;
     let integrity = EngineConfig::default().integrity;
     let tag_len = crate::integrity::Integrity::tag_len(&integrity);
     let total_len = crate::wire::WIRE_HEADER_LEN + usize::from(packet_len) + tag_len;
@@ -880,12 +883,8 @@ fn ack_packet_for_key(key: crate::core::PacketKey) -> WriteEvent {
     bytes[crate::wire::WIRE_HEADER_CRC_OFFSET] = crate::wire::header_crc(packet_len);
     let packet = &mut bytes[crate::wire::WIRE_HEADER_LEN..];
     packet[0] = crate::core::PacketType::Ack.code();
-    packet[1] = 0;
-    packet[2] = crate::core::ChannelId::DEFAULT.get();
-    packet[3..7].copy_from_slice(&key.message_id.get().to_le_bytes());
-    packet[7..9].copy_from_slice(&key.packet_index.get().to_le_bytes());
-    packet[9..11].copy_from_slice(&0u16.to_le_bytes());
-    packet[11..13].copy_from_slice(&0u16.to_le_bytes());
+    packet[1..5].copy_from_slice(&key.message_id.get().to_le_bytes());
+    packet[5..7].copy_from_slice(&key.packet_index.get().to_le_bytes());
 
     let (authenticated, tag) = bytes[..total_len].split_at_mut(total_len - tag_len);
     crate::integrity::Integrity::seal(&integrity, authenticated, tag);

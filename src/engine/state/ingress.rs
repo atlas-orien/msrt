@@ -133,8 +133,8 @@ impl EngineState {
                 report
             }
             PacketDecode::Ack(ack) => {
-                let packet_index = ack.header.packet_index();
-                self.recovery.apply_ack(ack.header.key());
+                let packet_index = ack.key.packet_index;
+                self.recovery.apply_ack(ack.key);
                 ReceiveReport::Ack { packet_index }
             }
             PacketDecode::Ping(ping) => {
