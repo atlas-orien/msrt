@@ -18,9 +18,19 @@ fn main() {
 fn run() -> io::Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
     let log_path = log_path()?;
+    for bench in ["poll", "protocol"] {
+        run_bench(bench, &args, &log_path)?;
+    }
+
+    println!("cargo bench log written to {}", log_path.display());
+
+    Ok(())
+}
+
+fn run_bench(bench: &str, args: &[String], log_path: &Path) -> io::Result<()> {
     let mut command = Command::new("cargo");
-    command.arg("bench").arg("--bench").arg("protocol");
-    command.args(&args);
+    command.arg("bench").arg("--bench").arg(bench);
+    command.args(args);
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
 
     let mut child = command.spawn()?;
@@ -33,17 +43,15 @@ fn run() -> io::Result<()> {
         .take()
         .ok_or_else(|| io::Error::other("missing cargo bench stderr"))?;
 
-    let stdout_log = log_path.clone();
+    let stdout_log = log_path.to_path_buf();
     let stdout_thread = thread::spawn(move || tee_reader(stdout, stdout_log, false));
 
-    let stderr_log = log_path.clone();
+    let stderr_log = log_path.to_path_buf();
     let stderr_thread = thread::spawn(move || tee_reader(stderr, stderr_log, true));
 
     let status = child.wait()?;
     join_thread(stdout_thread)?;
     join_thread(stderr_thread)?;
-
-    println!("cargo bench log written to {}", log_path.display());
 
     if status.success() {
         Ok(())
