@@ -170,6 +170,11 @@ impl PeerSlot {
         };
 
         let report = engine.receive(bytes);
+        if matches!(report, ReceiveReport::Error(_)) {
+            self.disconnect();
+            return report;
+        }
+
         if matches!(
             report,
             ReceiveReport::Packet { .. }
@@ -191,13 +196,24 @@ impl PeerSlot {
 
     /// Polls the active engine and disconnects the peer on reliable send failure.
     pub fn poll<'a>(&mut self, now_ms: u64, tx_buf: &'a mut [u8]) -> Result<EndpointPoll<'a>> {
-        self.queue_ping_if_idle(now_ms)?;
+        if let Err(error) = self.queue_ping_if_idle(now_ms) {
+            self.disconnect();
+            return Err(error);
+        }
 
         let Some(engine) = self.engine.as_mut() else {
             return Ok(EndpointPoll::Idle);
         };
 
-        match engine.poll(now_ms, tx_buf)? {
+        let poll = match engine.poll(now_ms, tx_buf) {
+            Ok(poll) => poll,
+            Err(error) => {
+                self.disconnect();
+                return Err(error);
+            }
+        };
+
+        match poll {
             EnginePoll::Transmit { bytes, attempts } => {
                 Ok(EndpointPoll::Transmit { bytes, attempts })
             }
@@ -256,7 +272,9 @@ impl Default for PeerSlot {
 
 #[cfg(test)]
 mod tests {
-    use super::PeerSlot;
+    use crate::engine::ReceiveReport;
+
+    use super::{EndpointPoll, PeerSlot};
 
     #[test]
     fn peer_slot_creates_and_drops_engine() {
@@ -286,5 +304,51 @@ mod tests {
         let engine = peer.engine_or_connect(2).unwrap();
 
         assert_eq!(engine.send(b"hello").unwrap().get(), 1);
+    }
+
+    #[test]
+    fn receive_error_drops_engine_session() {
+        let mut peer = PeerSlot::default();
+        peer.engine_or_accept_passive(1).unwrap();
+
+        let oversized = [0; crate::engine::config::MAX_INGRESS_BYTES + 1];
+        assert!(matches!(
+            peer.receive(2, &oversized),
+            ReceiveReport::Error(_)
+        ));
+        assert!(!peer.has_session());
+        assert_eq!(peer.state(), super::PeerState::Disconnected);
+    }
+
+    #[test]
+    fn poll_error_drops_engine_session() {
+        let mut peer = PeerSlot::default();
+        peer.engine_or_connect(1).unwrap();
+
+        let mut tx_buf = [];
+        assert!(peer.poll(1, &mut tx_buf).is_err());
+        assert!(!peer.has_session());
+        assert_eq!(peer.state(), super::PeerState::Disconnected);
+    }
+
+    #[test]
+    fn send_failed_drops_engine_session() {
+        let mut peer = PeerSlot::default();
+        let engine = peer.engine_or_connect(1).unwrap();
+        engine.config.max_retransmit_attempts = 1;
+        engine.config.retransmit_timeout_ms = 1;
+        engine.send(b"hello").unwrap();
+
+        let mut tx_buf = [0; 128];
+        while !matches!(peer.poll(1, &mut tx_buf).unwrap(), EndpointPoll::Idle) {}
+        let _ = peer.poll(2, &mut tx_buf).unwrap();
+        for _ in 0..4 {
+            if matches!(peer.poll(3, &mut tx_buf), Ok(EndpointPoll::SendFailed(_))) {
+                assert!(!peer.has_session());
+                return;
+            }
+        }
+
+        panic!("peer should report send failure");
     }
 }

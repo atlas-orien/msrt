@@ -264,14 +264,18 @@ fn pump_endpoint(
 ) -> io::Result<()> {
     loop {
         let mut tx_buf = [0; TX_BUF_BYTES];
-        match endpoint.poll(now_ms, &mut tx_buf).expect("endpoint poll") {
-            EndpointPoll::Transmit { bytes, .. } => {
+        match endpoint.poll(now_ms, &mut tx_buf) {
+            Err(error) => {
+                eprintln!("mcu endpoint poll error: {error:?}");
+                return Ok(());
+            }
+            Ok(EndpointPoll::Transmit { bytes, .. }) => {
                 let (packet, _) = mutate_or_copy(noise_state, bytes, noise);
                 socket.send_to(&packet, peer)?;
             }
-            EndpointPoll::Message(_) => {}
-            EndpointPoll::SendFailed(_) => {}
-            EndpointPoll::Idle => return Ok(()),
+            Ok(EndpointPoll::Message(_)) => {}
+            Ok(EndpointPoll::SendFailed(_)) => {}
+            Ok(EndpointPoll::Idle) => return Ok(()),
         }
     }
 }

@@ -18,8 +18,8 @@ const TX_BUF_BYTES: usize = 256;
 const MAX_MESSAGE_BYTES: usize = 256;
 const DEFAULT_MESSAGE_BYTES: usize = 240;
 const TEST_FRAGMENT_BYTES: usize = 48;
-const DEFAULT_DURATION_MS: u64 = 24 * 60 * 60 * 1000;
 const DEFAULT_INTERVAL_MS: u64 = 1;
+const DEFAULT_MESSAGES_PER_TICK: usize = 10;
 const DEFAULT_NOISE_PER_MILLE: u16 = 10;
 const DEFAULT_LOG_FILE: &str = "log/msrt-sim-fast.log";
 const STATUS_INTERVAL_MS: u64 = 60 * 60 * 1000;
@@ -28,7 +28,8 @@ const MAX_POLLS_PER_TICK: usize = 256;
 #[derive(Clone, Debug)]
 struct Args {
     interval_ms: u64,
-    duration_ms: u64,
+    duration_ms: Option<u64>,
+    messages_per_tick: usize,
     message: Vec<u8>,
     noise: NoiseConfig,
     log_file: PathBuf,
@@ -39,7 +40,8 @@ impl Args {
         let mut args = env::args().skip(1);
         let mut parsed = Self {
             interval_ms: DEFAULT_INTERVAL_MS,
-            duration_ms: DEFAULT_DURATION_MS,
+            duration_ms: None,
+            messages_per_tick: DEFAULT_MESSAGES_PER_TICK,
             message: make_message(DEFAULT_MESSAGE_BYTES),
             log_file: PathBuf::from(DEFAULT_LOG_FILE),
             noise: NoiseConfig {
@@ -59,17 +61,32 @@ impl Args {
                         .parse()
                         .map_err(|error| format!("invalid --interval-ms: {error}"))?;
                 }
+                "--messages-per-tick" => {
+                    parsed.messages_per_tick = next_value(&mut args, "--messages-per-tick")?
+                        .parse()
+                        .map_err(|error| format!("invalid --messages-per-tick: {error}"))?;
+                }
+                "--duration-ms" => {
+                    parsed.duration_ms = Some(
+                        next_value(&mut args, "--duration-ms")?
+                            .parse()
+                            .map_err(|error| format!("invalid --duration-ms: {error}"))?,
+                    );
+                }
                 "--duration-sec" => {
                     let secs: u64 = next_value(&mut args, "--duration-sec")?
                         .parse()
                         .map_err(|error| format!("invalid --duration-sec: {error}"))?;
-                    parsed.duration_ms = secs.saturating_mul(1000);
+                    parsed.duration_ms = Some(secs.saturating_mul(1000));
                 }
                 "--duration-hours" => {
                     let hours: u64 = next_value(&mut args, "--duration-hours")?
                         .parse()
                         .map_err(|error| format!("invalid --duration-hours: {error}"))?;
-                    parsed.duration_ms = hours.saturating_mul(60 * 60 * 1000);
+                    parsed.duration_ms = Some(hours.saturating_mul(60 * 60 * 1000));
+                }
+                "--forever" => {
+                    parsed.duration_ms = None;
                 }
                 "--message-size" => {
                     let len = next_value(&mut args, "--message-size")?
@@ -137,6 +154,10 @@ impl Args {
             return Err("--interval-ms must be > 0".to_string());
         }
 
+        if parsed.messages_per_tick == 0 {
+            return Err("--messages-per-tick must be > 0".to_string());
+        }
+
         if parsed.message.len() > MAX_MESSAGE_BYTES {
             return Err(format!("message length must be <= {MAX_MESSAGE_BYTES}"));
         }
@@ -163,10 +184,11 @@ fn main() {
 fn run(args: Args) -> Result<(), String> {
     init_log_file(&args).map_err(|error| format!("log init failed: {error}"))?;
     println!(
-        "msrt sim fast interval={}ms duration={}ms message_len={} {} log_file={}",
+        "msrt sim fast interval={}ms duration={} message_len={} messages_per_tick={} {} log_file={}",
         args.interval_ms,
-        args.duration_ms,
+        duration_label(args.duration_ms),
         args.message.len(),
+        args.messages_per_tick,
         noise_config_summary(args.noise),
         args.log_file.display()
     );
@@ -219,7 +241,8 @@ impl FastSim {
             .connect(0)
             .map_err(|error| format!("host connect failed: {error:?}"))?;
 
-        for now_ms in 0..=self.args.duration_ms {
+        let mut now_ms = 0;
+        loop {
             self.tick(now_ms)?;
 
             if now_ms >= self.next_status_ms {
@@ -227,9 +250,15 @@ impl FastSim {
                     .map_err(|error| error.to_string())?;
                 self.next_status_ms = self.next_status_ms.saturating_add(STATUS_INTERVAL_MS);
             }
+
+            if matches!(self.args.duration_ms, Some(duration_ms) if now_ms >= duration_ms) {
+                break;
+            }
+
+            now_ms = now_ms.saturating_add(1);
         }
 
-        self.write_status(self.args.duration_ms)
+        self.write_status(now_ms)
             .map_err(|error| error.to_string())?;
         println!("sim fast completed");
         Ok(())
@@ -334,18 +363,34 @@ impl FastSim {
     fn send_messages(&mut self, now_ms: u64) {
         if self.host.peer().is_connected()
             && now_ms.saturating_sub(self.host_last_send_ms) >= self.args.interval_ms
-            && self.host.peer_mut().send(&self.args.message).is_ok()
         {
-            self.host_last_send_ms = now_ms;
-            self.host_sent += 1;
+            let mut sent = 0;
+            for _ in 0..self.args.messages_per_tick {
+                if self.host.peer_mut().send(&self.args.message).is_err() {
+                    break;
+                }
+                sent += 1;
+            }
+            if sent > 0 {
+                self.host_last_send_ms = now_ms;
+                self.host_sent += sent;
+            }
         }
 
         if self.mcu.peer().is_connected()
             && now_ms.saturating_sub(self.mcu_last_send_ms) >= self.args.interval_ms
-            && matches!(self.mcu.send(&self.args.message), Ok(Some(_)))
         {
-            self.mcu_last_send_ms = now_ms;
-            self.mcu_sent += 1;
+            let mut sent = 0;
+            for _ in 0..self.args.messages_per_tick {
+                if !matches!(self.mcu.send(&self.args.message), Ok(Some(_))) {
+                    break;
+                }
+                sent += 1;
+            }
+            if sent > 0 {
+                self.mcu_last_send_ms = now_ms;
+                self.mcu_sent += sent;
+            }
         }
     }
 
@@ -439,12 +484,12 @@ fn receive_bytes(
         let chunk_len = 1 + noise.next_byte() as usize % max;
         let report = endpoint.receive(now_ms, &bytes[index..index + chunk_len]);
         if matches!(report, ReceiveReport::Error(_)) {
-            return Err(format!(
+            eprintln!(
                 "sim fast receive_error now={} side={} report={:?}",
                 now_ms,
                 side.label(),
                 report
-            ));
+            );
         }
         index += chunk_len;
     }
@@ -506,10 +551,11 @@ fn init_log_file(args: &Args) -> io::Result<()> {
     writeln!(file, "status=running")?;
     writeln!(
         file,
-        "config fast interval={}ms duration={}ms message_len={} {}",
+        "config fast interval={}ms duration={} message_len={} messages_per_tick={} {}",
         args.interval_ms,
-        args.duration_ms,
+        duration_label(args.duration_ms),
         args.message.len(),
+        args.messages_per_tick,
         noise_config_summary(args.noise)
     )
 }
@@ -544,6 +590,12 @@ fn noise_config_summary(noise: NoiseConfig) -> String {
     )
 }
 
+fn duration_label(duration_ms: Option<u64>) -> String {
+    duration_ms
+        .map(|duration_ms| format!("{duration_ms}ms"))
+        .unwrap_or_else(|| "forever".to_string())
+}
+
 fn noise_stats_summary(stats: NoiseStats) -> String {
     format!(
         "corrupted={} dropped={} inserted={} burst_corrupted={} burst_dropped={} packet_dropped={}",
@@ -562,6 +614,6 @@ fn next_value(args: &mut impl Iterator<Item = String>, name: &str) -> Result<Str
 }
 
 fn usage() -> String {
-    "usage: msrt-sim-fast [--interval-ms N] [--duration-sec N] [--duration-hours N] [--message-size N] [--log-file PATH] [--noise-percent N] [--corrupt-percent N] [--drop-byte-percent N] [--insert-byte-percent N] [--burst-corrupt-percent N] [--burst-drop-percent N] [--packet-drop-percent N]"
+    "usage: msrt-sim-fast [--interval-ms N] [--messages-per-tick N] [--duration-ms N] [--duration-sec N] [--duration-hours N] [--forever] [--message-size N] [--log-file PATH] [--noise-percent N] [--corrupt-percent N] [--drop-byte-percent N] [--insert-byte-percent N] [--burst-corrupt-percent N] [--burst-drop-percent N] [--packet-drop-percent N]"
         .to_string()
 }

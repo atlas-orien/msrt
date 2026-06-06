@@ -294,8 +294,16 @@ impl HostWorker {
 
     fn poll_endpoint(&mut self, now_ms: u64) -> Result<bool, ()> {
         let mut tx_buf = [0; TX_BUF_BYTES];
-        match self.endpoint.poll(now_ms, &mut tx_buf).expect("host poll") {
-            EndpointPoll::Transmit { bytes, attempts: _ } => {
+        match self.endpoint.poll(now_ms, &mut tx_buf) {
+            Err(error) => {
+                let _ = self.events.send(SimEvent::EndpointError {
+                    side: Side::Host,
+                    now_ms,
+                    error: format!("{error:?}"),
+                });
+                Ok(false)
+            }
+            Ok(EndpointPoll::Transmit { bytes, attempts: _ }) => {
                 let connected = self.endpoint.peer().is_connected();
                 let (bytes, stats) =
                     mutate_for_link(&mut self.noise, bytes, connected, self.args.noise);
@@ -303,11 +311,11 @@ impl HostWorker {
                 self.tx.send(bytes).map_err(|_| ())?;
                 Ok(true)
             }
-            EndpointPoll::Message(_) => {
+            Ok(EndpointPoll::Message(_)) => {
                 let _ = self.events.send(SimEvent::Received { side: Side::Host });
                 Ok(true)
             }
-            EndpointPoll::SendFailed(failed) => {
+            Ok(EndpointPoll::SendFailed(failed)) => {
                 let _ = self.events.send(SimEvent::SendFailed {
                     side: Side::Host,
                     now_ms,
@@ -316,7 +324,7 @@ impl HostWorker {
                 });
                 Err(())
             }
-            EndpointPoll::Idle => Ok(false),
+            Ok(EndpointPoll::Idle) => Ok(false),
         }
     }
 
@@ -425,8 +433,16 @@ impl McuWorker {
 
     fn poll_endpoint(&mut self, now_ms: u64) -> Result<bool, ()> {
         let mut tx_buf = [0; TX_BUF_BYTES];
-        match self.endpoint.poll(now_ms, &mut tx_buf).expect("mcu poll") {
-            EndpointPoll::Transmit { bytes, attempts: _ } => {
+        match self.endpoint.poll(now_ms, &mut tx_buf) {
+            Err(error) => {
+                let _ = self.events.send(SimEvent::EndpointError {
+                    side: Side::Mcu,
+                    now_ms,
+                    error: format!("{error:?}"),
+                });
+                Ok(false)
+            }
+            Ok(EndpointPoll::Transmit { bytes, attempts: _ }) => {
                 let connected = self.endpoint.peer().is_connected();
                 let (bytes, stats) =
                     mutate_for_link(&mut self.noise, bytes, connected, self.args.noise);
@@ -434,11 +450,11 @@ impl McuWorker {
                 self.tx.send(bytes).map_err(|_| ())?;
                 Ok(true)
             }
-            EndpointPoll::Message(_) => {
+            Ok(EndpointPoll::Message(_)) => {
                 let _ = self.events.send(SimEvent::Received { side: Side::Mcu });
                 Ok(true)
             }
-            EndpointPoll::SendFailed(failed) => {
+            Ok(EndpointPoll::SendFailed(failed)) => {
                 let _ = self.events.send(SimEvent::SendFailed {
                     side: Side::Mcu,
                     now_ms,
@@ -447,7 +463,7 @@ impl McuWorker {
                 });
                 Err(())
             }
-            EndpointPoll::Idle => Ok(false),
+            Ok(EndpointPoll::Idle) => Ok(false),
         }
     }
 
@@ -613,7 +629,20 @@ impl Monitor {
                     side.label(),
                     report
                 );
-                Err(())
+                Ok(())
+            }
+            SimEvent::EndpointError {
+                side,
+                now_ms,
+                error,
+            } => {
+                eprintln!(
+                    "sim endpoint_error now={} side={} error={}",
+                    now_ms,
+                    side.label(),
+                    error
+                );
+                Ok(())
             }
             SimEvent::SendFailed {
                 side,
@@ -747,6 +776,11 @@ enum SimEvent {
         side: Side,
         now_ms: u64,
         report: ReceiveReport,
+    },
+    EndpointError {
+        side: Side,
+        now_ms: u64,
+        error: String,
     },
     SendFailed {
         side: Side,
