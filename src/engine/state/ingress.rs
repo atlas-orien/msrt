@@ -97,15 +97,14 @@ impl EngineState {
                 let key = fragment.header.key();
                 let ack_eliciting = fragment.header.is_ack_eliciting();
 
-                if ack_eliciting && self.queue_ack(key).is_err() {
-                    return ReceiveReport::Error(Error::new(ErrorKind::Engine));
-                }
-
-                if self.receive.dedup().observe(key) == DedupDecision::Duplicate {
+                if self.receive.dedup().is_duplicate(key) {
+                    if ack_eliciting && self.queue_ack(key).is_err() {
+                        return ReceiveReport::Error(Error::new(ErrorKind::Engine));
+                    }
                     return ReceiveReport::Duplicate { packet_index };
                 }
 
-                match self.reassembly.observe(fragment, self.clock.now_ms()) {
+                let report = match self.reassembly.observe(fragment, self.clock.now_ms()) {
                     Ok(Some(mut message)) => {
                         message.profile = config.channel_profile(message.channel_id);
                         self.message.push(message);
@@ -113,7 +112,25 @@ impl EngineState {
                     }
                     Ok(None) => ReceiveReport::Packet { packet_index },
                     Err(error) => ReceiveReport::Error(error),
+                };
+
+                if matches!(report, ReceiveReport::Error(_)) {
+                    return report;
                 }
+
+                match self.receive.dedup().observe_packet(key) {
+                    Ok(DedupDecision::Accept) => {}
+                    Ok(DedupDecision::Duplicate) => {
+                        return ReceiveReport::Duplicate { packet_index };
+                    }
+                    Err(error) => return ReceiveReport::Error(error),
+                }
+
+                if ack_eliciting && self.queue_ack(key).is_err() {
+                    return ReceiveReport::Error(Error::new(ErrorKind::Engine));
+                }
+
+                report
             }
             PacketDecode::Ack(ack) => {
                 let packet_index = ack.header.packet_index;
