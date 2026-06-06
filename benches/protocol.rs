@@ -3,7 +3,7 @@
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use msrt::{
     Engine, EngineConfig,
-    core::{ChannelId, Flags, MessageId, PacketHeader, PacketIndex, PacketKey},
+    core::{Flags, MessageId, PacketHeader, PacketIndex, PacketKey},
     endpoint::{ClientEndpoint, EndpointPoll, PassiveEndpoint},
     engine::{EnginePoll, ReceiveReport},
     integrity::{Aead, Crc8, Crc16, Crc32, Crc64, Integrity, IntegrityConfig},
@@ -28,7 +28,6 @@ fn core_primitives(c: &mut Criterion) {
             let header = PacketHeader::data(
                 PacketIndex::new(black_box(7)),
                 Flags::ACK_ELICITING,
-                ChannelId::new(black_box(3)),
                 MessageId::new(black_box(99)),
                 black_box(128),
                 black_box(32),
@@ -203,7 +202,6 @@ fn reliability_primitives(c: &mut Criterion) {
             let header = PacketHeader::data(
                 PacketIndex::new(black_box(4)),
                 Flags::ACK_ELICITING,
-                ChannelId::DEFAULT,
                 MessageId::new(black_box(10)),
                 black_box(128),
                 black_box(64),

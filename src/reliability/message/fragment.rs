@@ -1,24 +1,19 @@
 //! Message fragment identifiers and ranges.
 
-use crate::core::{ChannelId, Error, ErrorKind, MessageId, PacketHeader, Result};
+use crate::core::{Error, ErrorKind, MessageId, PacketHeader, Result};
 
-/// Key that identifies one message on one channel.
+/// Key that identifies one message.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct MessageKey {
-    /// Logical channel that owns the message.
-    pub channel_id: ChannelId,
-    /// Message identifier scoped to the channel.
+    /// Message identifier.
     pub message_id: MessageId,
 }
 
 impl MessageKey {
     /// Creates a message key.
     #[must_use]
-    pub const fn new(channel_id: ChannelId, message_id: MessageId) -> Self {
-        Self {
-            channel_id,
-            message_id,
-        }
+    pub const fn new(message_id: MessageId) -> Self {
+        Self { message_id }
     }
 }
 
@@ -93,7 +88,7 @@ impl MessageFragment {
         }
 
         Ok(Self::new(
-            MessageKey::new(header.channel_id(), header.message_id()),
+            MessageKey::new(header.message_id()),
             message_len,
             range,
         ))
@@ -102,7 +97,7 @@ impl MessageFragment {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::{ChannelId, Flags, MessageId, PacketHeader, PacketIndex};
+    use crate::core::{Flags, MessageId, PacketHeader, PacketIndex};
 
     use super::{FragmentRange, MessageFragment, MessageKey};
 
@@ -117,7 +112,6 @@ mod tests {
         let header = PacketHeader::data(
             PacketIndex::new(3),
             Flags::ACK_ELICITING,
-            ChannelId::new(7),
             MessageId::new(9),
             8,
             2,
@@ -125,10 +119,7 @@ mod tests {
 
         let fragment = MessageFragment::try_from_packet_header(header, 3).unwrap();
 
-        assert_eq!(
-            fragment.key,
-            MessageKey::new(ChannelId::new(7), MessageId::new(9))
-        );
+        assert_eq!(fragment.key, MessageKey::new(MessageId::new(9)));
         assert_eq!(fragment.range, FragmentRange::new(2, 3));
     }
 }

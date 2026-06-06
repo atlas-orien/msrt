@@ -4,9 +4,9 @@ pub(crate) mod codec;
 pub(crate) mod config;
 pub(crate) mod state;
 
-pub use config::{ChannelProfile, ChannelSpec, EngineConfig};
+pub use config::EngineConfig;
 
-use crate::core::{ChannelId, Error, MessageId, PacketIndex, Result};
+use crate::core::{Error, MessageId, PacketIndex, PacketType, Result};
 use state::EngineState;
 
 /// Minimal non-blocking MSRT protocol engine.
@@ -43,22 +43,17 @@ impl Engine {
     /// The caller submits the complete message once. The engine splits it into
     /// packet-sized write events internally.
     pub fn send(&mut self, message: &[u8]) -> Result<MessageId> {
-        self.send_on(ChannelId::DEFAULT, message)
+        self.state
+            .send_packet_type(&self.config, PacketType::Data, message)
     }
 
-    /// Queues a complete message on a logical channel.
+    /// Queues a best-effort diagnostic log message.
     ///
-    /// This is the channel-aware form of [`Engine::send`].
-    pub fn send_on(&mut self, channel_id: ChannelId, message: &[u8]) -> Result<MessageId> {
-        self.state.send_on(&self.config, channel_id, message)
-    }
-
-    /// Queues a liveness ping packet.
-    ///
-    /// This packet is handled by the protocol and is never delivered as an
-    /// application message.
-    pub fn send_ping(&mut self) -> Result<()> {
-        self.state.send_ping(&self.config)
+    /// Log messages use the protocol `Log` packet kind. They are never tracked
+    /// in-flight and do not elicit acknowledgements.
+    pub fn send_log(&mut self, message: &[u8]) -> Result<MessageId> {
+        self.state
+            .send_packet_type(&self.config, PacketType::Log, message)
     }
 
     /// Feeds already-arrived wire bytes into the engine.
@@ -98,10 +93,8 @@ pub enum EnginePoll<'a> {
 /// A complete message delivered by the engine.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MessageEvent {
-    /// Logical channel that carried the message.
-    pub channel_id: ChannelId,
-    /// Protocol-level purpose associated with the channel.
-    pub profile: ChannelProfile,
+    /// Packet type that carried the message.
+    pub packet_type: PacketType,
     /// Message identifier scoped to this engine.
     pub message_id: MessageId,
     /// Fixed storage containing complete message bytes.
@@ -121,8 +114,8 @@ impl MessageEvent {
 /// A reliable send failure produced by the engine.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SendFailedEvent {
-    /// Logical channel whose message failed.
-    pub channel_id: ChannelId,
+    /// Packet type whose message failed.
+    pub packet_type: PacketType,
     /// Message identifier that failed.
     pub message_id: MessageId,
     /// Failure reason.

@@ -21,7 +21,7 @@ pub use log::LogHeader;
 
 use super::{PacketIndex, PacketKey, PacketType};
 
-use crate::core::{ChannelId, MessageId};
+use crate::core::MessageId;
 
 /// Metadata shared by every protocol packet.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -38,7 +38,6 @@ impl PacketHeader {
     pub const fn data(
         packet_index: PacketIndex,
         flags: Flags,
-        channel_id: ChannelId,
         message_id: MessageId,
         message_len: usize,
         fragment_offset: usize,
@@ -46,7 +45,6 @@ impl PacketHeader {
         Self {
             packet_type: PacketType::Data,
             body: PacketHeaderBody::Data {
-                channel_id,
                 header: DataHeader::new(
                     flags,
                     message_id,
@@ -58,13 +56,12 @@ impl PacketHeader {
         }
     }
 
-    /// Creates a legacy DATA packet header from the target DATA header.
+    /// Creates a DATA packet header from the target DATA header.
     #[must_use]
-    pub const fn from_data_header(channel_id: ChannelId, header: DataHeader) -> Self {
+    pub const fn from_data_header(header: DataHeader) -> Self {
         Self::data(
             header.packet_index,
             header.flags,
-            channel_id,
             header.message_id,
             header.message_len,
             header.fragment_offset,
@@ -75,7 +72,6 @@ impl PacketHeader {
     #[must_use]
     pub const fn log(
         packet_index: PacketIndex,
-        channel_id: ChannelId,
         message_id: MessageId,
         message_len: usize,
         fragment_offset: usize,
@@ -83,18 +79,16 @@ impl PacketHeader {
         Self {
             packet_type: PacketType::Log,
             body: PacketHeaderBody::Log {
-                channel_id,
                 header: LogHeader::new(message_id, packet_index, message_len, fragment_offset),
             },
         }
     }
 
-    /// Creates a legacy LOG packet header from the target LOG header.
+    /// Creates a LOG packet header from the target LOG header.
     #[must_use]
-    pub const fn from_log_header(channel_id: ChannelId, header: LogHeader) -> Self {
+    pub const fn from_log_header(header: LogHeader) -> Self {
         Self::log(
             header.packet_index,
-            channel_id,
             header.message_id,
             header.message_len,
             header.fragment_offset,
@@ -104,16 +98,9 @@ impl PacketHeader {
     /// Creates an ACK packet header.
     #[must_use]
     pub const fn ack(key: PacketKey) -> Self {
-        Self::ack_on(ChannelId::DEFAULT, key)
-    }
-
-    /// Creates a legacy ACK packet header with a wire channel field.
-    #[must_use]
-    pub const fn ack_on(channel_id: ChannelId, key: PacketKey) -> Self {
         Self {
             packet_type: PacketType::Ack,
             body: PacketHeaderBody::Ack {
-                channel_id,
                 header: AckHeader::new(key.message_id, key.packet_index),
             },
         }
@@ -164,17 +151,6 @@ impl PacketHeader {
             PacketHeaderBody::Ack { .. }
             | PacketHeaderBody::Ping { .. }
             | PacketHeaderBody::Pong { .. } => Flags::EMPTY,
-        }
-    }
-
-    /// Returns the legacy channel id for the current wire format.
-    #[must_use]
-    pub const fn channel_id(self) -> ChannelId {
-        match self.body {
-            PacketHeaderBody::Data { channel_id, .. }
-            | PacketHeaderBody::Log { channel_id, .. }
-            | PacketHeaderBody::Ack { channel_id, .. } => channel_id,
-            PacketHeaderBody::Ping { .. } | PacketHeaderBody::Pong { .. } => ChannelId::LIVENESS,
         }
     }
 

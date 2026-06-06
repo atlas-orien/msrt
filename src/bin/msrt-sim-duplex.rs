@@ -668,11 +668,11 @@ impl Monitor {
         state: PeerState,
     ) -> String {
         format!(
-            "sim send_failed now={} side={} state={:?} ch={} msg={} host_state={:?} mcu_state={:?} host_sent={} mcu_sent={} host_received={} mcu_received={} {}",
+            "sim send_failed now={} side={} state={:?} packet_type={:?} msg={} host_state={:?} mcu_state={:?} host_sent={} mcu_sent={} host_received={} mcu_received={} {}",
             now_ms,
             side.label(),
             state,
-            failed.channel_id.get(),
+            failed.packet_type,
             failed.message_id.get(),
             self.host_state,
             self.mcu_state,

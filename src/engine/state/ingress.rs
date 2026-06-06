@@ -106,7 +106,8 @@ impl EngineState {
 
                 let report = match self.reassembly.observe(fragment, self.clock.now_ms()) {
                     Ok(Some(mut message)) => {
-                        message.profile = config.channel_profile(message.channel_id);
+                        let _ = config;
+                        message.packet_type = crate::core::PacketType::Data;
                         self.message.push(message);
                         ReceiveReport::Packet { packet_index }
                     }
@@ -137,7 +138,7 @@ impl EngineState {
 
                 match self.reassembly.observe(fragment, self.clock.now_ms()) {
                     Ok(Some(mut message)) => {
-                        message.profile = config.channel_profile(message.channel_id);
+                        message.packet_type = crate::core::PacketType::Log;
                         self.message.push(message);
                         ReceiveReport::Packet { packet_index }
                     }

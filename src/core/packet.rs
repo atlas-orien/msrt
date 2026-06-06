@@ -73,12 +73,8 @@ impl<'a> Packet<'a> {
     #[must_use]
     pub const fn header(self) -> PacketHeader {
         match self.body {
-            PacketBody::Data { header, .. } => {
-                PacketHeader::from_data_header(crate::core::ChannelId::DEFAULT, header)
-            }
-            PacketBody::Log { header, .. } => {
-                PacketHeader::from_log_header(crate::core::ChannelId::LOG, header)
-            }
+            PacketBody::Data { header, .. } => PacketHeader::from_data_header(header),
+            PacketBody::Log { header, .. } => PacketHeader::from_log_header(header),
             PacketBody::Ack { header } => PacketHeader::ack(crate::core::PacketKey::new(
                 header.message_id,
                 header.packet_index,
@@ -186,7 +182,7 @@ impl<'a> Packet<'a> {
 #[cfg(test)]
 mod tests {
     use super::{Flags, Packet, PacketBody, PacketHeader, PacketIndex};
-    use crate::core::{ChannelId, MessageId};
+    use crate::core::MessageId;
 
     #[test]
     fn packet_payload_contains_bytes() {
@@ -194,7 +190,6 @@ mod tests {
         let header = PacketHeader::data(
             PacketIndex::new(0),
             Flags::ACK_ELICITING,
-            ChannelId::DEFAULT,
             MessageId::new(7),
             3,
             0,

@@ -1,8 +1,7 @@
 //! Engine configuration.
 
-use crate::core::{ChannelId, MessageId};
+use crate::core::MessageId;
 use crate::integrity::IntegrityConfig;
-use crate::reliability::{ChannelReliability, ReliabilityMode};
 
 /// Maximum encoded wire bytes held by one MVP engine event.
 pub(crate) const MAX_WIRE_BYTES: usize = 128;
@@ -20,10 +19,6 @@ pub(crate) const MAX_IN_FLIGHT_PACKETS: usize = 16;
 pub(crate) const MAX_PENDING_ACKS: usize = 16;
 /// Maximum incomplete messages tracked by the reassembly table.
 pub(crate) const MAX_REASSEMBLY_MESSAGES: usize = 4;
-/// Maximum channel reliability policies configured in the engine.
-pub(crate) const MAX_CHANNEL_POLICIES: usize = 4;
-/// Maximum channel specs configured in the engine.
-pub(crate) const MAX_CHANNEL_SPECS: usize = 4;
 /// Default maximum message fragment bytes per packet.
 pub(crate) const DEFAULT_FRAGMENT_BYTES: usize = 64;
 /// Default maximum retransmission attempts before a send fails.
@@ -41,66 +36,6 @@ pub(crate) const DEFAULT_RETRANSMIT_TIMEOUT_MS: u64 = 250;
 /// retransmitted fragments can still complete an in-progress message.
 pub(crate) const DEFAULT_REASSEMBLY_TIMEOUT_MS: u64 = 2_000;
 
-/// Protocol-level purpose associated with a channel.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ChannelProfile {
-    /// Normal application data. Business message dispatch belongs above MSRT.
-    Data,
-    /// Diagnostic log output.
-    Log,
-}
-
-impl ChannelProfile {
-    /// Returns the default profile for a well-known or application-defined channel.
-    #[must_use]
-    pub const fn default_for(channel_id: ChannelId) -> Self {
-        if channel_id.is_log() {
-            Self::Log
-        } else {
-            Self::Data
-        }
-    }
-}
-
-/// Protocol configuration associated with one channel.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ChannelSpec {
-    /// Channel this spec applies to.
-    pub channel_id: ChannelId,
-    /// Protocol-level purpose for this channel.
-    pub profile: ChannelProfile,
-    /// Reliability mode for this channel.
-    pub reliability_mode: ReliabilityMode,
-}
-
-impl ChannelSpec {
-    /// Creates a channel spec.
-    #[must_use]
-    pub const fn new(
-        channel_id: ChannelId,
-        profile: ChannelProfile,
-        reliability_mode: ReliabilityMode,
-    ) -> Self {
-        Self {
-            channel_id,
-            profile,
-            reliability_mode,
-        }
-    }
-
-    /// Creates a reliable data channel spec.
-    #[must_use]
-    pub const fn data(channel_id: ChannelId) -> Self {
-        Self::new(channel_id, ChannelProfile::Data, ReliabilityMode::Reliable)
-    }
-
-    /// Creates a best-effort log channel spec.
-    #[must_use]
-    pub const fn log(channel_id: ChannelId) -> Self {
-        Self::new(channel_id, ChannelProfile::Log, ReliabilityMode::BestEffort)
-    }
-}
-
 /// Minimal protocol engine configuration.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EngineConfig {
@@ -116,10 +51,6 @@ pub struct EngineConfig {
     pub reassembly_timeout_ms: u64,
     /// Packet integrity backend used by this engine.
     pub integrity: IntegrityConfig,
-    /// Optional per-channel protocol specs.
-    pub channel_specs: [Option<ChannelSpec>; 4],
-    /// Optional per-channel reliability policies.
-    pub channel_policies: [Option<ChannelReliability>; 4],
 }
 
 impl Default for EngineConfig {
@@ -131,55 +62,6 @@ impl Default for EngineConfig {
             retransmit_timeout_ms: DEFAULT_RETRANSMIT_TIMEOUT_MS,
             reassembly_timeout_ms: DEFAULT_REASSEMBLY_TIMEOUT_MS,
             integrity: IntegrityConfig::DEFAULT,
-            channel_specs: [None; MAX_CHANNEL_SPECS],
-            channel_policies: [None; MAX_CHANNEL_POLICIES],
         }
-    }
-}
-
-impl EngineConfig {
-    pub(crate) fn reliability_mode(&self, channel_id: ChannelId) -> ReliabilityMode {
-        let mut spec_index = 0;
-
-        while spec_index < MAX_CHANNEL_SPECS {
-            if let Some(spec) = self.channel_specs[spec_index]
-                && spec.channel_id.get() == channel_id.get()
-            {
-                return spec.reliability_mode;
-            }
-            spec_index += 1;
-        }
-
-        if channel_id.is_log() {
-            return ReliabilityMode::BestEffort;
-        }
-
-        let mut index = 0;
-
-        while index < MAX_CHANNEL_POLICIES {
-            if let Some(policy) = self.channel_policies[index]
-                && policy.channel_id.get() == channel_id.get()
-            {
-                return policy.mode;
-            }
-            index += 1;
-        }
-
-        ReliabilityMode::Reliable
-    }
-
-    pub(crate) fn channel_profile(&self, channel_id: ChannelId) -> ChannelProfile {
-        let mut index = 0;
-
-        while index < MAX_CHANNEL_SPECS {
-            if let Some(spec) = self.channel_specs[index]
-                && spec.channel_id.get() == channel_id.get()
-            {
-                return spec.profile;
-            }
-            index += 1;
-        }
-
-        ChannelProfile::default_for(channel_id)
     }
 }

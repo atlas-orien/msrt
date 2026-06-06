@@ -1,29 +1,23 @@
 //! Packet header body variants.
 
 use super::{AckHeader, DataHeader, LogHeader, PingHeader, PongHeader};
-use crate::core::{ChannelId, MessageId};
+use crate::core::MessageId;
 
 /// Kind-specific packet header data.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PacketHeaderBody {
-    /// Data-like fragment using the legacy channel field.
+    /// DATA fragment.
     Data {
-        /// Logical channel carrying this message fragment.
-        channel_id: ChannelId,
         /// DATA header fields.
         header: DataHeader,
     },
-    /// Log fragment using the legacy channel field.
+    /// LOG fragment.
     Log {
-        /// Logical channel carrying this log fragment.
-        channel_id: ChannelId,
         /// LOG header fields.
         header: LogHeader,
     },
-    /// Single-packet acknowledgement using the legacy channel field.
+    /// Single-packet acknowledgement.
     Ack {
-        /// Logical channel from the acknowledged packet key.
-        channel_id: ChannelId,
         /// ACK header fields.
         header: AckHeader,
     },

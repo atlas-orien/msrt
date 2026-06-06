@@ -78,13 +78,13 @@ impl EngineState {
             .poll_new_data(&mut self.recovery, now_ms, tx_buf)
     }
 
-    pub(crate) fn send_on(
+    pub(crate) fn send_packet_type(
         &mut self,
         config: &EngineConfig,
-        channel_id: crate::core::ChannelId,
+        packet_type: crate::core::PacketType,
         message: &[u8],
     ) -> Result<MessageId> {
-        self.send_on_impl(config, channel_id, message)
+        self.send_packet_type_impl(config, packet_type, message)
     }
 
     pub(crate) fn send_ping(&mut self, config: &EngineConfig) -> Result<()> {

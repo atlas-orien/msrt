@@ -10,4 +10,4 @@ pub use packet::{
     PacketReliabilityEvent, PacketState, RetransmitDecision, RetransmitPolicy, RetryLimitPolicy,
     SlidingWindow, TimeoutEvent, TimeoutPolicy, WindowDecision,
 };
-pub use policy::{ChannelReliability, ReliabilityMode};
+pub use policy::ReliabilityMode;

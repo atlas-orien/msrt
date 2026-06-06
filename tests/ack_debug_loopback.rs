@@ -1,6 +1,6 @@
 use msrt::{
     Engine,
-    core::ChannelId,
+    core::PacketType,
     engine::{EnginePoll, MessageEvent, ReceiveReport},
 };
 
@@ -26,7 +26,7 @@ fn default_message_is_acked_without_adapter() {
     ));
 
     let mcu_message = next_message(&mut mcu);
-    assert_eq!(mcu_message.channel_id, ChannelId::DEFAULT);
+    assert_eq!(mcu_message.packet_type, PacketType::Data);
     assert_eq!(mcu_message.as_bytes(), b"host ping");
 
     assert_no_send_failed(&mut host);
@@ -43,16 +43,16 @@ fn mcu_can_debug_after_receiving_default_message_without_adapter() {
     deliver_next_write(&mut mcu, &mut host);
 
     let mcu_message = next_message(&mut mcu);
-    assert_eq!(mcu_message.channel_id, ChannelId::DEFAULT);
+    assert_eq!(mcu_message.packet_type, PacketType::Data);
     assert_eq!(mcu_message.as_bytes(), b"host ping");
 
-    mcu.send_on(ChannelId::LOG, b"mcu received host message")
+    mcu.send_log(b"mcu received host message")
         .expect("queue mcu debug");
 
     deliver_next_write(&mut mcu, &mut host);
 
     let debug = next_message(&mut host);
-    assert_eq!(debug.channel_id, ChannelId::LOG);
+    assert_eq!(debug.packet_type, PacketType::Log);
     assert_eq!(debug.as_bytes(), b"mcu received host message");
 
     assert_no_send_failed(&mut host);
@@ -79,7 +79,7 @@ fn split_serial_reads_still_ack_and_debug_without_adapter() {
     let mcu_message = next_message(&mut mcu);
     assert_eq!(mcu_message.as_bytes(), b"host ping");
 
-    mcu.send_on(ChannelId::LOG, b"mcu received host message")
+    mcu.send_log(b"mcu received host message")
         .expect("queue mcu debug");
     let debug_write = next_write(&mut mcu);
     for byte in debug_write.as_bytes() {
@@ -87,7 +87,7 @@ fn split_serial_reads_still_ack_and_debug_without_adapter() {
     }
 
     let debug = next_message(&mut host);
-    assert_eq!(debug.channel_id, ChannelId::LOG);
+    assert_eq!(debug.packet_type, PacketType::Log);
     assert_eq!(debug.as_bytes(), b"mcu received host message");
 
     assert_no_send_failed(&mut host);
@@ -110,17 +110,17 @@ fn poll_copies_transmit_bytes_into_external_buffer() {
     assert!(matches!(host.receive(bytes), ReceiveReport::Ack { .. }));
 
     let message = next_polled_message(&mut mcu, &mut mcu_tx);
-    assert_eq!(message.channel_id, ChannelId::DEFAULT);
+    assert_eq!(message.packet_type, PacketType::Data);
     assert_eq!(message.as_bytes(), b"host ping");
 
-    mcu.send_on(ChannelId::LOG, b"mcu received host message")
+    mcu.send_log(b"mcu received host message")
         .expect("queue mcu debug");
 
     let bytes = next_transmit(&mut mcu, &mut mcu_tx);
     assert!(matches!(host.receive(bytes), ReceiveReport::Packet { .. }));
 
     let message = next_polled_message(&mut host, &mut host_tx);
-    assert_eq!(message.channel_id, ChannelId::LOG);
+    assert_eq!(message.packet_type, PacketType::Log);
     assert_eq!(message.as_bytes(), b"mcu received host message");
 }
 

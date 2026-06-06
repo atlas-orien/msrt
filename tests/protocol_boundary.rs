@@ -4,11 +4,9 @@ const TX_BUF_BYTES: usize = 128;
 
 use msrt::{
     Engine,
-    core::{ChannelId, Flags, MessageId, Packet, PacketHeader, PacketIndex},
+    core::{Flags, MessageId, Packet, PacketHeader, PacketIndex},
     engine::EnginePoll,
-    reliability::{
-        ChannelReliability, FragmentRange, MessageFragment, MessageKey, ReliabilityMode,
-    },
+    reliability::{FragmentRange, MessageFragment, MessageKey},
     wire::{EnvelopeHeader, EnvelopeMagic, WireEnvelope},
 };
 
@@ -18,7 +16,6 @@ fn facade_exposes_core_packet_and_wire_envelope() {
     let header = PacketHeader::data(
         PacketIndex::new(0),
         Flags::ACK_ELICITING,
-        ChannelId::DEFAULT,
         MessageId::new(7),
         payload.len(),
         0,
@@ -40,7 +37,6 @@ fn facade_exposes_reliability_fragment_view() {
     let header = PacketHeader::data(
         PacketIndex::new(0),
         Flags::ACK_ELICITING,
-        ChannelId::new(7),
         MessageId::new(9),
         8,
         2,
@@ -48,10 +44,7 @@ fn facade_exposes_reliability_fragment_view() {
 
     let fragment = MessageFragment::try_from_packet_header(header, 4).unwrap();
 
-    assert_eq!(
-        fragment.key,
-        MessageKey::new(ChannelId::new(7), MessageId::new(9))
-    );
+    assert_eq!(fragment.key, MessageKey::new(MessageId::new(9)));
     assert_eq!(fragment.range, FragmentRange::new(2, 4));
 }
 
@@ -68,25 +61,12 @@ fn facade_exposes_concrete_engine_api() {
     };
 
     assert_eq!(
-        bytes[msrt::wire::WIRE_HEADER_LEN + 2],
-        ChannelId::DEFAULT.get()
-    );
-    assert_eq!(
         u16::from_le_bytes(
-            bytes[msrt::wire::WIRE_HEADER_LEN + 7..msrt::wire::WIRE_HEADER_LEN + 9]
+            bytes[msrt::wire::WIRE_HEADER_LEN + 6..msrt::wire::WIRE_HEADER_LEN + 8]
                 .try_into()
                 .unwrap()
         ),
         PacketIndex::ZERO.get()
     );
     assert!(!bytes.is_empty());
-}
-
-#[test]
-fn facade_exposes_reliability_policy_types() {
-    let channel_id = ChannelId::new(3);
-    let policy = ChannelReliability::new(channel_id, ReliabilityMode::LatestOnly, 1, Some(100));
-
-    assert_eq!(policy.channel_id, channel_id);
-    assert_eq!(policy.mode, ReliabilityMode::LatestOnly);
 }

@@ -336,9 +336,9 @@ fn pump_endpoint(
                 stats.received_messages += 1;
                 if args.verbose {
                     println!(
-                        "frontend message count={} ch={} len={} text={}",
+                        "frontend message count={} packet_type={:?} len={} text={}",
                         stats.received_messages,
-                        message.channel_id.get(),
+                        message.packet_type,
                         message.as_bytes().len(),
                         printable(message.as_bytes())
                     );
@@ -346,8 +346,8 @@ fn pump_endpoint(
             }
             EndpointPoll::SendFailed(failed) => {
                 println!(
-                    "frontend send_failed ch={} msg={}",
-                    failed.channel_id.get(),
+                    "frontend send_failed packet_type={:?} msg={}",
+                    failed.packet_type,
                     failed.message_id.get()
                 );
                 log_state_change(last_state, endpoint.peer().state());

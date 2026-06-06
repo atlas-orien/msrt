@@ -1,10 +1,9 @@
 use crate::engine::state::{EngineOutput, EngineState, WriteEvent};
 use crate::engine::{
-    ChannelProfile, ChannelSpec, Engine, EngineConfig, EnginePoll, MessageEvent, ReceiveReport,
-    SendFailedEvent, SendFailureReason,
+    Engine, EngineConfig, EnginePoll, MessageEvent, ReceiveReport, SendFailedEvent,
+    SendFailureReason,
 };
 use crate::integrity::IntegrityConfig;
-use crate::reliability::ChannelReliability;
 
 #[test]
 fn engine_sends_one_message_as_multiple_write_events() {
@@ -203,29 +202,6 @@ fn engine_reassembly_timeout_releases_slot() {
         ),
         ReceiveReport::Packet { .. }
     ));
-}
-
-#[test]
-fn engine_send_on_uses_channel_id() {
-    let mut a = Engine::new(EngineConfig::default());
-    let mut b = Engine::new(EngineConfig::default());
-    let channel_id = crate::core::ChannelId::new(7);
-
-    a.send_on(channel_id, b"hello").unwrap();
-
-    let write = next_write(&mut a);
-    let bytes = write.as_bytes();
-
-    assert_eq!(channel_id_from_wire(bytes), channel_id.get());
-    assert!(matches!(
-        b.receive(write.as_bytes()),
-        ReceiveReport::Packet { .. }
-    ));
-
-    let message = next_message(&mut b);
-
-    assert_eq!(message.channel_id, channel_id);
-    assert_eq!(message.as_bytes(), b"hello");
 }
 
 #[test]
@@ -536,123 +512,39 @@ fn engine_encodes_v1_draft_packet_and_frame_headers() {
     );
     assert_eq!(packet[0], crate::core::PacketType::Data.code());
     assert_eq!(packet[1], crate::core::Flags::ACK_ELICITING.bits());
-    assert_eq!(packet[2], crate::core::ChannelId::DEFAULT.get());
     assert_eq!(
-        u32::from_le_bytes(packet[3..7].try_into().unwrap()),
+        u32::from_le_bytes(packet[2..6].try_into().unwrap()),
         write.key.message_id.get()
     );
     assert_eq!(
-        u16::from_le_bytes(packet[7..9].try_into().unwrap()),
+        u16::from_le_bytes(packet[6..8].try_into().unwrap()),
         write.key.packet_index.get()
     );
-    assert_eq!(u16::from_le_bytes(packet[9..11].try_into().unwrap()), 5);
-    assert_eq!(u16::from_le_bytes(packet[11..13].try_into().unwrap()), 0);
-    assert_eq!(&packet[legacy_data_packet_header_len()..], b"hello");
+    assert_eq!(u16::from_le_bytes(packet[8..10].try_into().unwrap()), 5);
+    assert_eq!(u16::from_le_bytes(packet[10..12].try_into().unwrap()), 0);
+    assert_eq!(&packet[crate::core::DATA_PACKET_HEADER_LEN..], b"hello");
 }
 
 #[test]
-fn engine_best_effort_channel_does_not_track_in_flight() {
-    let channel_id = crate::core::ChannelId::new(9);
-    let mut engine = Engine::new(EngineConfig {
-        channel_policies: [
-            Some(ChannelReliability::best_effort(channel_id)),
-            None,
-            None,
-            None,
-        ],
-        ..EngineConfig::default()
-    });
-
-    engine.send_on(channel_id, b"hello best effort").unwrap();
-
-    while let Some(event) = EngineState::poll_event(&mut engine.state) {
-        let EngineOutput::Write(_) = event else {
-            panic!("best-effort send should only produce writes before tick");
-        };
-    }
-
-    assert_eq!(engine.state.recovery.in_flight_len(), 0);
-
-    poll_idle(&mut engine, 1);
-}
-
-#[test]
-fn engine_best_effort_packet_is_not_ack_eliciting() {
-    let channel_id = crate::core::ChannelId::new(9);
-    let mut engine = Engine::new(EngineConfig {
-        channel_policies: [
-            Some(ChannelReliability::best_effort(channel_id)),
-            None,
-            None,
-            None,
-        ],
-        ..EngineConfig::default()
-    });
-
-    engine.send_on(channel_id, b"hello").unwrap();
-
-    let write = next_write(&mut engine);
-
-    assert_eq!(
-        packet_flags_from_wire(write.as_bytes()),
-        crate::core::Flags::EMPTY.bits()
-    );
-}
-
-#[test]
-fn engine_receives_best_effort_without_ack() {
-    let channel_id = crate::core::ChannelId::new(9);
-    let mut sender = Engine::new(EngineConfig {
-        channel_policies: [
-            Some(ChannelReliability::best_effort(channel_id)),
-            None,
-            None,
-            None,
-        ],
-        ..EngineConfig::default()
-    });
-    let mut receiver = Engine::new(EngineConfig::default());
-
-    sender.send_on(channel_id, b"hello best effort").unwrap();
-
-    let write = next_write(&mut sender);
-
-    assert!(matches!(
-        receiver.receive(write.as_bytes()),
-        ReceiveReport::Packet { .. }
-    ));
-
-    let message = next_message(&mut receiver);
-
-    assert_eq!(message.channel_id, channel_id);
-    assert_eq!(message.profile, ChannelProfile::Data);
-    assert_eq!(message.as_bytes(), b"hello best effort");
-    assert!(EngineState::poll_event(&mut receiver.state).is_none());
-}
-
-#[test]
-fn engine_send_uses_default_application_channel() {
+fn engine_send_uses_data_packet_kind() {
     let mut engine = Engine::new(EngineConfig::default());
 
     engine.send(b"hello default").unwrap();
 
     let write = next_write(&mut engine);
-    let bytes = write.as_bytes();
 
     assert_eq!(
-        channel_id_from_wire(bytes),
-        crate::core::ChannelId::DEFAULT.get()
+        packet_type_from_wire(write.as_bytes()),
+        crate::core::PacketType::Data
     );
 }
 
 #[test]
-fn engine_log_channel_defaults_to_best_effort_and_log_profile() {
+fn engine_send_log_uses_log_packet_kind() {
     let mut sender = Engine::new(EngineConfig::default());
     let mut receiver = Engine::new(EngineConfig::default());
 
-    sender
-        .send_on(crate::core::ChannelId::LOG, b"log line")
-        .unwrap();
+    sender.send_log(b"log via api").unwrap();
 
     let write = next_write(&mut sender);
 
@@ -660,14 +552,6 @@ fn engine_log_channel_defaults_to_best_effort_and_log_profile() {
         packet_type_from_wire(write.as_bytes()),
         crate::core::PacketType::Log
     );
-    assert_eq!(
-        packet_len_from_wire(write.as_bytes()),
-        crate::core::LOG_PACKET_HEADER_LEN + b"log line".len()
-    );
-    assert_eq!(
-        packet_flags_from_wire(write.as_bytes()),
-        crate::core::Flags::EMPTY.bits()
-    );
     assert_eq!(sender.state.recovery.in_flight_len(), 0);
 
     assert!(matches!(
@@ -677,44 +561,9 @@ fn engine_log_channel_defaults_to_best_effort_and_log_profile() {
 
     let message = next_message(&mut receiver);
 
-    assert_eq!(message.channel_id, crate::core::ChannelId::LOG);
-    assert_eq!(message.profile, ChannelProfile::Log);
-    assert_eq!(message.as_bytes(), b"log line");
+    assert_eq!(message.packet_type, crate::core::PacketType::Log);
+    assert_eq!(message.as_bytes(), b"log via api");
     assert!(EngineState::poll_event(&mut receiver.state).is_none());
-}
-
-#[test]
-fn engine_channel_spec_overrides_profile_and_reliability() {
-    let channel_id = crate::core::ChannelId::new(16);
-    let mut sender = Engine::new(EngineConfig {
-        channel_specs: [Some(ChannelSpec::log(channel_id)), None, None, None],
-        ..EngineConfig::default()
-    });
-    let mut receiver = Engine::new(EngineConfig {
-        channel_specs: [Some(ChannelSpec::log(channel_id)), None, None, None],
-        ..EngineConfig::default()
-    });
-
-    sender.send_on(channel_id, b"adapter log").unwrap();
-
-    let write = next_write(&mut sender);
-
-    assert_eq!(
-        packet_flags_from_wire(write.as_bytes()),
-        crate::core::Flags::EMPTY.bits()
-    );
-    assert_eq!(sender.state.recovery.in_flight_len(), 0);
-
-    assert!(matches!(
-        receiver.receive(write.as_bytes()),
-        ReceiveReport::Packet { .. }
-    ));
-
-    let message = next_message(&mut receiver);
-
-    assert_eq!(message.channel_id, channel_id);
-    assert_eq!(message.profile, ChannelProfile::Log);
-    assert_eq!(message.as_bytes(), b"adapter log");
 }
 
 #[test]
@@ -737,7 +586,7 @@ fn engine_reports_send_failed_after_retry_limit() {
     let failed = next_send_failed(&mut engine, 2);
 
     assert_eq!(failed.message_id, message_id);
-    assert_eq!(failed.channel_id, crate::core::ChannelId::DEFAULT);
+    assert_eq!(failed.packet_type, crate::core::PacketType::Data);
     assert_eq!(failed.reason, SendFailureReason::RetryLimitReached);
 }
 
@@ -766,7 +615,7 @@ fn engine_send_failed_is_message_scoped() {
     let failed = next_send_failed(&mut engine, 2);
 
     assert_eq!(failed.message_id, message_id);
-    assert_eq!(failed.channel_id, crate::core::ChannelId::DEFAULT);
+    assert_eq!(failed.packet_type, crate::core::PacketType::Data);
     assert_eq!(failed.reason, SendFailureReason::RetryLimitReached);
     assert_eq!(engine.state.recovery.in_flight_len(), 0);
     assert!(EngineState::poll_event(&mut engine.state).is_none());
@@ -804,7 +653,7 @@ fn engine_send_failed_suppresses_same_tick_message_retransmits() {
     let failed = next_send_failed(&mut engine, 2);
 
     assert_eq!(failed.message_id, message_id);
-    assert_eq!(failed.channel_id, crate::core::ChannelId::DEFAULT);
+    assert_eq!(failed.packet_type, crate::core::PacketType::Data);
     assert_eq!(failed.reason, SendFailureReason::RetryLimitReached);
     assert_eq!(engine.state.recovery.in_flight_len(), 0);
     assert!(EngineState::poll_event(&mut engine.state).is_none());
@@ -813,7 +662,7 @@ fn engine_send_failed_suppresses_same_tick_message_retransmits() {
 fn fragment_len_from_wire(bytes: &[u8]) -> usize {
     let packet_len = bytes[crate::wire::WIRE_PACKET_LEN_OFFSET] as usize;
     let header_len = match packet_type_from_wire(bytes) {
-        crate::core::PacketType::Data => legacy_data_packet_header_len(),
+        crate::core::PacketType::Data => crate::core::DATA_PACKET_HEADER_LEN,
         crate::core::PacketType::Log => crate::core::LOG_PACKET_HEADER_LEN,
         crate::core::PacketType::Ack => crate::core::ACK_PACKET_HEADER_LEN,
         crate::core::PacketType::Ping | crate::core::PacketType::Pong => {
@@ -824,37 +673,17 @@ fn fragment_len_from_wire(bytes: &[u8]) -> usize {
     packet_len - header_len
 }
 
-const fn legacy_data_packet_header_len() -> usize {
-    13
-}
-
-fn packet_flags_from_wire(bytes: &[u8]) -> u8 {
-    if matches!(packet_type_from_wire(bytes), crate::core::PacketType::Data) {
-        bytes[crate::wire::WIRE_HEADER_LEN + 1]
-    } else {
-        crate::core::Flags::EMPTY.bits()
-    }
-}
-
-fn channel_id_from_wire(bytes: &[u8]) -> u8 {
-    bytes[crate::wire::WIRE_HEADER_LEN + 2]
-}
-
 fn packet_type_from_wire(bytes: &[u8]) -> crate::core::PacketType {
     crate::core::PacketType::from_code(bytes[crate::wire::WIRE_HEADER_LEN])
         .expect("packet type should decode")
-}
-
-fn packet_len_from_wire(bytes: &[u8]) -> usize {
-    usize::from(bytes[crate::wire::WIRE_PACKET_LEN_OFFSET])
 }
 
 fn packet_key_from_wire(bytes: &[u8]) -> crate::core::PacketKey {
     let packet = &bytes[crate::wire::WIRE_HEADER_LEN..];
     match packet_type_from_wire(bytes) {
         crate::core::PacketType::Data => crate::core::PacketKey::new(
-            crate::core::MessageId::new(u32::from_le_bytes(packet[3..7].try_into().unwrap())),
-            crate::core::PacketIndex::new(u16::from_le_bytes(packet[7..9].try_into().unwrap())),
+            crate::core::MessageId::new(u32::from_le_bytes(packet[2..6].try_into().unwrap())),
+            crate::core::PacketIndex::new(u16::from_le_bytes(packet[6..8].try_into().unwrap())),
         ),
         crate::core::PacketType::Log | crate::core::PacketType::Ack => crate::core::PacketKey::new(
             crate::core::MessageId::new(u32::from_le_bytes(packet[1..5].try_into().unwrap())),

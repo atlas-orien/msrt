@@ -1,15 +1,14 @@
 //! v1 draft packet byte layout glue.
 
 use crate::core::{
-    ChannelId, Error, Flags, MessageId, PacketIndex, PacketKey, PacketType, Result,
+    Error, Flags, MessageId, PacketIndex, PacketKey, PacketType, Result,
     packet::header::{
-        ACK_PACKET_HEADER_LEN, LIVENESS_PACKET_HEADER_LEN, LOG_PACKET_HEADER_LEN, PacketHeader,
+        ACK_PACKET_HEADER_LEN, DATA_PACKET_HEADER_LEN, LIVENESS_PACKET_HEADER_LEN,
+        LOG_PACKET_HEADER_LEN, PacketHeader,
     },
 };
 
 use crate::engine::config::MAX_WIRE_BYTES;
-
-const LEGACY_DATA_PACKET_HEADER_LEN: usize = 13;
 
 /// Decoded MVP packet.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -44,7 +43,7 @@ pub(crate) struct DecodedLiveness {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct DecodedFragment<'a> {
     pub(crate) header: PacketHeader,
-    pub(crate) channel_id: ChannelId,
+    pub(crate) packet_type: PacketType,
     pub(crate) message_id: MessageId,
     pub(crate) message_len: usize,
     pub(crate) fragment_offset: usize,
@@ -133,21 +132,19 @@ fn packet_header_from_bytes(bytes: &[u8]) -> Option<PacketHeader> {
 }
 
 fn data_header_from_bytes(bytes: &[u8]) -> Option<PacketHeader> {
-    if bytes.len() < LEGACY_DATA_PACKET_HEADER_LEN {
+    if bytes.len() < DATA_PACKET_HEADER_LEN {
         return None;
     }
 
     let flags = Flags::from_bits(*bytes.get(1)?);
-    let channel_id = ChannelId::new(*bytes.get(2)?);
-    let message_id = MessageId::new(u32::from_le_bytes(bytes.get(3..7)?.try_into().ok()?));
-    let packet_index = PacketIndex::new(u16::from_le_bytes(bytes.get(7..9)?.try_into().ok()?));
-    let message_len = u16::from_le_bytes(bytes.get(9..11)?.try_into().ok()?) as usize;
-    let fragment_offset = u16::from_le_bytes(bytes.get(11..13)?.try_into().ok()?) as usize;
+    let message_id = MessageId::new(u32::from_le_bytes(bytes.get(2..6)?.try_into().ok()?));
+    let packet_index = PacketIndex::new(u16::from_le_bytes(bytes.get(6..8)?.try_into().ok()?));
+    let message_len = u16::from_le_bytes(bytes.get(8..10)?.try_into().ok()?) as usize;
+    let fragment_offset = u16::from_le_bytes(bytes.get(10..12)?.try_into().ok()?) as usize;
 
     Some(PacketHeader::data(
         packet_index,
         flags,
-        channel_id,
         message_id,
         message_len,
         fragment_offset,
@@ -166,7 +163,6 @@ fn log_header_from_bytes(bytes: &[u8]) -> Option<PacketHeader> {
 
     Some(PacketHeader::log(
         packet_index,
-        ChannelId::LOG,
         message_id,
         message_len,
         fragment_offset,
@@ -188,7 +184,7 @@ fn ack_from_packet_bytes(bytes: &[u8]) -> Option<DecodedAck> {
 
 fn fragment_from_packet_bytes(header: PacketHeader, bytes: &[u8]) -> Option<DecodedFragment<'_>> {
     let header_len = match header.packet_type {
-        PacketType::Data => LEGACY_DATA_PACKET_HEADER_LEN,
+        PacketType::Data => DATA_PACKET_HEADER_LEN,
         PacketType::Log => LOG_PACKET_HEADER_LEN,
         PacketType::Ack | PacketType::Ping | PacketType::Pong => return None,
     };
@@ -207,7 +203,7 @@ fn fragment_from_packet_bytes(header: PacketHeader, bytes: &[u8]) -> Option<Deco
 
     Some(DecodedFragment {
         header,
-        channel_id: header.channel_id(),
+        packet_type: header.packet_type,
         message_id: header.message_id(),
         message_len: header.message_len(),
         fragment_offset: header.fragment_offset(),

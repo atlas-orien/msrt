@@ -1,6 +1,6 @@
 //! In-flight packet tracking.
 
-use crate::core::{ChannelId, Error, ErrorKind, MessageId, PacketKey, Result};
+use crate::core::{Error, ErrorKind, MessageId, PacketKey, PacketType, Result};
 
 use crate::engine::config::{MAX_IN_FLIGHT_PACKETS, MAX_WIRE_BYTES};
 
@@ -8,7 +8,7 @@ use crate::engine::config::{MAX_IN_FLIGHT_PACKETS, MAX_WIRE_BYTES};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct InFlightPacket {
     pub(crate) key: PacketKey,
-    pub(crate) channel_id: ChannelId,
+    pub(crate) packet_type: PacketType,
     pub(crate) message_id: MessageId,
     pub(crate) bytes: [u8; MAX_WIRE_BYTES],
     pub(crate) len: usize,
@@ -81,10 +81,10 @@ impl InFlightPackets {
         MAX_IN_FLIGHT_PACKETS - self.len
     }
 
-    pub(crate) fn remove_message(&mut self, channel_id: ChannelId, message_id: MessageId) {
+    pub(crate) fn remove_message(&mut self, packet_type: PacketType, message_id: MessageId) {
         for slot in &mut self.packets {
             if slot
-                .map(|packet| packet.channel_id == channel_id && packet.message_id == message_id)
+                .map(|packet| packet.packet_type == packet_type && packet.message_id == message_id)
                 .unwrap_or(false)
             {
                 *slot = None;

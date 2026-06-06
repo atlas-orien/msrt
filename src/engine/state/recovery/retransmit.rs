@@ -37,13 +37,13 @@ impl EngineState {
                 let already_failed = failed_messages[..failed_message_len]
                     .iter()
                     .flatten()
-                    .any(|key| *key == (packet.channel_id, packet.message_id));
+                    .any(|key| *key == (packet.packet_type, packet.message_id));
 
                 if !already_failed && failure_len < failures.len() {
                     failures[failure_len] = Some(*packet);
                     failure_len += 1;
                     failed_messages[failed_message_len] =
-                        Some((packet.channel_id, packet.message_id));
+                        Some((packet.packet_type, packet.message_id));
                     failed_message_len += 1;
                 }
             } else if retransmit_len < retransmits.len() {
@@ -55,11 +55,11 @@ impl EngineState {
         for packet in failures[..failure_len].iter().flatten() {
             self.log_send_failed_snapshot(config, now_ms, packet);
             self.recovery
-                .remove_message(packet.channel_id, packet.message_id);
+                .remove_message(packet.packet_type, packet.message_id);
             let _ = self
                 .scheduler
                 .push(EngineOutput::SendFailed(SendFailedEvent {
-                    channel_id: packet.channel_id,
+                    packet_type: packet.packet_type,
                     message_id: packet.message_id,
                     reason: SendFailureReason::RetryLimitReached,
                 }));
@@ -69,7 +69,7 @@ impl EngineState {
             let message_failed = failed_messages[..failed_message_len]
                 .iter()
                 .flatten()
-                .any(|key| *key == (packet.channel_id, packet.message_id));
+                .any(|key| *key == (packet.packet_type, packet.message_id));
 
             if message_failed {
                 continue;
@@ -93,13 +93,13 @@ impl EngineState {
         failed: &InFlightPacket,
     ) {
         eprintln!(
-            "msrt in_flight send_failed now={} len={} message_len={} ack_pending={} ack_pending_len={} failed_channel={} failed_message={} failed_index={} attempts={} age_ms={} retry_limit={} rto_ms={}",
+            "msrt in_flight send_failed now={} len={} message_len={} ack_pending={} ack_pending_len={} failed_type={:?} failed_message={} failed_index={} attempts={} age_ms={} retry_limit={} rto_ms={}",
             now_ms,
             self.recovery.in_flight_len(),
             self.message.len(),
             self.ack.is_pending(),
             self.ack.pending_len(),
-            failed.channel_id.get(),
+            failed.packet_type,
             failed.message_id.get(),
             failed.key.packet_index.get(),
             failed.attempts,
@@ -115,9 +115,9 @@ impl EngineState {
     fn log_in_flight_packets(&self, now_ms: u64) {
         for packet in self.recovery.packets() {
             eprintln!(
-                "msrt in_flight packet now={} ch={} msg={} idx={} attempts={} age_ms={} len={} sent={}",
+                "msrt in_flight packet now={} type={:?} msg={} idx={} attempts={} age_ms={} len={} sent={}",
                 now_ms,
-                packet.channel_id.get(),
+                packet.packet_type,
                 packet.message_id.get(),
                 packet.key.packet_index.get(),
                 packet.attempts,

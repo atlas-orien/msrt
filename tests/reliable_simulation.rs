@@ -2,7 +2,7 @@
 
 use msrt::{
     Engine, EngineConfig,
-    core::{ChannelId, PacketType},
+    core::PacketType,
     engine::{EnginePoll, ReceiveReport},
 };
 
@@ -20,30 +20,26 @@ fn reliable_transport_survives_drops_corruption_reordering_and_duplex_load() {
         retransmit_timeout_ms: 1,
         ..EngineConfig::default()
     });
-    let nav = ChannelId::new(16);
-    let telemetry = ChannelId::new(17);
     let mac_messages = [
-        ExpectedMessage::new(nav, b"mac nav message one"),
-        ExpectedMessage::new(telemetry, b"mac telemetry message two"),
-        ExpectedMessage::new(nav, b"mac command message three"),
+        ExpectedMessage::new(b"mac nav message one"),
+        ExpectedMessage::new(b"mac telemetry message two"),
+        ExpectedMessage::new(b"mac command message three"),
     ];
     let mcu_messages = [
-        ExpectedMessage::new(telemetry, b"mcu telemetry response one"),
-        ExpectedMessage::new(nav, b"mcu nav response two"),
-        ExpectedMessage::new(telemetry, b"mcu status response three"),
+        ExpectedMessage::new(b"mcu telemetry response one"),
+        ExpectedMessage::new(b"mcu nav response two"),
+        ExpectedMessage::new(b"mcu status response three"),
     ];
     let mut link = SimLink::new();
     let mut mac_delivered = DeliveredMessages::new();
     let mut mcu_delivered = DeliveredMessages::new();
 
     for message in mac_messages {
-        mac.send_on(message.channel_id, message.bytes)
-            .expect("queue mac message");
+        mac.send(message.bytes).expect("queue mac message");
     }
 
     for message in mcu_messages {
-        mcu.send_on(message.channel_id, message.bytes)
-            .expect("queue mcu message");
+        mcu.send(message.bytes).expect("queue mcu message");
     }
 
     for _ in 0..64 {
@@ -110,7 +106,7 @@ fn pump_one(
             true
         }
         EnginePoll::Message(message) => {
-            delivered.push(message.channel_id, message.as_bytes());
+            delivered.push(message.as_bytes());
             true
         }
         EnginePoll::SendFailed(failed) => {
@@ -136,31 +132,30 @@ fn assert_no_unexpected_events(engine: &mut Engine) {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct ExpectedMessage {
-    channel_id: ChannelId,
     bytes: &'static [u8],
 }
 
 impl ExpectedMessage {
-    const fn new(channel_id: ChannelId, bytes: &'static [u8]) -> Self {
-        Self { channel_id, bytes }
+    const fn new(bytes: &'static [u8]) -> Self {
+        Self { bytes }
     }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct DeliveredMessages {
-    messages: [(ChannelId, [u8; 64], usize); 8],
+    messages: [([u8; 64], usize); 8],
     len: usize,
 }
 
 impl DeliveredMessages {
     const fn new() -> Self {
         Self {
-            messages: [(ChannelId::DEFAULT, [0; 64], 0); 8],
+            messages: [([0; 64], 0); 8],
             len: 0,
         }
     }
 
-    fn push(&mut self, channel_id: ChannelId, bytes: &[u8]) {
+    fn push(&mut self, bytes: &[u8]) {
         assert!(
             self.len < self.messages.len(),
             "delivered message buffer full"
@@ -169,22 +164,18 @@ impl DeliveredMessages {
 
         let mut stored = [0; 64];
         stored[..bytes.len()].copy_from_slice(bytes);
-        self.messages[self.len] = (channel_id, stored, bytes.len());
+        self.messages[self.len] = (stored, bytes.len());
         self.len += 1;
     }
 
     fn contains_all(&self, expected: &[ExpectedMessage]) -> bool {
-        expected
-            .iter()
-            .all(|message| self.contains(message.channel_id, message.bytes))
+        expected.iter().all(|message| self.contains(message.bytes))
     }
 
-    fn contains(&self, channel_id: ChannelId, bytes: &[u8]) -> bool {
+    fn contains(&self, bytes: &[u8]) -> bool {
         self.messages[..self.len]
             .iter()
-            .any(|(current_channel, current_bytes, current_len)| {
-                *current_channel == channel_id && &current_bytes[..*current_len] == bytes
-            })
+            .any(|(current_bytes, current_len)| &current_bytes[..*current_len] == bytes)
     }
 }
 
@@ -279,7 +270,7 @@ fn is_data(write: SimWrite) -> bool {
 
 fn packet_index(bytes: &[u8]) -> u16 {
     u16::from_le_bytes(
-        bytes[msrt::wire::WIRE_HEADER_LEN + 7..msrt::wire::WIRE_HEADER_LEN + 9]
+        bytes[msrt::wire::WIRE_HEADER_LEN + 6..msrt::wire::WIRE_HEADER_LEN + 8]
             .try_into()
             .expect("packet index bytes"),
     )

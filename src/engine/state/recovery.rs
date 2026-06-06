@@ -1,6 +1,6 @@
 //! Reliable packet recovery state.
 
-use crate::core::{ChannelId, MessageId, PacketKey, Result};
+use crate::core::{MessageId, PacketKey, PacketType, Result};
 
 use self::inflight::{InFlightPacket, InFlightPackets};
 
@@ -52,8 +52,8 @@ impl RecoveryState {
         true
     }
 
-    pub(crate) fn remove_message(&mut self, channel_id: ChannelId, message_id: MessageId) {
-        self.in_flight.remove_message(channel_id, message_id);
+    pub(crate) fn remove_message(&mut self, packet_type: PacketType, message_id: MessageId) {
+        self.in_flight.remove_message(packet_type, message_id);
     }
 
     pub(crate) fn note_sent(&mut self, key: PacketKey, now_ms: u64) {

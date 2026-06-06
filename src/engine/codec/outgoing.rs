@@ -1,9 +1,10 @@
 //! Outgoing message fragmentation and packet encoding.
 
 use crate::core::{
-    ChannelId, Error, ErrorKind, Flags, MessageId, PacketIndex, PacketKey, PacketType, Result,
+    Error, ErrorKind, Flags, MessageId, PacketIndex, PacketKey, PacketType, Result,
     packet::header::{
-        ACK_PACKET_HEADER_LEN, LIVENESS_PACKET_HEADER_LEN, LOG_PACKET_HEADER_LEN, PacketHeader,
+        ACK_PACKET_HEADER_LEN, DATA_PACKET_HEADER_LEN, LIVENESS_PACKET_HEADER_LEN,
+        LOG_PACKET_HEADER_LEN, PacketHeader,
     },
 };
 use crate::reliability::ReliabilityMode;
@@ -23,24 +24,23 @@ use crate::engine::{
 
 const ACK_PACKET_LEN: usize = ACK_PACKET_HEADER_LEN;
 const LIVENESS_PACKET_LEN: usize = LIVENESS_PACKET_HEADER_LEN;
-const LEGACY_DATA_PACKET_HEADER_LEN: usize = 13;
 
 impl EngineState {
-    pub(crate) fn send_on_impl(
+    pub(crate) fn send_packet_type_impl(
         &mut self,
         config: &EngineConfig,
-        channel_id: ChannelId,
+        packet_type: PacketType,
         message: &[u8],
     ) -> Result<MessageId> {
         let fragment_bytes = config.fragment_bytes.clamp(
             1,
-            max_fragment_bytes(channel_id, config.integrity.tag_len()),
+            max_fragment_bytes(packet_type, config.integrity.tag_len())?,
         );
         let message_id = self.numbers.alloc_message_id();
-        let mode = config.reliability_mode(channel_id);
+        let mode = reliability_mode(packet_type)?;
         self.ensure_can_queue_message(message.len(), fragment_bytes, mode)?;
         self.send_message_fragments(
-            channel_id,
+            packet_type,
             message_id,
             message,
             fragment_bytes,
@@ -114,7 +114,7 @@ impl EngineState {
 
     fn send_message_fragments(
         &mut self,
-        channel_id: ChannelId,
+        packet_type: PacketType,
         message_id: MessageId,
         message: &[u8],
         fragment_bytes: usize,
@@ -134,13 +134,13 @@ impl EngineState {
             let mut wire = [0; MAX_WIRE_BYTES];
             let key = PacketKey::new(message_id, packet_index);
             let header = packet_header_for_fragment(
-                channel_id,
+                packet_type,
                 packet_index,
                 message_id,
                 message.len(),
                 offset,
                 mode,
-            );
+            )?;
             let written = encode_message_fragment(header, fragment, &mut wire, integrity)?;
 
             self.scheduler.push(EngineOutput::Write(WriteEvent {
@@ -153,7 +153,7 @@ impl EngineState {
             if matches!(mode, ReliabilityMode::Reliable) {
                 self.recovery.track(InFlightPacket {
                     key,
-                    channel_id,
+                    packet_type,
                     message_id,
                     bytes: wire,
                     len: written,
@@ -182,7 +182,7 @@ fn encode_message_fragment(
     integrity: &impl Integrity,
 ) -> Result<usize> {
     let header_len = match header.packet_type {
-        PacketType::Data => LEGACY_DATA_PACKET_HEADER_LEN,
+        PacketType::Data => DATA_PACKET_HEADER_LEN,
         PacketType::Log => LOG_PACKET_HEADER_LEN,
         PacketType::Ack | PacketType::Ping | PacketType::Pong => {
             return Err(Error::new(ErrorKind::Engine));
@@ -216,35 +216,33 @@ fn encode_message_fragment(
 }
 
 fn packet_header_for_fragment(
-    channel_id: ChannelId,
+    packet_type: PacketType,
     packet_index: PacketIndex,
     message_id: MessageId,
     message_len: usize,
     fragment_offset: usize,
     mode: ReliabilityMode,
-) -> PacketHeader {
-    if channel_id.is_log() {
-        return PacketHeader::log(
+) -> Result<PacketHeader> {
+    match packet_type {
+        PacketType::Data => Ok(PacketHeader::data(
             packet_index,
-            channel_id,
+            if matches!(mode, ReliabilityMode::Reliable) {
+                Flags::ACK_ELICITING
+            } else {
+                Flags::EMPTY
+            },
             message_id,
             message_len,
             fragment_offset,
-        );
+        )),
+        PacketType::Log => Ok(PacketHeader::log(
+            packet_index,
+            message_id,
+            message_len,
+            fragment_offset,
+        )),
+        PacketType::Ack | PacketType::Ping | PacketType::Pong => Err(Error::new(ErrorKind::Engine)),
     }
-
-    PacketHeader::data(
-        packet_index,
-        if matches!(mode, ReliabilityMode::Reliable) {
-            Flags::ACK_ELICITING
-        } else {
-            Flags::EMPTY
-        },
-        channel_id,
-        message_id,
-        message_len,
-        fragment_offset,
-    )
 }
 
 fn encode_fragment_header(
@@ -257,15 +255,14 @@ fn encode_fragment_header(
 
     match header.packet_type {
         PacketType::Data => {
-            if packet.len() < LEGACY_DATA_PACKET_HEADER_LEN {
+            if packet.len() < DATA_PACKET_HEADER_LEN {
                 return Err(Error::buffer_too_small());
             }
             packet[1] = header.flags().bits();
-            packet[2] = header.channel_id().get();
-            packet[3..7].copy_from_slice(&header.message_id().get().to_le_bytes());
-            packet[7..9].copy_from_slice(&header.packet_index().get().to_le_bytes());
-            packet[9..11].copy_from_slice(&message_len.to_le_bytes());
-            packet[11..13].copy_from_slice(&fragment_offset.to_le_bytes());
+            packet[2..6].copy_from_slice(&header.message_id().get().to_le_bytes());
+            packet[6..8].copy_from_slice(&header.packet_index().get().to_le_bytes());
+            packet[8..10].copy_from_slice(&message_len.to_le_bytes());
+            packet[10..12].copy_from_slice(&fragment_offset.to_le_bytes());
         }
         PacketType::Log => {
             if packet.len() < LOG_PACKET_HEADER_LEN {
@@ -339,14 +336,24 @@ fn encode_liveness_packet(
     Ok(total_len)
 }
 
-const fn max_fragment_bytes(channel_id: ChannelId, integrity_tag_len: usize) -> usize {
-    let header_len = if channel_id.is_log() {
-        LOG_PACKET_HEADER_LEN
-    } else {
-        LEGACY_DATA_PACKET_HEADER_LEN
+const fn reliability_mode(packet_type: PacketType) -> Result<ReliabilityMode> {
+    match packet_type {
+        PacketType::Data => Ok(ReliabilityMode::Reliable),
+        PacketType::Log => Ok(ReliabilityMode::BestEffort),
+        PacketType::Ack | PacketType::Ping | PacketType::Pong => Err(Error::new(ErrorKind::Engine)),
+    }
+}
+
+const fn max_fragment_bytes(packet_type: PacketType, integrity_tag_len: usize) -> Result<usize> {
+    let header_len = match packet_type {
+        PacketType::Data => DATA_PACKET_HEADER_LEN,
+        PacketType::Log => LOG_PACKET_HEADER_LEN,
+        PacketType::Ack | PacketType::Ping | PacketType::Pong => {
+            return Err(Error::new(ErrorKind::Engine));
+        }
     };
 
-    MAX_WIRE_BYTES - crate::wire::WIRE_HEADER_LEN - header_len - integrity_tag_len
+    Ok(MAX_WIRE_BYTES - crate::wire::WIRE_HEADER_LEN - header_len - integrity_tag_len)
 }
 
 const fn fragment_count(message_len: usize, fragment_bytes: usize) -> usize {

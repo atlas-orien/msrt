@@ -237,7 +237,7 @@ impl PeerSlot {
             return Ok(());
         };
 
-        engine.send_ping()?;
+        engine.state.send_ping(&engine.config)?;
         self.last_ping_ms = now_ms;
         self.pending_ping = true;
         Ok(())

@@ -1,6 +1,6 @@
 //! Message reassembly table.
 
-use crate::core::{ChannelId, Error, ErrorKind, MessageId, Result};
+use crate::core::{Error, ErrorKind, MessageId, PacketType, Result};
 
 use crate::engine::{
     MessageEvent,
@@ -31,7 +31,7 @@ impl ReassemblyState {
         }
 
         let key = MessageKey {
-            channel_id: fragment.channel_id,
+            packet_type: fragment.packet_type,
             message_id: fragment.message_id,
         };
         let index = match self.find_slot(key) {
@@ -152,8 +152,7 @@ impl ReassemblySlot {
 
         if self.is_complete() {
             let message = MessageEvent {
-                channel_id: self.key.channel_id,
-                profile: crate::engine::ChannelProfile::default_for(self.key.channel_id),
+                packet_type: self.key.packet_type,
                 message_id: self.key.message_id,
                 bytes: self.bytes,
                 len: self.expected_len,
@@ -176,13 +175,13 @@ impl ReassemblySlot {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct MessageKey {
-    channel_id: ChannelId,
+    packet_type: PacketType,
     message_id: MessageId,
 }
 
 impl MessageKey {
     const ZERO: Self = Self {
-        channel_id: ChannelId::DEFAULT,
+        packet_type: PacketType::Data,
         message_id: MessageId::ZERO,
     };
 }
