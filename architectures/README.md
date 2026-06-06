@@ -40,6 +40,7 @@ MSRT 当前分成五个协议部分：
 - [endpoint](endpoint.md)：连接生命周期、单 peer 和多 peer 会话管理。
 - [reliability](reliability.md)：ACK、去重、重传、可靠性策略。
 - [wire](wire.md)：字节流边界、校验和重同步。
+- [header-redesign](header-redesign.md)：为了减少包头而做的 packet kind/header 边界改版记录。
 - [stress-testing](stress-testing.md)：压力测试过程、ACK 修复和噪音模型结论。
 
 它们的关系可以理解为：
@@ -49,7 +50,7 @@ wire
   从 byte stream 恢复完整 encoded packet bytes
 
 core
-  定义 packet、frame、channel、message id 等协议对象
+  定义 packet、packet kind、message id 等协议对象
 
 reliability
   判断 packet 是否重复、是否已 ACK、是否需要重传
@@ -61,7 +62,7 @@ endpoint
   在 engine 之上管理连接生命周期和 peer -> Engine 映射
 ```
 
-## 实现文档
+## 临时实现文档
 
 未来持续开发时，可以在本地创建：
 

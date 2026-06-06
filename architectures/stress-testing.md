@@ -63,7 +63,7 @@ ACK range 集合
 这不是 MSRT 的正确边界。MSRT 是 message-oriented，packet 是某条 message 的 fragment。packet 的稳定身份应该是：
 
 ```text
-channel_id + message_id + packet_index
+message_id + packet_index
 ```
 
 全局 packet number 会把协议拉回 packet stream 模型，进而自然长出 ACK range、largest ACK、全局 dedup 这些不属于 MSRT 思想的结构。高压下这些结构会让 ACK 语义变复杂，甚至让重传 DATA 到达后仍然无法正确清掉 in-flight。
@@ -83,7 +83,7 @@ ACK payload = empty
 
 ```text
 receive(DATA packet)
-  -> 先 observe PacketKey(channel_id, message_id, packet_index) 到 AckState
+  -> 先 observe PacketKey(message_id, packet_index) 到 AckState
   -> 再做 duplicate 判断
   -> duplicate 也必须重新 ACK
 

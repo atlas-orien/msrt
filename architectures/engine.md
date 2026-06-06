@@ -35,7 +35,7 @@ engine 的外部 API 应该保持窄：
 Engine::new(config)
 Engine::default()
 engine.send(message)
-engine.send_on(channel_id, message)
+engine.send_log(message)
 engine.receive(bytes)
 engine.poll(now_ms, tx_buf)
 ```
@@ -92,20 +92,29 @@ loop:
 
 `send(message)` 是 outgoing message 进入协议状态机的入口。调用方提交的是一个完整 application message，不需要自己拆 packet，也不需要关心 wire envelope。
 
+外部发送入口只有两类：
+
+- `send(message)`：发送可靠 Data message。
+- `send_log(message)`：发送 best-effort Log message。
+
+ACK、Ping、Pong 都是 engine/endpoint 内部协议行为，不允许外部应用直接发送。
+
 当前 send 链路是：
 
 ```text
 Engine::send(message)
-  -> Engine::send_on(default_channel, message)
-    -> EngineState::send_on(config, channel_id, message)
+  -> EngineState::send_data(config, message)
+    -> send_data_impl
       -> 分配 message_id
-      -> 根据 channel 选择 reliability mode
+      -> 使用 Data packet kind 和 Reliable 模式
       -> 按 fragment_bytes 拆分 message
       -> 每个 fragment 编码成 packet
       -> 每个 packet 包进 wire envelope
       -> 将 envelope 作为 Write event 放入事件队列
       -> reliable packet 同时保存到 in-flight table
 ```
+
+`send_log(message)` 使用同样的分片和编码路径，但 packet kind 是 `Log`，reliability mode 是 `BestEffort`，不会进入 in-flight，也不会等待 ACK。
 
 所以 `send` 做的是“生成待发送动作”，不是直接写链路。外部真正拿到 bytes 是通过后续 `poll()`：
 
@@ -129,7 +138,7 @@ poll(now_ms, tx_buf)
 
 ## Send 和可靠性
 
-reliable channel 和 best-effort channel 在 `send` 后的保存策略不同。
+Data message 和 Log message 在发送后的保存策略不同。
 
 best-effort packet：
 

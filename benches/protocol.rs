@@ -23,7 +23,7 @@ const TX_BUF_BYTES: usize = 256;
 const WIRE_DECODE_BYTES: usize = 512;
 
 fn core_primitives(c: &mut Criterion) {
-    c.bench_function("core_packet_header_key", |b| {
+    c.bench_function("core_data_header_key", |b| {
         b.iter(|| {
             let header = DataHeader::new(
                 Flags::ACK_ELICITING,
@@ -200,7 +200,7 @@ fn reliability_primitives(c: &mut Criterion) {
         });
     });
 
-    c.bench_function("reliability_message_fragment_from_header", |b| {
+    c.bench_function("reliability_message_fragment_from_data_header", |b| {
         b.iter(|| {
             let header = DataHeader::new(
                 Flags::ACK_ELICITING,
