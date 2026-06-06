@@ -60,7 +60,7 @@ pub trait Encoder {
     fn envelope_for<'a>(&self, packet: Packet<'a>) -> WireEnvelope<'a> {
         WireEnvelope::new(
             EnvelopeHeader::new(packet.payload_len() as u8),
-            packet.payload.as_bytes(),
+            packet.payload_bytes(),
         )
     }
 }

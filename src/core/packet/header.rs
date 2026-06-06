@@ -1,48 +1,36 @@
 //! Packet header structure.
 
+pub mod ack;
+pub mod body;
+pub mod data;
 pub mod flags;
+pub mod len;
+pub mod liveness;
+pub mod log;
 
+pub use ack::AckHeader;
+pub use body::PacketHeaderBody;
+pub use data::DataHeader;
 pub use flags::Flags;
+pub(crate) use len::PACKET_HEADER_LEN;
+pub use len::{
+    ACK_PACKET_HEADER_LEN, DATA_PACKET_HEADER_LEN, LIVENESS_PACKET_HEADER_LEN,
+    LOG_PACKET_HEADER_LEN,
+};
+pub use liveness::{PingHeader, PongHeader};
+pub use log::LogHeader;
 
 use super::{PacketIndex, PacketKey, PacketType};
 
-use crate::core::{
-    ChannelId, MessageId,
-    message::{CHANNEL_ID_LEN, FRAGMENT_OFFSET_LEN, MESSAGE_ID_LEN, MESSAGE_LEN_LEN},
-};
-
-/// Encoded packet type length in bytes.
-pub(crate) const PACKET_TYPE_LEN: usize = core::mem::size_of::<u8>();
-/// Encoded packet flags length in bytes.
-pub(crate) const PACKET_FLAGS_LEN: usize = core::mem::size_of::<u8>();
-/// Encoded message-scoped packet index length in bytes.
-pub(crate) const PACKET_INDEX_LEN: usize = core::mem::size_of::<u16>();
-/// Encoded packet header length in bytes.
-pub(crate) const PACKET_HEADER_LEN: usize = PACKET_TYPE_LEN
-    + PACKET_FLAGS_LEN
-    + CHANNEL_ID_LEN
-    + MESSAGE_ID_LEN
-    + PACKET_INDEX_LEN
-    + MESSAGE_LEN_LEN
-    + FRAGMENT_OFFSET_LEN;
+use crate::core::{ChannelId, MessageId};
 
 /// Metadata shared by every protocol packet.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PacketHeader {
     /// Packet type.
     pub packet_type: PacketType,
-    /// Packet index scoped to `message_id`.
-    pub packet_index: PacketIndex,
-    /// Packet flags.
-    pub flags: Flags,
-    /// Logical channel carrying this message fragment.
-    pub channel_id: ChannelId,
-    /// Message this fragment belongs to.
-    pub message_id: MessageId,
-    /// Complete message length in bytes.
-    pub message_len: usize,
-    /// Offset of this fragment inside the complete message.
-    pub fragment_offset: usize,
+    /// Kind-specific header fields.
+    pub body: PacketHeaderBody,
 }
 
 impl PacketHeader {
@@ -58,13 +46,60 @@ impl PacketHeader {
     ) -> Self {
         Self {
             packet_type: PacketType::Data,
-            packet_index,
-            flags,
-            channel_id,
-            message_id,
-            message_len,
-            fragment_offset,
+            body: PacketHeaderBody::Data {
+                channel_id,
+                header: DataHeader::new(
+                    flags,
+                    message_id,
+                    packet_index,
+                    message_len,
+                    fragment_offset,
+                ),
+            },
         }
+    }
+
+    /// Creates a legacy DATA packet header from the target DATA header.
+    #[must_use]
+    pub const fn from_data_header(channel_id: ChannelId, header: DataHeader) -> Self {
+        Self::data(
+            header.packet_index,
+            header.flags,
+            channel_id,
+            header.message_id,
+            header.message_len,
+            header.fragment_offset,
+        )
+    }
+
+    /// Creates a LOG packet header.
+    #[must_use]
+    pub const fn log(
+        packet_index: PacketIndex,
+        channel_id: ChannelId,
+        message_id: MessageId,
+        message_len: usize,
+        fragment_offset: usize,
+    ) -> Self {
+        Self {
+            packet_type: PacketType::Log,
+            body: PacketHeaderBody::Log {
+                channel_id,
+                header: LogHeader::new(message_id, packet_index, message_len, fragment_offset),
+            },
+        }
+    }
+
+    /// Creates a legacy LOG packet header from the target LOG header.
+    #[must_use]
+    pub const fn from_log_header(channel_id: ChannelId, header: LogHeader) -> Self {
+        Self::log(
+            header.packet_index,
+            channel_id,
+            header.message_id,
+            header.message_len,
+            header.fragment_offset,
+        )
     }
 
     /// Creates an ACK packet header.
@@ -72,48 +107,126 @@ impl PacketHeader {
     pub const fn ack(key: PacketKey) -> Self {
         Self {
             packet_type: PacketType::Ack,
-            flags: Flags::EMPTY,
-            channel_id: key.channel_id,
-            message_id: key.message_id,
-            packet_index: key.packet_index,
-            message_len: 0,
-            fragment_offset: 0,
+            body: PacketHeaderBody::Ack {
+                channel_id: key.channel_id,
+                header: AckHeader::new(key.message_id, key.packet_index),
+            },
         }
     }
 
     /// Creates a PING packet header.
     #[must_use]
     pub const fn ping(message_id: MessageId) -> Self {
-        Self::liveness(PacketType::Ping, message_id)
+        Self {
+            packet_type: PacketType::Ping,
+            body: PacketHeaderBody::Ping {
+                header: PingHeader::new(),
+                legacy_message_id: message_id,
+            },
+        }
     }
 
     /// Creates a PONG packet header.
     #[must_use]
     pub const fn pong(message_id: MessageId) -> Self {
-        Self::liveness(PacketType::Pong, message_id)
+        Self {
+            packet_type: PacketType::Pong,
+            body: PacketHeaderBody::Pong {
+                header: PongHeader::new(),
+                legacy_message_id: message_id,
+            },
+        }
     }
 
     /// Returns whether this packet should elicit an acknowledgement.
     #[must_use]
     pub const fn is_ack_eliciting(self) -> bool {
-        self.flags.contains(Flags::ACK_ELICITING)
+        self.flags().contains(Flags::ACK_ELICITING)
     }
 
-    const fn liveness(packet_type: PacketType, message_id: MessageId) -> Self {
-        Self {
-            packet_type,
-            flags: Flags::EMPTY,
-            channel_id: ChannelId::LIVENESS,
-            message_id,
-            packet_index: PacketIndex::ZERO,
-            message_len: 0,
-            fragment_offset: 0,
+    /// Returns whether this packet kind can carry payload bytes.
+    #[must_use]
+    pub const fn can_carry_payload(self) -> bool {
+        matches!(self.packet_type, PacketType::Data | PacketType::Log)
+    }
+
+    /// Returns packet flags, or empty flags for packet kinds that do not carry flags.
+    #[must_use]
+    pub const fn flags(self) -> Flags {
+        match self.body {
+            PacketHeaderBody::Data { header, .. } => header.flags,
+            PacketHeaderBody::Log { .. } => Flags::EMPTY,
+            PacketHeaderBody::Ack { .. }
+            | PacketHeaderBody::Ping { .. }
+            | PacketHeaderBody::Pong { .. } => Flags::EMPTY,
+        }
+    }
+
+    /// Returns the legacy channel id for the current wire format.
+    #[must_use]
+    pub const fn channel_id(self) -> ChannelId {
+        match self.body {
+            PacketHeaderBody::Data { channel_id, .. }
+            | PacketHeaderBody::Log { channel_id, .. }
+            | PacketHeaderBody::Ack { channel_id, .. } => channel_id,
+            PacketHeaderBody::Ping { .. } | PacketHeaderBody::Pong { .. } => ChannelId::LIVENESS,
+        }
+    }
+
+    /// Returns the message id associated with this packet.
+    #[must_use]
+    pub const fn message_id(self) -> MessageId {
+        match self.body {
+            PacketHeaderBody::Data { header, .. } => header.message_id,
+            PacketHeaderBody::Log { header, .. } => header.message_id,
+            PacketHeaderBody::Ack { header, .. } => header.message_id,
+            PacketHeaderBody::Ping {
+                legacy_message_id, ..
+            }
+            | PacketHeaderBody::Pong {
+                legacy_message_id, ..
+            } => legacy_message_id,
+        }
+    }
+
+    /// Returns the packet index associated with this packet.
+    #[must_use]
+    pub const fn packet_index(self) -> PacketIndex {
+        match self.body {
+            PacketHeaderBody::Data { header, .. } => header.packet_index,
+            PacketHeaderBody::Log { header, .. } => header.packet_index,
+            PacketHeaderBody::Ack { header, .. } => header.packet_index,
+            PacketHeaderBody::Ping { .. } | PacketHeaderBody::Pong { .. } => PacketIndex::ZERO,
+        }
+    }
+
+    /// Returns the complete message length for fragment packets.
+    #[must_use]
+    pub const fn message_len(self) -> usize {
+        match self.body {
+            PacketHeaderBody::Data { header, .. } => header.message_len,
+            PacketHeaderBody::Log { header, .. } => header.message_len,
+            PacketHeaderBody::Ack { .. }
+            | PacketHeaderBody::Ping { .. }
+            | PacketHeaderBody::Pong { .. } => 0,
+        }
+    }
+
+    /// Returns the fragment offset for fragment packets.
+    #[must_use]
+    pub const fn fragment_offset(self) -> usize {
+        match self.body {
+            PacketHeaderBody::Data { header, .. } => header.fragment_offset,
+            PacketHeaderBody::Log { header, .. } => header.fragment_offset,
+            PacketHeaderBody::Ack { .. }
+            | PacketHeaderBody::Ping { .. }
+            | PacketHeaderBody::Pong { .. } => 0,
         }
     }
 
     /// Returns this packet's stable message-scoped identity.
     #[must_use]
     pub const fn key(self) -> PacketKey {
-        PacketKey::new(self.channel_id, self.message_id, self.packet_index)
+        PacketKey::new(self.channel_id(), self.message_id(), self.packet_index())
     }
 }

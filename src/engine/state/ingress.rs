@@ -93,7 +93,7 @@ impl EngineState {
     ) -> ReceiveReport {
         match packet.decode() {
             PacketDecode::Data(fragment) => {
-                let packet_index = fragment.header.packet_index;
+                let packet_index = fragment.header.packet_index();
                 let key = fragment.header.key();
                 let ack_eliciting = fragment.header.is_ack_eliciting();
 
@@ -133,26 +133,26 @@ impl EngineState {
                 report
             }
             PacketDecode::Ack(ack) => {
-                let packet_index = ack.header.packet_index;
+                let packet_index = ack.header.packet_index();
                 self.recovery.apply_ack(ack.header.key());
                 ReceiveReport::Ack { packet_index }
             }
             PacketDecode::Ping(ping) => {
-                let packet_index = ping.header.packet_index;
-                if self.queue_pong(config, ping.header.message_id).is_err() {
+                let packet_index = ping.header.packet_index();
+                if self.queue_pong(config, ping.header.message_id()).is_err() {
                     return ReceiveReport::Error(Error::new(ErrorKind::Engine));
                 }
                 ReceiveReport::Ping {
                     packet_index,
-                    message_id: ping.header.message_id,
+                    message_id: ping.header.message_id(),
                 }
             }
             PacketDecode::Pong(pong) => {
                 self.recovery
-                    .remove_message(ChannelId::LIVENESS, pong.header.message_id);
+                    .remove_message(ChannelId::LIVENESS, pong.header.message_id());
                 ReceiveReport::Pong {
-                    packet_index: pong.header.packet_index,
-                    message_id: pong.header.message_id,
+                    packet_index: pong.header.packet_index(),
+                    message_id: pong.header.message_id(),
                 }
             }
             PacketDecode::Malformed => ReceiveReport::Corrupted,

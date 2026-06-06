@@ -26,7 +26,7 @@ fn facade_exposes_core_packet_and_wire_envelope() {
     let packet = Packet::new(header, &payload);
 
     let envelope_header = EnvelopeHeader::new(packet.payload_len() as u8);
-    let envelope = WireEnvelope::new(envelope_header, packet.payload.as_bytes());
+    let envelope = WireEnvelope::new(envelope_header, packet.payload_bytes());
 
     assert_eq!(EnvelopeMagic::MSRT.bytes(), [0xA5]);
     assert_eq!(envelope.packet_bytes, &payload);

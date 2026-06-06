@@ -87,6 +87,7 @@ fn decode_packet_bytes(bytes: &[u8]) -> PacketDecode<'_> {
         PacketType::Data => fragment_from_packet_bytes(header, bytes)
             .map(PacketDecode::Data)
             .unwrap_or(PacketDecode::Malformed),
+        PacketType::Log => PacketDecode::Malformed,
         PacketType::Ack => ack_from_packet_bytes(header, payload_bytes)
             .map(PacketDecode::Ack)
             .unwrap_or(PacketDecode::Malformed),
@@ -104,22 +105,65 @@ fn packet_header_from_bytes(bytes: &[u8]) -> Option<PacketHeader> {
         return None;
     }
 
-    Some(PacketHeader {
-        packet_type: PacketType::from_code(*bytes.first()?)?,
-        flags: Flags::from_bits(*bytes.get(1)?),
-        channel_id: ChannelId::new(*bytes.get(2)?),
-        message_id: MessageId::new(u32::from_le_bytes(bytes.get(3..7)?.try_into().ok()?)),
-        packet_index: PacketIndex::new(u16::from_le_bytes(bytes.get(7..9)?.try_into().ok()?)),
-        message_len: u16::from_le_bytes(bytes.get(9..11)?.try_into().ok()?) as usize,
-        fragment_offset: u16::from_le_bytes(bytes.get(11..13)?.try_into().ok()?) as usize,
-    })
+    let packet_type = PacketType::from_code(*bytes.first()?)?;
+    let flags = Flags::from_bits(*bytes.get(1)?);
+    let channel_id = ChannelId::new(*bytes.get(2)?);
+    let message_id = MessageId::new(u32::from_le_bytes(bytes.get(3..7)?.try_into().ok()?));
+    let packet_index = PacketIndex::new(u16::from_le_bytes(bytes.get(7..9)?.try_into().ok()?));
+    let message_len = u16::from_le_bytes(bytes.get(9..11)?.try_into().ok()?) as usize;
+    let fragment_offset = u16::from_le_bytes(bytes.get(11..13)?.try_into().ok()?) as usize;
+
+    match packet_type {
+        PacketType::Data => Some(PacketHeader::data(
+            packet_index,
+            flags,
+            channel_id,
+            message_id,
+            message_len,
+            fragment_offset,
+        )),
+        PacketType::Log => None,
+        PacketType::Ack => {
+            if flags != Flags::EMPTY || message_len != 0 || fragment_offset != 0 {
+                return None;
+            }
+
+            Some(PacketHeader::ack(crate::core::PacketKey::new(
+                channel_id,
+                message_id,
+                packet_index,
+            )))
+        }
+        PacketType::Ping => {
+            if flags != Flags::EMPTY
+                || !channel_id.is_liveness()
+                || message_len != 0
+                || fragment_offset != 0
+            {
+                return None;
+            }
+
+            Some(PacketHeader::ping(message_id))
+        }
+        PacketType::Pong => {
+            if flags != Flags::EMPTY
+                || !channel_id.is_liveness()
+                || message_len != 0
+                || fragment_offset != 0
+            {
+                return None;
+            }
+
+            Some(PacketHeader::pong(message_id))
+        }
+    }
 }
 
 fn ack_from_packet_bytes(header: PacketHeader, bytes: &[u8]) -> Option<DecodedAck> {
     if !bytes.is_empty()
-        || header.flags != Flags::EMPTY
-        || header.message_len != 0
-        || header.fragment_offset != 0
+        || header.flags() != Flags::EMPTY
+        || header.message_len() != 0
+        || header.fragment_offset() != 0
     {
         return None;
     }
@@ -134,27 +178,27 @@ fn fragment_from_packet_bytes(header: PacketHeader, bytes: &[u8]) -> Option<Deco
 
     let fragment = bytes.get(PACKET_HEADER_LEN..)?;
 
-    let end = header.fragment_offset.checked_add(fragment.len())?;
+    let end = header.fragment_offset().checked_add(fragment.len())?;
 
-    if end > header.message_len {
+    if end > header.message_len() {
         return None;
     }
 
     Some(DecodedFragment {
         header,
-        channel_id: header.channel_id,
-        message_id: header.message_id,
-        message_len: header.message_len,
-        fragment_offset: header.fragment_offset,
+        channel_id: header.channel_id(),
+        message_id: header.message_id(),
+        message_len: header.message_len(),
+        fragment_offset: header.fragment_offset(),
         bytes: fragment,
     })
 }
 
 fn liveness_from_packet_bytes(header: PacketHeader, bytes: &[u8]) -> Option<DecodedLiveness> {
     if !bytes.is_empty()
-        || !header.channel_id.is_liveness()
-        || header.message_len != 0
-        || header.fragment_offset != 0
+        || !header.channel_id().is_liveness()
+        || header.message_len() != 0
+        || header.fragment_offset() != 0
     {
         return None;
     }

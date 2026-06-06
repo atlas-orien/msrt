@@ -83,8 +83,8 @@ impl MessageFragment {
     pub fn try_from_packet_header(header: PacketHeader, payload_len: usize) -> Result<Self> {
         let len = u32::try_from(payload_len).map_err(|_| Error::new(ErrorKind::Reliability))?;
         let message_len =
-            u32::try_from(header.message_len).map_err(|_| Error::new(ErrorKind::Reliability))?;
-        let fragment_offset = u32::try_from(header.fragment_offset)
+            u32::try_from(header.message_len()).map_err(|_| Error::new(ErrorKind::Reliability))?;
+        let fragment_offset = u32::try_from(header.fragment_offset())
             .map_err(|_| Error::new(ErrorKind::Reliability))?;
         let range = FragmentRange::new(fragment_offset, len);
 
@@ -93,7 +93,7 @@ impl MessageFragment {
         }
 
         Ok(Self::new(
-            MessageKey::new(header.channel_id, header.message_id),
+            MessageKey::new(header.channel_id(), header.message_id()),
             message_len,
             range,
         ))

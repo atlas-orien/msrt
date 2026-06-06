@@ -203,9 +203,9 @@ fn encode_message_fragment(
     let packet_len = PACKET_HEADER_LEN + fragment.len();
     let packet_len = u8::try_from(packet_len).map_err(|_| Error::new(ErrorKind::Engine))?;
     let message_len =
-        u16::try_from(header.message_len).map_err(|_| Error::new(ErrorKind::Engine))?;
+        u16::try_from(header.message_len()).map_err(|_| Error::new(ErrorKind::Engine))?;
     let fragment_offset =
-        u16::try_from(header.fragment_offset).map_err(|_| Error::new(ErrorKind::Engine))?;
+        u16::try_from(header.fragment_offset()).map_err(|_| Error::new(ErrorKind::Engine))?;
     let envelope_header = EnvelopeHeader::new(packet_len);
     let integrity_tag_len = integrity.tag_len();
     let total_len = envelope_header.total_len(integrity_tag_len);
@@ -219,10 +219,10 @@ fn encode_message_fragment(
     out[WIRE_HEADER_CRC_OFFSET] = envelope_header.header_crc;
     let packet = &mut out[WIRE_HEADER_LEN..];
     packet[0] = header.packet_type.code();
-    packet[1] = header.flags.bits();
-    packet[2] = header.channel_id.get();
-    packet[3..7].copy_from_slice(&header.message_id.get().to_le_bytes());
-    packet[7..9].copy_from_slice(&header.packet_index.get().to_le_bytes());
+    packet[1] = header.flags().bits();
+    packet[2] = header.channel_id().get();
+    packet[3..7].copy_from_slice(&header.message_id().get().to_le_bytes());
+    packet[7..9].copy_from_slice(&header.packet_index().get().to_le_bytes());
     packet[9..11].copy_from_slice(&message_len.to_le_bytes());
     packet[11..13].copy_from_slice(&fragment_offset.to_le_bytes());
     packet[PACKET_HEADER_LEN..PACKET_HEADER_LEN + fragment.len()].copy_from_slice(fragment);
@@ -253,12 +253,12 @@ pub(crate) fn encode_ack_packet(
     out[WIRE_HEADER_CRC_OFFSET] = envelope_header.header_crc;
     let packet = &mut out[WIRE_HEADER_LEN..];
     packet[0] = header.packet_type.code();
-    packet[1] = header.flags.bits();
-    packet[2] = header.channel_id.get();
-    packet[3..7].copy_from_slice(&header.message_id.get().to_le_bytes());
-    packet[7..9].copy_from_slice(&header.packet_index.get().to_le_bytes());
-    packet[9..11].copy_from_slice(&(header.message_len as u16).to_le_bytes());
-    packet[11..13].copy_from_slice(&(header.fragment_offset as u16).to_le_bytes());
+    packet[1] = header.flags().bits();
+    packet[2] = header.channel_id().get();
+    packet[3..7].copy_from_slice(&header.message_id().get().to_le_bytes());
+    packet[7..9].copy_from_slice(&header.packet_index().get().to_le_bytes());
+    packet[9..11].copy_from_slice(&(header.message_len() as u16).to_le_bytes());
+    packet[11..13].copy_from_slice(&(header.fragment_offset() as u16).to_le_bytes());
 
     let (authenticated, tag) = out[..total_len].split_at_mut(total_len - integrity_tag_len);
     integrity.seal(authenticated, tag);
@@ -286,12 +286,12 @@ fn encode_liveness_packet(
     out[WIRE_HEADER_CRC_OFFSET] = envelope_header.header_crc;
     let packet = &mut out[WIRE_HEADER_LEN..];
     packet[0] = header.packet_type.code();
-    packet[1] = header.flags.bits();
-    packet[2] = header.channel_id.get();
-    packet[3..7].copy_from_slice(&header.message_id.get().to_le_bytes());
-    packet[7..9].copy_from_slice(&header.packet_index.get().to_le_bytes());
-    packet[9..11].copy_from_slice(&(header.message_len as u16).to_le_bytes());
-    packet[11..13].copy_from_slice(&(header.fragment_offset as u16).to_le_bytes());
+    packet[1] = header.flags().bits();
+    packet[2] = header.channel_id().get();
+    packet[3..7].copy_from_slice(&header.message_id().get().to_le_bytes());
+    packet[7..9].copy_from_slice(&header.packet_index().get().to_le_bytes());
+    packet[9..11].copy_from_slice(&(header.message_len() as u16).to_le_bytes());
+    packet[11..13].copy_from_slice(&(header.fragment_offset() as u16).to_le_bytes());
 
     let (authenticated, tag) = out[..total_len].split_at_mut(total_len - integrity_tag_len);
     integrity.seal(authenticated, tag);
