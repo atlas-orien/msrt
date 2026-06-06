@@ -234,14 +234,14 @@ mod tests {
     fn accept_replaces_existing_peer_engine() {
         let mut endpoint = ServerEndpoint::<u8, 1>::default();
 
-        endpoint
+        let first_engine = endpoint
             .engine_or_accept(1, 1)
-            .unwrap()
-            .send(b"hello")
             .unwrap();
+        first_engine.send(b"hello").unwrap();
+        let expected_after_reconnect = first_engine.send(b"hello").unwrap();
         let engine = endpoint.accept(1, 2).unwrap();
 
-        assert_eq!(engine.send(b"hello").unwrap().get(), 1);
+        assert_eq!(engine.send(b"hello").unwrap(), expected_after_reconnect);
     }
 
     #[test]

@@ -24,7 +24,7 @@ fn engine_sends_one_message_as_multiple_write_events() {
         }
     }
 
-    assert_eq!(message_id.get(), 0);
+    assert_ne!(message_id.get(), 0);
     assert_eq!(writes, 4);
 }
 

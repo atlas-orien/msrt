@@ -80,15 +80,15 @@ mod tests {
     fn client_reconnect_creates_fresh_engine() {
         let mut endpoint = ClientEndpoint::default();
 
-        endpoint
+        let first_engine = endpoint
             .engine_or_connect(1)
-            .unwrap()
-            .send(b"hello")
             .unwrap();
+        first_engine.send(b"hello").unwrap();
+        let expected_after_reconnect = first_engine.send(b"hello").unwrap();
         endpoint.disconnect();
         let engine = endpoint.engine_or_connect(2).unwrap();
 
-        assert_eq!(engine.send(b"hello").unwrap().get(), 1);
+        assert_eq!(engine.send(b"hello").unwrap(), expected_after_reconnect);
     }
 
     #[test]

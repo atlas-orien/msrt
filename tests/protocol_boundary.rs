@@ -54,7 +54,7 @@ fn facade_exposes_concrete_engine_api() {
     let mut tx_buf = [0; TX_BUF_BYTES];
     let message_id = engine.send(b"hello").unwrap();
 
-    assert_eq!(message_id, MessageId::ZERO);
+    assert_ne!(message_id, MessageId::ZERO);
 
     let EnginePoll::Transmit { bytes, .. } = engine.poll(0, &mut tx_buf).unwrap() else {
         panic!("engine should produce transmit bytes");

@@ -299,11 +299,13 @@ mod tests {
     fn reconnect_replaces_engine_state() {
         let mut peer = PeerSlot::default();
 
-        peer.engine_or_connect(1).unwrap().send(b"hello").unwrap();
+        let first_engine = peer.engine_or_connect(1).unwrap();
+        first_engine.send(b"hello").unwrap();
+        let expected_after_reconnect = first_engine.send(b"hello").unwrap();
         peer.disconnect();
         let engine = peer.engine_or_connect(2).unwrap();
 
-        assert_eq!(engine.send(b"hello").unwrap().get(), 1);
+        assert_eq!(engine.send(b"hello").unwrap(), expected_after_reconnect);
     }
 
     #[test]
