@@ -41,7 +41,7 @@ impl PassiveEndpoint {
     }
 
     /// Returns the active engine, creating a passive session if needed.
-    pub fn engine_or_accept(&mut self, now_ms: u64) -> &mut Engine {
+    pub fn engine_or_accept(&mut self, now_ms: u64) -> Result<&mut Engine> {
         self.peer.engine_or_accept_passive(now_ms)
     }
 
@@ -57,7 +57,10 @@ impl PassiveEndpoint {
 
     /// Creates a passive session if needed, then feeds received bytes into it.
     pub fn receive(&mut self, now_ms: u64, bytes: &[u8]) -> ReceiveReport {
-        self.peer.engine_or_accept_passive(now_ms);
+        if let Err(error) = self.peer.engine_or_accept_passive(now_ms) {
+            return ReceiveReport::Error(error);
+        }
+
         self.peer.receive(now_ms, bytes)
     }
 
@@ -114,7 +117,7 @@ mod tests {
     fn passive_disconnect_drops_engine_until_next_receive() {
         let mut passive = PassiveEndpoint::default();
 
-        passive.engine_or_accept(1);
+        passive.engine_or_accept(1).unwrap();
         assert!(passive.peer().has_session());
 
         passive.disconnect();

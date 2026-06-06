@@ -1,6 +1,6 @@
 //! Server-side endpoint manager.
 
-use crate::core::Error;
+use crate::core::{Error, ErrorKind};
 use crate::endpoint::{EndpointPoll, PeerSlot};
 use crate::engine::{Engine, EngineConfig, ReceiveReport};
 
@@ -95,7 +95,9 @@ where
         now_ms: u64,
     ) -> core::result::Result<&mut Engine, AcceptError> {
         if let Some(index) = self.find_index(peer_id) {
-            let entry = self.peers[index].as_mut().expect("peer index exists");
+            let Some(entry) = self.peers[index].as_mut() else {
+                return Err(AcceptError::Engine(Error::new(ErrorKind::Engine)));
+            };
             return entry
                 .slot
                 .engine_or_connect(now_ms)
@@ -172,9 +174,15 @@ where
         index: usize,
         now_ms: u64,
     ) -> core::result::Result<&mut Engine, AcceptError> {
-        let entry = self.peers[index].as_mut().expect("peer index exists");
+        let Some(entry) = self.peers[index].as_mut() else {
+            return Err(AcceptError::Engine(Error::new(ErrorKind::Engine)));
+        };
         entry.slot.connect(now_ms).map_err(AcceptError::Engine)?;
-        Ok(entry.slot.engine_mut().expect("engine was just inserted"))
+        let Some(engine) = entry.slot.engine_mut() else {
+            return Err(AcceptError::Engine(Error::new(ErrorKind::Engine)));
+        };
+
+        Ok(engine)
     }
 
     fn find_index(&self, peer_id: P) -> Option<usize> {

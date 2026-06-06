@@ -1,6 +1,6 @@
 //! Peer session slot shared by endpoint managers.
 
-use crate::core::{MessageId, Result};
+use crate::core::{Error, ErrorKind, MessageId, Result};
 use crate::engine::{Engine, EngineConfig, EnginePoll, ReceiveReport, SendFailedEvent};
 
 const HELLO_MESSAGE: &[u8] = &[0];
@@ -96,10 +96,11 @@ impl PeerSlot {
         self.last_seen_ms = now_ms;
         self.last_ping_ms = now_ms;
         self.pending_ping = None;
-        self.engine
-            .as_mut()
-            .expect("engine was just inserted")
-            .send(HELLO_MESSAGE)
+        let Some(engine) = self.engine.as_mut() else {
+            return Err(Error::new(ErrorKind::Engine));
+        };
+
+        engine.send(HELLO_MESSAGE)
     }
 
     /// Creates a fresh engine without queueing a hello message.
@@ -127,17 +128,25 @@ impl PeerSlot {
         }
 
         self.last_seen_ms = now_ms;
-        Ok(self.engine.as_mut().expect("engine exists"))
+        let Some(engine) = self.engine.as_mut() else {
+            return Err(Error::new(ErrorKind::Engine));
+        };
+
+        Ok(engine)
     }
 
     /// Creates a passive engine if needed and returns the active engine.
-    pub fn engine_or_accept_passive(&mut self, now_ms: u64) -> &mut Engine {
+    pub fn engine_or_accept_passive(&mut self, now_ms: u64) -> Result<&mut Engine> {
         if self.engine.is_none() {
             self.accept_passive(now_ms);
         }
 
         self.last_seen_ms = now_ms;
-        self.engine.as_mut().expect("engine exists")
+        let Some(engine) = self.engine.as_mut() else {
+            return Err(Error::new(ErrorKind::Engine));
+        };
+
+        Ok(engine)
     }
 
     /// Returns the active engine if a session exists.
