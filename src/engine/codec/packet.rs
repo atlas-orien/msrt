@@ -2,7 +2,9 @@
 
 use crate::core::{
     ChannelId, Error, Flags, MessageId, PacketIndex, PacketKey, PacketType, Result,
-    packet::header::{ACK_PACKET_HEADER_LEN, PACKET_HEADER_LEN, PacketHeader},
+    packet::header::{
+        ACK_PACKET_HEADER_LEN, LIVENESS_PACKET_HEADER_LEN, PACKET_HEADER_LEN, PacketHeader,
+    },
 };
 
 use crate::engine::config::MAX_WIRE_BYTES;
@@ -31,7 +33,7 @@ pub(crate) struct DecodedAck {
 /// Decoded liveness packet.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct DecodedLiveness {
-    pub(crate) header: PacketHeader,
+    pub(crate) packet_type: PacketType,
 }
 
 /// Decoded message fragment.
@@ -86,11 +88,22 @@ fn decode_packet_bytes(bytes: &[u8]) -> PacketDecode<'_> {
             .unwrap_or(PacketDecode::Malformed);
     }
 
+    if matches!(
+        bytes.first().and_then(|code| PacketType::from_code(*code)),
+        Some(PacketType::Ping | PacketType::Pong)
+    ) {
+        return liveness_from_packet_bytes(bytes)
+            .map(|liveness| match liveness.packet_type {
+                PacketType::Ping => PacketDecode::Ping(liveness),
+                PacketType::Pong => PacketDecode::Pong(liveness),
+                PacketType::Data | PacketType::Log | PacketType::Ack => PacketDecode::Malformed,
+            })
+            .unwrap_or(PacketDecode::Malformed);
+    }
+
     let Some(header) = packet_header_from_bytes(bytes) else {
         return PacketDecode::Malformed;
     };
-
-    let payload_bytes = &bytes[PACKET_HEADER_LEN..];
 
     match header.packet_type {
         PacketType::Data => fragment_from_packet_bytes(header, bytes)
@@ -98,12 +111,7 @@ fn decode_packet_bytes(bytes: &[u8]) -> PacketDecode<'_> {
             .unwrap_or(PacketDecode::Malformed),
         PacketType::Log => PacketDecode::Malformed,
         PacketType::Ack => PacketDecode::Malformed,
-        PacketType::Ping => liveness_from_packet_bytes(header, payload_bytes)
-            .map(PacketDecode::Ping)
-            .unwrap_or(PacketDecode::Malformed),
-        PacketType::Pong => liveness_from_packet_bytes(header, payload_bytes)
-            .map(PacketDecode::Pong)
-            .unwrap_or(PacketDecode::Malformed),
+        PacketType::Ping | PacketType::Pong => PacketDecode::Malformed,
     }
 }
 
@@ -131,28 +139,7 @@ fn packet_header_from_bytes(bytes: &[u8]) -> Option<PacketHeader> {
         )),
         PacketType::Log => None,
         PacketType::Ack => None,
-        PacketType::Ping => {
-            if flags != Flags::EMPTY
-                || !channel_id.is_liveness()
-                || message_len != 0
-                || fragment_offset != 0
-            {
-                return None;
-            }
-
-            Some(PacketHeader::ping(message_id))
-        }
-        PacketType::Pong => {
-            if flags != Flags::EMPTY
-                || !channel_id.is_liveness()
-                || message_len != 0
-                || fragment_offset != 0
-            {
-                return None;
-            }
-
-            Some(PacketHeader::pong(message_id))
-        }
+        PacketType::Ping | PacketType::Pong => None,
     }
 }
 
@@ -192,14 +179,15 @@ fn fragment_from_packet_bytes(header: PacketHeader, bytes: &[u8]) -> Option<Deco
     })
 }
 
-fn liveness_from_packet_bytes(header: PacketHeader, bytes: &[u8]) -> Option<DecodedLiveness> {
-    if !bytes.is_empty()
-        || !header.channel_id().is_liveness()
-        || header.message_len() != 0
-        || header.fragment_offset() != 0
-    {
+fn liveness_from_packet_bytes(bytes: &[u8]) -> Option<DecodedLiveness> {
+    if bytes.len() != LIVENESS_PACKET_HEADER_LEN {
         return None;
     }
 
-    Some(DecodedLiveness { header })
+    let packet_type = PacketType::from_code(*bytes.first()?)?;
+    if !matches!(packet_type, PacketType::Ping | PacketType::Pong) {
+        return None;
+    }
+
+    Some(DecodedLiveness { packet_type })
 }

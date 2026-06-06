@@ -48,7 +48,7 @@ pub struct PeerSlot {
     state: PeerState,
     last_seen_ms: u64,
     last_ping_ms: u64,
-    pending_ping: Option<MessageId>,
+    pending_ping: bool,
 }
 
 impl PeerSlot {
@@ -61,7 +61,7 @@ impl PeerSlot {
             state: PeerState::Disconnected,
             last_seen_ms: 0,
             last_ping_ms: 0,
-            pending_ping: None,
+            pending_ping: false,
         }
     }
 
@@ -95,7 +95,7 @@ impl PeerSlot {
         self.state = PeerState::Connecting;
         self.last_seen_ms = now_ms;
         self.last_ping_ms = now_ms;
-        self.pending_ping = None;
+        self.pending_ping = false;
         let Some(engine) = self.engine.as_mut() else {
             return Err(Error::new(ErrorKind::Engine));
         };
@@ -109,7 +109,7 @@ impl PeerSlot {
         self.state = PeerState::Connecting;
         self.last_seen_ms = now_ms;
         self.last_ping_ms = now_ms;
-        self.pending_ping = None;
+        self.pending_ping = false;
     }
 
     /// Drops the current peer engine.
@@ -118,7 +118,7 @@ impl PeerSlot {
         self.state = PeerState::Disconnected;
         self.last_seen_ms = 0;
         self.last_ping_ms = 0;
-        self.pending_ping = None;
+        self.pending_ping = false;
     }
 
     /// Creates an engine if needed and returns the active engine.
@@ -175,17 +175,15 @@ impl PeerSlot {
             ReceiveReport::Packet { .. }
                 | ReceiveReport::Duplicate { .. }
                 | ReceiveReport::Ack { .. }
-                | ReceiveReport::Ping { .. }
-                | ReceiveReport::Pong { .. }
+                | ReceiveReport::Ping
+                | ReceiveReport::Pong
         ) {
             self.state = PeerState::Connected;
             self.last_seen_ms = now_ms;
         }
 
-        if let ReceiveReport::Pong { message_id, .. } = report
-            && self.pending_ping == Some(message_id)
-        {
-            self.pending_ping = None;
+        if matches!(report, ReceiveReport::Pong) {
+            self.pending_ping = false;
         }
 
         report
@@ -228,7 +226,7 @@ impl PeerSlot {
 
     fn queue_ping_if_idle(&mut self, now_ms: u64) -> Result<()> {
         if !self.is_connected()
-            || self.pending_ping.is_some()
+            || self.pending_ping
             || now_ms.saturating_sub(self.last_seen_ms) < DEFAULT_PING_INTERVAL_MS
             || now_ms.saturating_sub(self.last_ping_ms) < DEFAULT_PING_INTERVAL_MS
         {
@@ -239,9 +237,9 @@ impl PeerSlot {
             return Ok(());
         };
 
-        let message_id = engine.send_ping()?;
+        engine.send_ping()?;
         self.last_ping_ms = now_ms;
-        self.pending_ping = Some(message_id);
+        self.pending_ping = true;
         Ok(())
     }
 

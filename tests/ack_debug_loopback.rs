@@ -129,8 +129,8 @@ fn deliver_next_write(src: &mut Engine, dst: &mut Engine) {
     match dst.receive(write.as_bytes()) {
         ReceiveReport::Packet { .. }
         | ReceiveReport::Ack { .. }
-        | ReceiveReport::Ping { .. }
-        | ReceiveReport::Pong { .. } => {}
+        | ReceiveReport::Ping
+        | ReceiveReport::Pong => {}
         other => panic!("unexpected receive report: {other:?}"),
     }
 }

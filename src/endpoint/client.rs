@@ -149,7 +149,7 @@ mod tests {
 
         assert!(matches!(
             passive.receive(1_005, ping_bytes),
-            crate::engine::ReceiveReport::Ping { .. }
+            crate::engine::ReceiveReport::Ping
         ));
 
         let pong_bytes = loop {
@@ -162,18 +162,14 @@ mod tests {
 
         assert!(matches!(
             client.receive(5_006, pong_bytes),
-            crate::engine::ReceiveReport::Pong { .. }
+            crate::engine::ReceiveReport::Pong
         ));
         assert_eq!(client.peer().state(), PeerState::Connected);
     }
 
     #[test]
-    fn missing_pong_disconnects_endpoint_after_retry_limit() {
-        let mut client = ClientEndpoint::new(crate::engine::EngineConfig {
-            retransmit_timeout_ms: 10,
-            max_retransmit_attempts: 1,
-            ..crate::engine::EngineConfig::default()
-        });
+    fn missing_pong_disconnects_endpoint_after_idle_timeout() {
+        let mut client = ClientEndpoint::default();
         let mut passive = crate::endpoint::PassiveEndpoint::default();
         let mut client_tx = [0; 128];
         let mut passive_tx = [0; 128];
@@ -194,12 +190,9 @@ mod tests {
         ));
         assert!(matches!(
             client.poll(5_014, &mut client_tx).unwrap(),
-            EndpointPoll::Transmit { .. }
+            EndpointPoll::Idle
         ));
-        assert!(matches!(
-            client.poll(5_024, &mut client_tx).unwrap(),
-            EndpointPoll::SendFailed(_)
-        ));
+        assert!(client.disconnect_if_idle(10_004, 10_001));
         assert_eq!(client.peer().state(), PeerState::Disconnected);
     }
 }

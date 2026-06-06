@@ -1,6 +1,6 @@
 //! Incoming wire byte handling.
 
-use crate::core::{ChannelId, Error, ErrorKind};
+use crate::core::{Error, ErrorKind};
 use crate::integrity::Integrity;
 use crate::reliability::{Dedup, DedupDecision};
 use crate::wire::{StreamDecodeOutcome, StreamingDecoder};
@@ -138,23 +138,13 @@ impl EngineState {
                 ReceiveReport::Ack { packet_index }
             }
             PacketDecode::Ping(ping) => {
-                let packet_index = ping.header.packet_index();
-                if self.queue_pong(config, ping.header.message_id()).is_err() {
+                let _ = ping;
+                if self.queue_pong(config).is_err() {
                     return ReceiveReport::Error(Error::new(ErrorKind::Engine));
                 }
-                ReceiveReport::Ping {
-                    packet_index,
-                    message_id: ping.header.message_id(),
-                }
+                ReceiveReport::Ping
             }
-            PacketDecode::Pong(pong) => {
-                self.recovery
-                    .remove_message(ChannelId::LIVENESS, pong.header.message_id());
-                ReceiveReport::Pong {
-                    packet_index: pong.header.packet_index(),
-                    message_id: pong.header.message_id(),
-                }
-            }
+            PacketDecode::Pong(_) => ReceiveReport::Pong,
             PacketDecode::Malformed => ReceiveReport::Corrupted,
         }
     }

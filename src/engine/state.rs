@@ -87,7 +87,7 @@ impl EngineState {
         self.send_on_impl(config, channel_id, message)
     }
 
-    pub(crate) fn send_ping(&mut self, config: &EngineConfig) -> Result<MessageId> {
+    pub(crate) fn send_ping(&mut self, config: &EngineConfig) -> Result<()> {
         self.send_ping_impl(config)
     }
 

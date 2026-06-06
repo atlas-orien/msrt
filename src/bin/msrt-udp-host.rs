@@ -312,8 +312,8 @@ fn recv_udp_endpoint(
                 ReceiveReport::Packet { .. }
                     | ReceiveReport::Duplicate { .. }
                     | ReceiveReport::Ack { .. }
-                    | ReceiveReport::Ping { .. }
-                    | ReceiveReport::Pong { .. }
+                    | ReceiveReport::Ping
+                    | ReceiveReport::Pong
                     | ReceiveReport::Incomplete { .. }
             );
         }
@@ -343,8 +343,8 @@ fn recv_udp(socket: &UdpSocket, engine: &mut Engine, rx_buf: &mut [u8]) -> io::R
                         ReceiveReport::Packet { .. }
                             | ReceiveReport::Duplicate { .. }
                             | ReceiveReport::Ack { .. }
-                            | ReceiveReport::Ping { .. }
-                            | ReceiveReport::Pong { .. }
+                            | ReceiveReport::Ping
+                            | ReceiveReport::Pong
                             | ReceiveReport::Incomplete { .. }
                     );
                 }

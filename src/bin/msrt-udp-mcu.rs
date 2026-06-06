@@ -227,8 +227,8 @@ fn recv_udp(
                 ReceiveReport::Packet { .. }
                     | ReceiveReport::Duplicate { .. }
                     | ReceiveReport::Ack { .. }
-                    | ReceiveReport::Ping { .. }
-                    | ReceiveReport::Pong { .. }
+                    | ReceiveReport::Ping
+                    | ReceiveReport::Pong
                     | ReceiveReport::Incomplete { .. }
             );
         }

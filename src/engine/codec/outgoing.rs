@@ -1,8 +1,10 @@
 //! Outgoing message fragmentation and packet encoding.
 
 use crate::core::{
-    ChannelId, Error, ErrorKind, Flags, MessageId, PacketIndex, PacketKey, Result,
-    packet::header::{ACK_PACKET_HEADER_LEN, PACKET_HEADER_LEN, PacketHeader},
+    ChannelId, Error, ErrorKind, Flags, MessageId, PacketIndex, PacketKey, PacketType, Result,
+    packet::header::{
+        ACK_PACKET_HEADER_LEN, LIVENESS_PACKET_HEADER_LEN, PACKET_HEADER_LEN, PacketHeader,
+    },
 };
 use crate::reliability::ReliabilityMode;
 use crate::{
@@ -20,7 +22,7 @@ use crate::engine::{
 };
 
 const ACK_PACKET_LEN: usize = ACK_PACKET_HEADER_LEN;
-const LIVENESS_PACKET_LEN: usize = PACKET_HEADER_LEN;
+const LIVENESS_PACKET_LEN: usize = LIVENESS_PACKET_HEADER_LEN;
 
 impl EngineState {
     pub(crate) fn send_on_impl(
@@ -76,13 +78,10 @@ impl EngineState {
         }
     }
 
-    pub(crate) fn send_ping_impl(&mut self, config: &EngineConfig) -> Result<MessageId> {
-        let message_id = self.numbers.alloc_message_id();
-        let packet_index = PacketIndex::ZERO;
+    pub(crate) fn send_ping_impl(&mut self, config: &EngineConfig) -> Result<()> {
         let mut wire = [0; MAX_WIRE_BYTES];
-        let written =
-            encode_liveness_packet(PacketHeader::ping(message_id), &mut wire, &config.integrity)?;
-        let key = PacketKey::new(message_id, packet_index);
+        let written = encode_liveness_packet(PacketType::Ping, &mut wire, &config.integrity)?;
+        let key = PacketKey::new(MessageId::ZERO, PacketIndex::ZERO);
 
         self.scheduler.push(EngineOutput::Write(WriteEvent {
             key,
@@ -91,30 +90,14 @@ impl EngineState {
             attempts: 0,
             priority: crate::engine::state::scheduler::WritePriority::NewData,
         }))?;
-        self.recovery.track(InFlightPacket {
-            key,
-            channel_id: ChannelId::LIVENESS,
-            message_id,
-            bytes: wire,
-            len: written,
-            attempts: 0,
-            last_sent_ms: self.clock.now_ms(),
-            sent: false,
-        })?;
 
-        Ok(message_id)
+        Ok(())
     }
 
-    pub(crate) fn queue_pong(
-        &mut self,
-        config: &EngineConfig,
-        message_id: MessageId,
-    ) -> Result<()> {
-        let packet_index = PacketIndex::ZERO;
+    pub(crate) fn queue_pong(&mut self, config: &EngineConfig) -> Result<()> {
         let mut wire = [0; MAX_WIRE_BYTES];
-        let written =
-            encode_liveness_packet(PacketHeader::pong(message_id), &mut wire, &config.integrity)?;
-        let key = PacketKey::new(message_id, packet_index);
+        let written = encode_liveness_packet(PacketType::Pong, &mut wire, &config.integrity)?;
+        let key = PacketKey::new(MessageId::ZERO, PacketIndex::ZERO);
 
         self.scheduler.push(EngineOutput::Write(WriteEvent {
             key,
@@ -262,7 +245,7 @@ pub(crate) fn encode_ack_packet(
 }
 
 fn encode_liveness_packet(
-    header: PacketHeader,
+    packet_type: PacketType,
     out: &mut [u8],
     integrity: &impl Integrity,
 ) -> Result<usize> {
@@ -280,13 +263,7 @@ fn encode_liveness_packet(
     out[WIRE_PACKET_LEN_OFFSET] = envelope_header.packet_len;
     out[WIRE_HEADER_CRC_OFFSET] = envelope_header.header_crc;
     let packet = &mut out[WIRE_HEADER_LEN..];
-    packet[0] = header.packet_type.code();
-    packet[1] = header.flags().bits();
-    packet[2] = header.channel_id().get();
-    packet[3..7].copy_from_slice(&header.message_id().get().to_le_bytes());
-    packet[7..9].copy_from_slice(&header.packet_index().get().to_le_bytes());
-    packet[9..11].copy_from_slice(&(header.message_len() as u16).to_le_bytes());
-    packet[11..13].copy_from_slice(&(header.fragment_offset() as u16).to_le_bytes());
+    packet[0] = packet_type.code();
 
     let (authenticated, tag) = out[..total_len].split_at_mut(total_len - integrity_tag_len);
     integrity.seal(authenticated, tag);

@@ -57,7 +57,7 @@ impl Engine {
     ///
     /// This packet is handled by the protocol and is never delivered as an
     /// application message.
-    pub fn send_ping(&mut self) -> Result<MessageId> {
+    pub fn send_ping(&mut self) -> Result<()> {
         self.state.send_ping(&self.config)
     }
 
@@ -155,19 +155,9 @@ pub enum ReceiveReport {
         packet_index: PacketIndex,
     },
     /// A PING packet was accepted and a PONG was queued.
-    Ping {
-        /// Packet index decoded from the PING packet.
-        packet_index: PacketIndex,
-        /// Liveness message id carried by the PING packet.
-        message_id: MessageId,
-    },
+    Ping,
     /// A PONG packet was accepted.
-    Pong {
-        /// Packet index decoded from the PONG packet.
-        packet_index: PacketIndex,
-        /// Liveness message id carried by the PONG packet.
-        message_id: MessageId,
-    },
+    Pong,
     /// The input did not contain a valid magic prefix at offset zero.
     Noise {
         /// Number of bytes treated as noise.
