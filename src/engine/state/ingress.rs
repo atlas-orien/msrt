@@ -115,10 +115,10 @@ impl EngineState {
                         ReceiveReport::Packet { packet_index }
                     }
                     Ok(None) => ReceiveReport::Packet { packet_index },
-                    Err(error) => ReceiveReport::Error(error),
+                    Err(_) => ReceiveReport::Corrupted,
                 };
 
-                if matches!(report, ReceiveReport::Error(_)) {
+                if matches!(report, ReceiveReport::Corrupted | ReceiveReport::Error(_)) {
                     return report;
                 }
 
@@ -149,7 +149,7 @@ impl EngineState {
                         ReceiveReport::Packet { packet_index }
                     }
                     Ok(None) => ReceiveReport::Packet { packet_index },
-                    Err(error) => ReceiveReport::Error(error),
+                    Err(_) => ReceiveReport::Corrupted,
                 }
             }
             PacketDecode::Ack(ack) => {

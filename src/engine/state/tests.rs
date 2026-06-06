@@ -391,6 +391,31 @@ fn engine_treats_semantically_malformed_packet_as_corrupted() {
 }
 
 #[test]
+fn engine_treats_reassembly_conflict_as_corrupted() {
+    let mut sender = Engine::new(EngineConfig {
+        fragment_bytes: 2,
+        ..EngineConfig::default()
+    });
+    let mut receiver = Engine::new(EngineConfig::default());
+
+    sender.send(b"abcd").unwrap();
+    let first = next_write(&mut sender);
+    let mut second = next_write(&mut sender);
+
+    assert!(matches!(
+        receiver.receive(first.as_bytes()),
+        ReceiveReport::Packet { .. }
+    ));
+
+    rewrite_data_message_len(&mut second, 3);
+
+    assert_eq!(
+        receiver.receive(second.as_bytes()),
+        ReceiveReport::Corrupted
+    );
+}
+
+#[test]
 fn engine_receives_sticky_packets_and_multiple_packets_per_receive() {
     let mut a = Engine::new(EngineConfig {
         fragment_bytes: 5,
@@ -762,6 +787,19 @@ fn ack_packet_for_key(key: crate::core::PacketKey) -> WriteEvent {
         attempts: 0,
         priority: crate::engine::state::scheduler::WritePriority::Control,
     }
+}
+
+fn rewrite_data_message_len(write: &mut WriteEvent, message_len: u16) {
+    let integrity = EngineConfig::default().integrity;
+    let tag_len = crate::integrity::Integrity::tag_len(&integrity);
+    let total_len = write.len;
+    let packet = &mut write.bytes[crate::wire::WIRE_HEADER_LEN..];
+
+    assert_eq!(packet[0], crate::core::PacketType::Data.code());
+    packet[8..10].copy_from_slice(&message_len.to_le_bytes());
+
+    let (authenticated, tag) = write.bytes[..total_len].split_at_mut(total_len - tag_len);
+    crate::integrity::Integrity::seal(&integrity, authenticated, tag);
 }
 
 fn first_fragments_for_five_messages(engine: &mut Engine) -> [Option<WriteEvent>; 5] {

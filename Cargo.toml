@@ -23,7 +23,8 @@ include = [
 
 [features]
 default = ["std"]
-std = ["dep:serialport"]
+std = []
+serial = ["std", "dep:serialport"]
 
 [dependencies]
 serialport = { version = "4.9", optional = true }
@@ -38,3 +39,7 @@ harness = false
 [[bench]]
 name = "poll"
 harness = false
+
+[[bin]]
+name = "msrt-serial-frontend"
+required-features = ["serial"]
