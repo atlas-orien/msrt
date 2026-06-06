@@ -43,8 +43,7 @@ impl Engine {
     /// The caller submits the complete message once. The engine splits it into
     /// packet-sized write events internally.
     pub fn send(&mut self, message: &[u8]) -> Result<MessageId> {
-        self.state
-            .send_packet_type(&self.config, PacketType::Data, message)
+        self.state.send_data(&self.config, message)
     }
 
     /// Queues a best-effort diagnostic log message.
@@ -52,8 +51,7 @@ impl Engine {
     /// Log messages use the protocol `Log` packet kind. They are never tracked
     /// in-flight and do not elicit acknowledgements.
     pub fn send_log(&mut self, message: &[u8]) -> Result<MessageId> {
-        self.state
-            .send_packet_type(&self.config, PacketType::Log, message)
+        self.state.send_log(&self.config, message)
     }
 
     /// Feeds already-arrived wire bytes into the engine.

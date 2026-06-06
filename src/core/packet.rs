@@ -26,46 +26,9 @@ pub struct Packet<'a> {
 }
 
 impl<'a> Packet<'a> {
-    /// Creates a borrowed packet from a packet header.
-    #[must_use]
-    pub const fn new(header: PacketHeader, payload: &'a [u8]) -> Self {
-        Self::from_header(header, payload)
-    }
-
-    /// Creates a borrowed DATA packet.
-    #[must_use]
-    pub const fn data(header: PacketHeader, payload: &'a [u8]) -> Self {
-        Self::from_header(header, payload)
-    }
-
-    /// Creates a borrowed control packet without payload.
-    #[must_use]
-    pub const fn control(header: PacketHeader) -> Self {
-        Self::from_header(header, &[])
-    }
-
     /// Creates a borrowed packet from explicit kind-specific content.
     #[must_use]
     pub const fn from_parts(packet_type: PacketType, body: PacketBody<'a>) -> Self {
-        Self { packet_type, body }
-    }
-
-    const fn from_header(header: PacketHeader, payload: &'a [u8]) -> Self {
-        let packet_type = header.packet_type;
-        let body = match header.body {
-            header::PacketHeaderBody::Data { header, .. } => PacketBody::Data {
-                header,
-                payload: PacketPayload::new(payload),
-            },
-            header::PacketHeaderBody::Log { header, .. } => PacketBody::Log {
-                header,
-                payload: PacketPayload::new(payload),
-            },
-            header::PacketHeaderBody::Ack { header, .. } => PacketBody::Ack { header },
-            header::PacketHeaderBody::Ping { header, .. } => PacketBody::Ping { header },
-            header::PacketHeaderBody::Pong { header, .. } => PacketBody::Pong { header },
-        };
-
         Self { packet_type, body }
     }
 
@@ -181,20 +144,20 @@ impl<'a> Packet<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Flags, Packet, PacketBody, PacketHeader, PacketIndex};
+    use super::{AckHeader, DataHeader, Flags, Packet, PacketBody, PacketIndex};
     use crate::core::MessageId;
 
     #[test]
     fn packet_payload_contains_bytes() {
         let payload = [1, 2, 3];
-        let header = PacketHeader::data(
-            PacketIndex::new(0),
+        let header = DataHeader::new(
             Flags::ACK_ELICITING,
             MessageId::new(7),
+            PacketIndex::new(0),
             3,
             0,
         );
-        let packet = Packet::new(header, &payload);
+        let packet = Packet::data_parts(header, &payload);
 
         assert_eq!(packet.payload_len(), 3);
         assert!(!packet.is_empty());
@@ -204,11 +167,8 @@ mod tests {
 
     #[test]
     fn ack_packet_has_no_payload() {
-        let header = PacketHeader::ack(crate::core::PacketKey::new(
-            MessageId::new(7),
-            PacketIndex::new(0),
-        ));
-        let packet = Packet::new(header, &[1, 2, 3]);
+        let header = AckHeader::new(MessageId::new(7), PacketIndex::new(0));
+        let packet = Packet::ack(header);
 
         assert_eq!(packet.payload_len(), 0);
         assert!(packet.is_empty());

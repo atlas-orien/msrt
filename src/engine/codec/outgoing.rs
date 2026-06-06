@@ -4,7 +4,7 @@ use crate::core::{
     Error, ErrorKind, Flags, MessageId, PacketIndex, PacketKey, PacketType, Result,
     packet::header::{
         ACK_PACKET_HEADER_LEN, DATA_PACKET_HEADER_LEN, LIVENESS_PACKET_HEADER_LEN,
-        LOG_PACKET_HEADER_LEN, PacketHeader,
+        LOG_PACKET_HEADER_LEN, PacketHeader, PacketHeaderBody,
     },
 };
 use crate::reliability::ReliabilityMode;
@@ -26,7 +26,23 @@ const ACK_PACKET_LEN: usize = ACK_PACKET_HEADER_LEN;
 const LIVENESS_PACKET_LEN: usize = LIVENESS_PACKET_HEADER_LEN;
 
 impl EngineState {
-    pub(crate) fn send_packet_type_impl(
+    pub(crate) fn send_data_impl(
+        &mut self,
+        config: &EngineConfig,
+        message: &[u8],
+    ) -> Result<MessageId> {
+        self.send_fragmented_message(config, PacketType::Data, message)
+    }
+
+    pub(crate) fn send_log_impl(
+        &mut self,
+        config: &EngineConfig,
+        message: &[u8],
+    ) -> Result<MessageId> {
+        self.send_fragmented_message(config, PacketType::Log, message)
+    }
+
+    fn send_fragmented_message(
         &mut self,
         config: &EngineConfig,
         packet_type: PacketType,
@@ -181,19 +197,17 @@ fn encode_message_fragment(
     out: &mut [u8],
     integrity: &impl Integrity,
 ) -> Result<usize> {
-    let header_len = match header.packet_type {
-        PacketType::Data => DATA_PACKET_HEADER_LEN,
-        PacketType::Log => LOG_PACKET_HEADER_LEN,
-        PacketType::Ack | PacketType::Ping | PacketType::Pong => {
+    let header_len = match header.body {
+        PacketHeaderBody::Data { .. } => DATA_PACKET_HEADER_LEN,
+        PacketHeaderBody::Log { .. } => LOG_PACKET_HEADER_LEN,
+        PacketHeaderBody::Ack { .. }
+        | PacketHeaderBody::Ping { .. }
+        | PacketHeaderBody::Pong { .. } => {
             return Err(Error::new(ErrorKind::Engine));
         }
     };
     let packet_len = header_len + fragment.len();
     let packet_len = u8::try_from(packet_len).map_err(|_| Error::new(ErrorKind::Engine))?;
-    let message_len =
-        u16::try_from(header.message_len()).map_err(|_| Error::new(ErrorKind::Engine))?;
-    let fragment_offset =
-        u16::try_from(header.fragment_offset()).map_err(|_| Error::new(ErrorKind::Engine))?;
     let envelope_header = EnvelopeHeader::new(packet_len);
     let integrity_tag_len = integrity.tag_len();
     let total_len = envelope_header.total_len(integrity_tag_len);
@@ -206,7 +220,7 @@ fn encode_message_fragment(
     out[WIRE_PACKET_LEN_OFFSET] = envelope_header.packet_len;
     out[WIRE_HEADER_CRC_OFFSET] = envelope_header.header_crc;
     let packet = &mut out[WIRE_HEADER_LEN..];
-    encode_fragment_header(header, message_len, fragment_offset, packet)?;
+    encode_fragment_header(header, packet)?;
     packet[header_len..header_len + fragment.len()].copy_from_slice(fragment);
 
     let (authenticated, tag) = out[..total_len].split_at_mut(total_len - integrity_tag_len);
@@ -245,35 +259,42 @@ fn packet_header_for_fragment(
     }
 }
 
-fn encode_fragment_header(
-    header: PacketHeader,
-    message_len: u16,
-    fragment_offset: u16,
-    packet: &mut [u8],
-) -> Result<()> {
+fn encode_fragment_header(header: PacketHeader, packet: &mut [u8]) -> Result<()> {
     packet[0] = header.packet_type.code();
 
-    match header.packet_type {
-        PacketType::Data => {
+    match header.body {
+        PacketHeaderBody::Data { header } => {
             if packet.len() < DATA_PACKET_HEADER_LEN {
                 return Err(Error::buffer_too_small());
             }
-            packet[1] = header.flags().bits();
-            packet[2..6].copy_from_slice(&header.message_id().get().to_le_bytes());
-            packet[6..8].copy_from_slice(&header.packet_index().get().to_le_bytes());
+            let message_len =
+                u16::try_from(header.message_len).map_err(|_| Error::new(ErrorKind::Engine))?;
+            let fragment_offset =
+                u16::try_from(header.fragment_offset).map_err(|_| Error::new(ErrorKind::Engine))?;
+
+            packet[1] = header.flags.bits();
+            packet[2..6].copy_from_slice(&header.message_id.get().to_le_bytes());
+            packet[6..8].copy_from_slice(&header.packet_index.get().to_le_bytes());
             packet[8..10].copy_from_slice(&message_len.to_le_bytes());
             packet[10..12].copy_from_slice(&fragment_offset.to_le_bytes());
         }
-        PacketType::Log => {
+        PacketHeaderBody::Log { header } => {
             if packet.len() < LOG_PACKET_HEADER_LEN {
                 return Err(Error::buffer_too_small());
             }
-            packet[1..5].copy_from_slice(&header.message_id().get().to_le_bytes());
-            packet[5..7].copy_from_slice(&header.packet_index().get().to_le_bytes());
+            let message_len =
+                u16::try_from(header.message_len).map_err(|_| Error::new(ErrorKind::Engine))?;
+            let fragment_offset =
+                u16::try_from(header.fragment_offset).map_err(|_| Error::new(ErrorKind::Engine))?;
+
+            packet[1..5].copy_from_slice(&header.message_id.get().to_le_bytes());
+            packet[5..7].copy_from_slice(&header.packet_index.get().to_le_bytes());
             packet[7..9].copy_from_slice(&message_len.to_le_bytes());
             packet[9..11].copy_from_slice(&fragment_offset.to_le_bytes());
         }
-        PacketType::Ack | PacketType::Ping | PacketType::Pong => {
+        PacketHeaderBody::Ack { .. }
+        | PacketHeaderBody::Ping { .. }
+        | PacketHeaderBody::Pong { .. } => {
             return Err(Error::new(ErrorKind::Engine));
         }
     }

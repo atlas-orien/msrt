@@ -128,79 +128,9 @@ impl PacketHeader {
         }
     }
 
-    /// Returns whether this packet should elicit an acknowledgement.
-    #[must_use]
-    pub const fn is_ack_eliciting(self) -> bool {
-        self.flags().contains(Flags::ACK_ELICITING)
-    }
-
     /// Returns whether this packet kind can carry payload bytes.
     #[must_use]
     pub const fn can_carry_payload(self) -> bool {
         matches!(self.packet_type, PacketType::Data | PacketType::Log)
-    }
-
-    /// Returns packet flags, or empty flags for packet kinds that do not carry flags.
-    #[must_use]
-    pub const fn flags(self) -> Flags {
-        match self.body {
-            PacketHeaderBody::Data { header, .. } => header.flags,
-            PacketHeaderBody::Log { .. } => Flags::EMPTY,
-            PacketHeaderBody::Ack { .. }
-            | PacketHeaderBody::Ping { .. }
-            | PacketHeaderBody::Pong { .. } => Flags::EMPTY,
-        }
-    }
-
-    /// Returns the message id associated with this packet.
-    #[must_use]
-    pub const fn message_id(self) -> MessageId {
-        match self.body {
-            PacketHeaderBody::Data { header, .. } => header.message_id,
-            PacketHeaderBody::Log { header, .. } => header.message_id,
-            PacketHeaderBody::Ack { header, .. } => header.message_id,
-            PacketHeaderBody::Ping { .. } | PacketHeaderBody::Pong { .. } => MessageId::ZERO,
-        }
-    }
-
-    /// Returns the packet index associated with this packet.
-    #[must_use]
-    pub const fn packet_index(self) -> PacketIndex {
-        match self.body {
-            PacketHeaderBody::Data { header, .. } => header.packet_index,
-            PacketHeaderBody::Log { header, .. } => header.packet_index,
-            PacketHeaderBody::Ack { header, .. } => header.packet_index,
-            PacketHeaderBody::Ping { .. } | PacketHeaderBody::Pong { .. } => PacketIndex::ZERO,
-        }
-    }
-
-    /// Returns the complete message length for fragment packets.
-    #[must_use]
-    pub const fn message_len(self) -> usize {
-        match self.body {
-            PacketHeaderBody::Data { header, .. } => header.message_len,
-            PacketHeaderBody::Log { header, .. } => header.message_len,
-            PacketHeaderBody::Ack { .. }
-            | PacketHeaderBody::Ping { .. }
-            | PacketHeaderBody::Pong { .. } => 0,
-        }
-    }
-
-    /// Returns the fragment offset for fragment packets.
-    #[must_use]
-    pub const fn fragment_offset(self) -> usize {
-        match self.body {
-            PacketHeaderBody::Data { header, .. } => header.fragment_offset,
-            PacketHeaderBody::Log { header, .. } => header.fragment_offset,
-            PacketHeaderBody::Ack { .. }
-            | PacketHeaderBody::Ping { .. }
-            | PacketHeaderBody::Pong { .. } => 0,
-        }
-    }
-
-    /// Returns this packet's stable message-scoped identity.
-    #[must_use]
-    pub const fn key(self) -> PacketKey {
-        PacketKey::new(self.message_id(), self.packet_index())
     }
 }

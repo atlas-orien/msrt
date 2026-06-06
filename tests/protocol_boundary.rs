@@ -4,7 +4,7 @@ const TX_BUF_BYTES: usize = 128;
 
 use msrt::{
     Engine,
-    core::{Flags, MessageId, Packet, PacketHeader, PacketIndex},
+    core::{DataHeader, Flags, MessageId, Packet, PacketIndex},
     engine::EnginePoll,
     reliability::{FragmentRange, MessageFragment, MessageKey},
     wire::{EnvelopeHeader, EnvelopeMagic, WireEnvelope},
@@ -13,14 +13,14 @@ use msrt::{
 #[test]
 fn facade_exposes_core_packet_and_wire_envelope() {
     let payload = [0x01, 0x02, 0x03];
-    let header = PacketHeader::data(
-        PacketIndex::new(0),
+    let header = DataHeader::new(
         Flags::ACK_ELICITING,
         MessageId::new(7),
+        PacketIndex::new(0),
         payload.len(),
         0,
     );
-    let packet = Packet::new(header, &payload);
+    let packet = Packet::data_parts(header, &payload);
 
     let envelope_header = EnvelopeHeader::new(packet.payload_len() as u8);
     let envelope = WireEnvelope::new(envelope_header, packet.payload_bytes());
@@ -34,15 +34,15 @@ fn facade_exposes_core_packet_and_wire_envelope() {
 
 #[test]
 fn facade_exposes_reliability_fragment_view() {
-    let header = PacketHeader::data(
-        PacketIndex::new(0),
+    let header = DataHeader::new(
         Flags::ACK_ELICITING,
         MessageId::new(9),
+        PacketIndex::new(0),
         8,
         2,
     );
 
-    let fragment = MessageFragment::try_from_packet_header(header, 4).unwrap();
+    let fragment = MessageFragment::try_from_data_header(header, 4).unwrap();
 
     assert_eq!(fragment.key, MessageKey::new(MessageId::new(9)));
     assert_eq!(fragment.range, FragmentRange::new(2, 4));

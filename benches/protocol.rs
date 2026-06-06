@@ -3,7 +3,7 @@
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use msrt::{
     Engine, EngineConfig,
-    core::{Flags, MessageId, PacketHeader, PacketIndex, PacketKey},
+    core::{DataHeader, Flags, MessageId, PacketIndex, PacketKey},
     endpoint::{ClientEndpoint, EndpointPoll, PassiveEndpoint},
     engine::{EnginePoll, ReceiveReport},
     integrity::{Aead, Crc8, Crc16, Crc32, Crc64, Integrity, IntegrityConfig},
@@ -25,15 +25,18 @@ const WIRE_DECODE_BYTES: usize = 512;
 fn core_primitives(c: &mut Criterion) {
     c.bench_function("core_packet_header_key", |b| {
         b.iter(|| {
-            let header = PacketHeader::data(
-                PacketIndex::new(black_box(7)),
+            let header = DataHeader::new(
                 Flags::ACK_ELICITING,
                 MessageId::new(black_box(99)),
+                PacketIndex::new(black_box(7)),
                 black_box(128),
                 black_box(32),
             );
 
-            black_box((header.key(), header.is_ack_eliciting()))
+            black_box((
+                PacketKey::new(header.message_id, header.packet_index),
+                header.is_ack_eliciting(),
+            ))
         });
     });
 
@@ -199,15 +202,15 @@ fn reliability_primitives(c: &mut Criterion) {
 
     c.bench_function("reliability_message_fragment_from_header", |b| {
         b.iter(|| {
-            let header = PacketHeader::data(
-                PacketIndex::new(black_box(4)),
+            let header = DataHeader::new(
                 Flags::ACK_ELICITING,
                 MessageId::new(black_box(10)),
+                PacketIndex::new(black_box(4)),
                 black_box(128),
                 black_box(64),
             );
             black_box(
-                MessageFragment::try_from_packet_header(header, black_box(16))
+                MessageFragment::try_from_data_header(header, black_box(16))
                     .expect("fragment should fit"),
             )
         });

@@ -1,6 +1,6 @@
 //! Message fragment identifiers and ranges.
 
-use crate::core::{Error, ErrorKind, MessageId, PacketHeader, Result};
+use crate::core::{DataHeader, Error, ErrorKind, MessageId, Result};
 
 /// Key that identifies one message.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -74,12 +74,12 @@ impl MessageFragment {
         }
     }
 
-    /// Builds a message fragment descriptor from a packet header and payload length.
-    pub fn try_from_packet_header(header: PacketHeader, payload_len: usize) -> Result<Self> {
+    /// Builds a message fragment descriptor from a DATA header and payload length.
+    pub fn try_from_data_header(header: DataHeader, payload_len: usize) -> Result<Self> {
         let len = u32::try_from(payload_len).map_err(|_| Error::new(ErrorKind::Reliability))?;
         let message_len =
-            u32::try_from(header.message_len()).map_err(|_| Error::new(ErrorKind::Reliability))?;
-        let fragment_offset = u32::try_from(header.fragment_offset())
+            u32::try_from(header.message_len).map_err(|_| Error::new(ErrorKind::Reliability))?;
+        let fragment_offset = u32::try_from(header.fragment_offset)
             .map_err(|_| Error::new(ErrorKind::Reliability))?;
         let range = FragmentRange::new(fragment_offset, len);
 
@@ -88,7 +88,7 @@ impl MessageFragment {
         }
 
         Ok(Self::new(
-            MessageKey::new(header.message_id()),
+            MessageKey::new(header.message_id),
             message_len,
             range,
         ))
@@ -97,7 +97,7 @@ impl MessageFragment {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::{Flags, MessageId, PacketHeader, PacketIndex};
+    use crate::core::{DataHeader, Flags, MessageId, PacketIndex};
 
     use super::{FragmentRange, MessageFragment, MessageKey};
 
@@ -109,15 +109,15 @@ mod tests {
 
     #[test]
     fn packet_header_maps_to_message_fragment() {
-        let header = PacketHeader::data(
-            PacketIndex::new(3),
+        let header = DataHeader::new(
             Flags::ACK_ELICITING,
             MessageId::new(9),
+            PacketIndex::new(3),
             8,
             2,
         );
 
-        let fragment = MessageFragment::try_from_packet_header(header, 3).unwrap();
+        let fragment = MessageFragment::try_from_data_header(header, 3).unwrap();
 
         assert_eq!(fragment.key, MessageKey::new(MessageId::new(9)));
         assert_eq!(fragment.range, FragmentRange::new(2, 3));

@@ -4,7 +4,7 @@ use crate::core::{
     DataHeader, Error, Flags, LogHeader, MessageId, PacketIndex, PacketKey, PacketType, Result,
     packet::header::{
         ACK_PACKET_HEADER_LEN, DATA_PACKET_HEADER_LEN, LIVENESS_PACKET_HEADER_LEN,
-        LOG_PACKET_HEADER_LEN, PacketHeader, PacketHeaderBody,
+        LOG_PACKET_HEADER_LEN,
     },
 };
 
@@ -113,15 +113,15 @@ fn decode_packet_bytes(bytes: &[u8]) -> PacketDecode<'_> {
         };
     }
 
-    let Some(header) = packet_header_from_bytes(bytes) else {
+    let Some(packet_type) = bytes.first().and_then(|code| PacketType::from_code(*code)) else {
         return PacketDecode::Malformed;
     };
 
-    match header.packet_type {
-        PacketType::Data => data_from_packet_bytes(header, bytes)
+    match packet_type {
+        PacketType::Data => data_from_packet_bytes(bytes)
             .map(PacketDecode::Data)
             .unwrap_or(PacketDecode::Malformed),
-        PacketType::Log => log_from_packet_bytes(header, bytes)
+        PacketType::Log => log_from_packet_bytes(bytes)
             .map(PacketDecode::Log)
             .unwrap_or(PacketDecode::Malformed),
         PacketType::Ack => PacketDecode::Malformed,
@@ -129,18 +129,7 @@ fn decode_packet_bytes(bytes: &[u8]) -> PacketDecode<'_> {
     }
 }
 
-fn packet_header_from_bytes(bytes: &[u8]) -> Option<PacketHeader> {
-    let packet_type = PacketType::from_code(*bytes.first()?)?;
-
-    match packet_type {
-        PacketType::Data => data_header_from_bytes(bytes),
-        PacketType::Log => log_header_from_bytes(bytes),
-        PacketType::Ack => None,
-        PacketType::Ping | PacketType::Pong => None,
-    }
-}
-
-fn data_header_from_bytes(bytes: &[u8]) -> Option<PacketHeader> {
+fn data_header_from_bytes(bytes: &[u8]) -> Option<DataHeader> {
     if bytes.len() < DATA_PACKET_HEADER_LEN {
         return None;
     }
@@ -151,16 +140,16 @@ fn data_header_from_bytes(bytes: &[u8]) -> Option<PacketHeader> {
     let message_len = u16::from_le_bytes(bytes.get(8..10)?.try_into().ok()?) as usize;
     let fragment_offset = u16::from_le_bytes(bytes.get(10..12)?.try_into().ok()?) as usize;
 
-    Some(PacketHeader::data(
-        packet_index,
+    Some(DataHeader::new(
         flags,
         message_id,
+        packet_index,
         message_len,
         fragment_offset,
     ))
 }
 
-fn log_header_from_bytes(bytes: &[u8]) -> Option<PacketHeader> {
+fn log_header_from_bytes(bytes: &[u8]) -> Option<LogHeader> {
     if bytes.len() < LOG_PACKET_HEADER_LEN {
         return None;
     }
@@ -170,9 +159,9 @@ fn log_header_from_bytes(bytes: &[u8]) -> Option<PacketHeader> {
     let message_len = u16::from_le_bytes(bytes.get(7..9)?.try_into().ok()?) as usize;
     let fragment_offset = u16::from_le_bytes(bytes.get(9..11)?.try_into().ok()?) as usize;
 
-    Some(PacketHeader::log(
-        packet_index,
+    Some(LogHeader::new(
         message_id,
+        packet_index,
         message_len,
         fragment_offset,
     ))
@@ -191,59 +180,57 @@ fn ack_from_packet_bytes(bytes: &[u8]) -> Option<DecodedAck> {
     })
 }
 
-fn data_from_packet_bytes(header: PacketHeader, bytes: &[u8]) -> Option<DecodedData<'_>> {
-    let PacketHeaderBody::Data {
-        header: data_header,
-    } = header.body
-    else {
-        return None;
-    };
-    let fragment = fragment_from_packet_bytes(header, bytes)?;
+fn data_from_packet_bytes(bytes: &[u8]) -> Option<DecodedData<'_>> {
+    let header = data_header_from_bytes(bytes)?;
+    let fragment = data_fragment_from_packet_bytes(header, bytes)?;
 
-    Some(DecodedData {
-        header: data_header,
-        fragment,
-    })
+    Some(DecodedData { header, fragment })
 }
 
-fn log_from_packet_bytes(header: PacketHeader, bytes: &[u8]) -> Option<DecodedLog<'_>> {
-    let PacketHeaderBody::Log { header: log_header } = header.body else {
-        return None;
-    };
-    let fragment = fragment_from_packet_bytes(header, bytes)?;
+fn log_from_packet_bytes(bytes: &[u8]) -> Option<DecodedLog<'_>> {
+    let header = log_header_from_bytes(bytes)?;
+    let fragment = log_fragment_from_packet_bytes(header, bytes)?;
 
-    Some(DecodedLog {
-        header: log_header,
-        fragment,
-    })
+    Some(DecodedLog { header, fragment })
 }
 
-fn fragment_from_packet_bytes(header: PacketHeader, bytes: &[u8]) -> Option<MessageFragment<'_>> {
-    let header_len = match header.packet_type {
-        PacketType::Data => DATA_PACKET_HEADER_LEN,
-        PacketType::Log => LOG_PACKET_HEADER_LEN,
-        PacketType::Ack | PacketType::Ping | PacketType::Pong => return None,
-    };
+fn data_fragment_from_packet_bytes(
+    header: DataHeader,
+    bytes: &[u8],
+) -> Option<MessageFragment<'_>> {
+    let fragment = bytes.get(DATA_PACKET_HEADER_LEN..)?;
+    let end = header.fragment_offset.checked_add(fragment.len())?;
 
-    if bytes.len() < header_len {
-        return None;
-    }
-
-    let fragment = bytes.get(header_len..)?;
-
-    let end = header.fragment_offset().checked_add(fragment.len())?;
-
-    if end > header.message_len() {
+    if end > header.message_len {
         return None;
     }
 
     Some(MessageFragment {
-        packet_type: header.packet_type,
-        packet_index: header.packet_index(),
+        packet_type: PacketType::Data,
+        packet_index: header.packet_index,
         ack_eliciting: header.is_ack_eliciting(),
-        message_id: header.message_id(),
-        message_len: header.message_len(),
-        fragment_offset: header.fragment_offset(),
+        message_id: header.message_id,
+        message_len: header.message_len,
+        fragment_offset: header.fragment_offset,
+        bytes: fragment,
+    })
+}
+
+fn log_fragment_from_packet_bytes(header: LogHeader, bytes: &[u8]) -> Option<MessageFragment<'_>> {
+    let fragment = bytes.get(LOG_PACKET_HEADER_LEN..)?;
+    let end = header.fragment_offset.checked_add(fragment.len())?;
+
+    if end > header.message_len {
+        return None;
+    }
+
+    Some(MessageFragment {
+        packet_type: PacketType::Log,
+        packet_index: header.packet_index,
+        ack_eliciting: false,
+        message_id: header.message_id,
+        message_len: header.message_len,
+        fragment_offset: header.fragment_offset,
         bytes: fragment,
     })
 }
