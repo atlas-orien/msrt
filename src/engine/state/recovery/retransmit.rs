@@ -29,7 +29,9 @@ impl EngineState {
                 continue;
             }
 
-            if now_ms.saturating_sub(packet.last_sent_ms) < config.retransmit_timeout_ms {
+            if now_ms.saturating_sub(packet.last_sent_ms)
+                < self.retransmit_timeout_ms(config, packet.attempts)
+            {
                 continue;
             }
 
@@ -105,10 +107,21 @@ impl EngineState {
             failed.attempts,
             now_ms.saturating_sub(failed.last_sent_ms),
             config.max_retransmit_attempts,
-            config.retransmit_timeout_ms,
+            self.retransmit_timeout_ms(config, failed.attempts),
         );
         self.scheduler.log_snapshot(now_ms, self.ack.is_pending());
         self.log_in_flight_packets(now_ms);
+    }
+
+    #[cfg(not(feature = "dynamic-recovery"))]
+    fn retransmit_timeout_ms(&self, config: &EngineConfig, _attempts: u8) -> u64 {
+        config.retransmit_timeout_ms
+    }
+
+    #[cfg(feature = "dynamic-recovery")]
+    fn retransmit_timeout_ms(&self, config: &EngineConfig, attempts: u8) -> u64 {
+        self.recovery
+            .dynamic_timeout_ms(config.dynamic_recovery, attempts)
     }
 
     #[cfg(feature = "std")]

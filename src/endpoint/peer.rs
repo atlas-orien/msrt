@@ -334,10 +334,8 @@ mod tests {
 
     #[test]
     fn send_failed_drops_engine_session() {
-        let mut peer = PeerSlot::default();
+        let mut peer = PeerSlot::new(test_retransmit_config(1, 1));
         let engine = peer.engine_or_connect(1).unwrap();
-        engine.config.max_retransmit_attempts = 1;
-        engine.config.retransmit_timeout_ms = 1;
         engine.send(b"hello").unwrap();
 
         let mut tx_buf = [0; 128];
@@ -351,5 +349,23 @@ mod tests {
         }
 
         panic!("peer should report send failure");
+    }
+
+    fn test_retransmit_config(
+        max_retransmit_attempts: u8,
+        retransmit_timeout_ms: u64,
+    ) -> crate::engine::EngineConfig {
+        crate::engine::EngineConfig {
+            max_retransmit_attempts,
+            retransmit_timeout_ms,
+            #[cfg(feature = "dynamic-recovery")]
+            dynamic_recovery: crate::reliability::DynamicRecoveryConfig {
+                initial_rtt_ms: 0,
+                max_ack_delay_ms: 0,
+                timer_granularity_ms: retransmit_timeout_ms,
+                max_backoff_exponent: 0,
+            },
+            ..crate::engine::EngineConfig::default()
+        }
     }
 }

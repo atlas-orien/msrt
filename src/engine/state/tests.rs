@@ -4,6 +4,8 @@ use crate::engine::{
     SendFailureReason,
 };
 use crate::integrity::IntegrityConfig;
+#[cfg(feature = "dynamic-recovery")]
+use crate::reliability::DynamicRecoveryConfig;
 
 #[test]
 fn engine_sends_one_message_as_multiple_write_events() {
@@ -287,11 +289,7 @@ fn engine_polls_message_before_queued_new_data_when_no_ack_is_pending() {
 
 #[test]
 fn engine_single_ack_retransmits_unacked_packets() {
-    let mut engine = Engine::new(EngineConfig {
-        fragment_bytes: 2,
-        retransmit_timeout_ms: 1,
-        ..EngineConfig::default()
-    });
+    let mut engine = Engine::new(test_retransmit_config(2, 5, 1));
 
     engine.send(b"abcdefgh").unwrap();
 
@@ -317,10 +315,11 @@ fn engine_single_ack_retransmits_unacked_packets() {
 
 #[test]
 fn engine_tick_waits_for_retransmit_timeout() {
-    let mut engine = Engine::new(EngineConfig {
-        retransmit_timeout_ms: 10,
-        ..EngineConfig::default()
-    });
+    let mut engine = Engine::new(test_retransmit_config(
+        EngineConfig::default().fragment_bytes,
+        5,
+        10,
+    ));
 
     engine.send(b"hello").unwrap();
     let first = next_write(&mut engine);
@@ -593,11 +592,11 @@ fn engine_send_log_uses_log_packet_kind() {
 
 #[test]
 fn engine_reports_send_failed_after_retry_limit() {
-    let mut engine = Engine::new(EngineConfig {
-        max_retransmit_attempts: 1,
-        retransmit_timeout_ms: 1,
-        ..EngineConfig::default()
-    });
+    let mut engine = Engine::new(test_retransmit_config(
+        EngineConfig::default().fragment_bytes,
+        1,
+        1,
+    ));
 
     let message_id = engine.send(b"hello").unwrap();
     let first = next_write(&mut engine);
@@ -617,12 +616,7 @@ fn engine_reports_send_failed_after_retry_limit() {
 
 #[test]
 fn engine_send_failed_is_message_scoped() {
-    let mut engine = Engine::new(EngineConfig {
-        fragment_bytes: 2,
-        max_retransmit_attempts: 1,
-        retransmit_timeout_ms: 1,
-        ..EngineConfig::default()
-    });
+    let mut engine = Engine::new(test_retransmit_config(2, 1, 1));
 
     let message_id = engine.send(b"hello").unwrap();
     let first = next_write(&mut engine);
@@ -648,12 +642,7 @@ fn engine_send_failed_is_message_scoped() {
 
 #[test]
 fn engine_send_failed_suppresses_same_tick_message_retransmits() {
-    let mut engine = Engine::new(EngineConfig {
-        fragment_bytes: 2,
-        max_retransmit_attempts: 1,
-        retransmit_timeout_ms: 1,
-        ..EngineConfig::default()
-    });
+    let mut engine = Engine::new(test_retransmit_config(2, 1, 1));
 
     let message_id = engine.send(b"hello").unwrap();
     let first = next_write(&mut engine);
@@ -725,6 +714,26 @@ fn packet_key_from_wire(bytes: &[u8]) -> crate::core::PacketKey {
 
 fn next_write(engine: &mut Engine) -> WriteEvent {
     next_polled_write(engine, 0)
+}
+
+fn test_retransmit_config(
+    fragment_bytes: usize,
+    max_retransmit_attempts: u8,
+    retransmit_timeout_ms: u64,
+) -> EngineConfig {
+    EngineConfig {
+        fragment_bytes,
+        max_retransmit_attempts,
+        retransmit_timeout_ms,
+        #[cfg(feature = "dynamic-recovery")]
+        dynamic_recovery: DynamicRecoveryConfig {
+            initial_rtt_ms: 0,
+            max_ack_delay_ms: 0,
+            timer_granularity_ms: retransmit_timeout_ms,
+            max_backoff_exponent: 0,
+        },
+        ..EngineConfig::default()
+    }
 }
 
 fn next_polled_write(engine: &mut Engine, now_ms: u64) -> WriteEvent {

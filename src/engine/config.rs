@@ -2,6 +2,8 @@
 
 use crate::core::MessageId;
 use crate::integrity::IntegrityConfig;
+#[cfg(feature = "dynamic-recovery")]
+use crate::reliability::DynamicRecoveryConfig;
 
 /// Maximum encoded wire bytes held by one MVP engine event.
 pub(crate) const MAX_WIRE_BYTES: usize = 128;
@@ -51,6 +53,9 @@ pub struct EngineConfig {
     pub reassembly_timeout_ms: u64,
     /// Packet integrity backend used by this engine.
     pub integrity: IntegrityConfig,
+    /// Dynamic recovery timeout configuration.
+    #[cfg(feature = "dynamic-recovery")]
+    pub dynamic_recovery: DynamicRecoveryConfig,
 }
 
 impl Default for EngineConfig {
@@ -62,6 +67,8 @@ impl Default for EngineConfig {
             retransmit_timeout_ms: DEFAULT_RETRANSMIT_TIMEOUT_MS,
             reassembly_timeout_ms: DEFAULT_REASSEMBLY_TIMEOUT_MS,
             integrity: IntegrityConfig::DEFAULT,
+            #[cfg(feature = "dynamic-recovery")]
+            dynamic_recovery: DynamicRecoveryConfig::default(),
         }
     }
 }

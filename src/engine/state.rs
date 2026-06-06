@@ -38,12 +38,19 @@ pub(crate) struct EngineState {
 }
 
 impl EngineState {
-    pub(crate) const fn new(initial_message_id: MessageId) -> Self {
+    pub(crate) const fn new(
+        initial_message_id: MessageId,
+        #[cfg_attr(not(feature = "dynamic-recovery"), allow(unused_variables))]
+        config: &EngineConfig,
+    ) -> Self {
         Self {
             clock: ClockState::new(),
             numbers: NumberState::new(initial_message_id),
             scheduler: SchedulerState::new(),
+            #[cfg(not(feature = "dynamic-recovery"))]
             recovery: RecoveryState::new(),
+            #[cfg(feature = "dynamic-recovery")]
+            recovery: RecoveryState::new(config.dynamic_recovery),
             ack: AckState::new(),
             ingress: IngressState::new(),
             message: MessageState::new(),

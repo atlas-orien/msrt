@@ -26,7 +26,7 @@ impl Engine {
     pub const fn new(config: EngineConfig) -> Self {
         Self {
             config,
-            state: EngineState::new(config.initial_message_id),
+            state: EngineState::new(config.initial_message_id, &config),
         }
     }
 

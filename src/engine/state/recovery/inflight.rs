@@ -72,6 +72,14 @@ impl InFlightPackets {
         self.packets.iter().flatten()
     }
 
+    #[cfg(feature = "dynamic-recovery")]
+    pub(crate) fn packet(&self, key: PacketKey) -> Option<&InFlightPacket> {
+        self.packets
+            .iter()
+            .flatten()
+            .find(|packet| packet.key == key)
+    }
+
     #[cfg_attr(not(feature = "std"), allow(dead_code))]
     pub(crate) const fn len(&self) -> usize {
         self.len

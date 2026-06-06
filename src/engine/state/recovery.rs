@@ -1,6 +1,8 @@
 //! Reliable packet recovery state.
 
 use crate::core::{MessageId, PacketKey, PacketType, Result};
+#[cfg(feature = "dynamic-recovery")]
+use crate::reliability::{DynamicRecoveryConfig, DynamicRecoveryState};
 
 use self::inflight::{InFlightPacket, InFlightPackets};
 
@@ -12,13 +14,25 @@ pub(crate) mod retransmit;
 pub(crate) struct RecoveryState {
     in_flight: InFlightPackets,
     last_tick_ms: Option<u64>,
+    #[cfg(feature = "dynamic-recovery")]
+    dynamic: DynamicRecoveryState,
 }
 
 impl RecoveryState {
+    #[cfg(not(feature = "dynamic-recovery"))]
     pub(crate) const fn new() -> Self {
         Self {
             in_flight: InFlightPackets::new(),
             last_tick_ms: None,
+        }
+    }
+
+    #[cfg(feature = "dynamic-recovery")]
+    pub(crate) const fn new(dynamic_config: DynamicRecoveryConfig) -> Self {
+        Self {
+            in_flight: InFlightPackets::new(),
+            last_tick_ms: None,
+            dynamic: DynamicRecoveryState::new(dynamic_config),
         }
     }
 
@@ -28,6 +42,18 @@ impl RecoveryState {
 
     pub(crate) fn apply_ack(&mut self, key: PacketKey) {
         self.in_flight.apply_ack(key);
+    }
+
+    #[cfg(feature = "dynamic-recovery")]
+    pub(crate) fn apply_ack_at(&mut self, key: PacketKey, now_ms: u64) {
+        if let Some(packet) = self.in_flight.packet(key)
+            && packet.sent
+        {
+            self.dynamic
+                .observe_ack(now_ms.saturating_sub(packet.last_sent_ms));
+        }
+
+        self.apply_ack(key);
     }
 
     pub(crate) fn packets(&self) -> impl Iterator<Item = &InFlightPacket> {
@@ -62,5 +88,10 @@ impl RecoveryState {
 
     pub(crate) fn note_retransmit_sent(&mut self, key: PacketKey, now_ms: u64) {
         self.in_flight.note_retransmit_sent(key, now_ms);
+    }
+
+    #[cfg(feature = "dynamic-recovery")]
+    pub(crate) fn dynamic_timeout_ms(&self, config: DynamicRecoveryConfig, attempts: u8) -> u64 {
+        self.dynamic.timeout_ms(config, attempts)
     }
 }

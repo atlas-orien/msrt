@@ -154,6 +154,9 @@ impl EngineState {
             }
             PacketDecode::Ack(ack) => {
                 let packet_index = ack.key.packet_index;
+                #[cfg(feature = "dynamic-recovery")]
+                self.recovery.apply_ack_at(ack.key, self.clock.now_ms());
+                #[cfg(not(feature = "dynamic-recovery"))]
                 self.recovery.apply_ack(ack.key);
                 ReceiveReport::Ack { packet_index }
             }
