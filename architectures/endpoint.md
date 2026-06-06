@@ -65,7 +65,7 @@ Connected
 
 ## 联通确认
 
-MSRT 当前不新增 `Ping` / `Pong` packet type。联通确认使用现有 `Data` + `Ack` 完成。
+联通确认首先使用现有 `Data` + `Ack` 完成。
 
 主动端 connect 时，endpoint 会创建新的 `Engine`，并发送一个很短的 hello message：
 
@@ -87,6 +87,10 @@ ClientEndpoint::connect(now_ms)
 ```
 
 endpoint 此时把状态切到 `Connected`，并刷新 `last_seen_ms`。
+
+`Ping` / `Pong` 是内部保活 packet。它们不是用户 API，不携带 message id，也不携带 payload。endpoint 可以在连接空闲后触发 Ping，收到 Ping 的一端由 engine 自动排队 Pong。
+
+用户不应该直接调用 `send_ping`，应用层也不应该依赖 Ping/Pong 承载业务含义。
 
 ## 主动单 Peer：ClientEndpoint
 
@@ -232,7 +236,7 @@ idle timeout
   通过 endpoint 的 last_seen_ms 超时判断
 ```
 
-后续如果需要更主动的空闲探测，可以在 endpoint 或更上层用普通 `Data` message 实现 heartbeat，而不需要立刻新增 packet type。
+空闲探测可以由 endpoint 内部 Ping/Pong 或应用层普通 Data heartbeat 完成。两者都不改变“一个 Engine = 一个会话状态”的边界。
 
 ## 不属于 Endpoint 的职责
 

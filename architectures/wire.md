@@ -105,3 +105,19 @@ integrity tag 只验证 wire bytes 是否损坏或不合法。它不表达可靠
 默认 `EngineConfig` 使用 CRC-16/XMODEM。CRC-32、CRC-64 和轻量 keyed validation 通过 `EngineConfig::integrity` 选择。不同 integrity backend 的 tag 长度不同，因此 envelope total length 必须根据当前 engine 配置计算，而不是使用全局固定长度。
 
 length 字段仍然使用固定 CRC-8 做第一阶段保护，用于在完整 envelope 尚未到达前验证 packet length。
+
+integrity 的边界是 wire 合法性，不是业务数据正确性。协议层交付的是 bytes。如果业务 payload 内部有命令、字段、版本或业务 checksum，应该由业务层自己判断。
+
+## Length Framing 的代价
+
+MSRT 使用：
+
+```text
+magic + length + length_crc8 + packet + integrity_tag
+```
+
+这种 length-based framing 正常效率高，不需要 tail magic，也不需要对 payload 中出现 tail magic 做转义。
+
+代价是：如果 packet body 中间发生连续丢字节，decoder 会按照原 length 等待后续 bytes，坏 envelope 可能吞掉后面真实 envelope 的一部分。这就是压力测试里 `burst-drop` 比整包丢失更危险的原因。
+
+这个现象不是 ACK bug，也不是 engine bug，而是 length framing 面对裸字节流连续丢失时的自然成本。

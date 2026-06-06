@@ -83,9 +83,10 @@ ACK payload = empty
 
 ```text
 receive(DATA packet)
-  -> 先 observe PacketKey(message_id, packet_index) 到 AckState
-  -> 再做 duplicate 判断
-  -> duplicate 也必须重新 ACK
+  -> 如果是 duplicate PacketKey，重新 ACK，但不重复交付
+  -> 如果不是 duplicate，先让 reassembly 接受 fragment
+  -> reassembly 接受后再 observe PacketKey 到 dedup
+  -> 最后排队 ACK
 
 poll()
   -> 如果 ack pending，最高优先级发送 ACK
@@ -94,7 +95,7 @@ poll()
 
 这个修复点很小，但非常关键。
 
-修复以后，重复 DATA 不再因为“已经见过”而失去 ACK 机会；重传包刚到达时，会进入 pending ACK 队列，ACK 不再被全局 packet stream 或 range 压缩语义污染。
+修复以后，重复 DATA 不再因为“已经见过”而失去 ACK 机会；坏 fragment 也不会在 reassembly 拒绝前被误 ACK。ACK 不再被全局 packet stream 或 range 压缩语义污染。
 
 ## 调度顺序
 
@@ -248,3 +249,85 @@ burst-drop 是当前最强破坏模型
 ```
 
 后续如果继续提高极限稳定性，优先研究 burst-drop 下的恢复策略，而不是回头改 packet header 或 ACK pending 语义。
+
+## 动态网络测试
+
+在固定 RTO 策略稳定以后，新增了 `msrt-sim-dynamic` 用来模拟动态网络：
+
+```bash
+cargo run --release --features dynamic-recovery --bin msrt-sim-dynamic
+```
+
+这个测试不是简单字节噪声，而是给链路增加可变化的 delivery time。每个 packet 入队后带有 `deliver_at_ms`，因此会自然产生：
+
+- 延迟
+- 抖动
+- 乱序
+- 队列堆积
+- 链路整包丢失
+- 6 种 byte/packet 噪声
+
+当前 profile 每 15 秒切换：
+
+```text
+fast:      2ms 基础延迟 + 2ms 抖动
+slow:      80ms 基础延迟 + 80ms 抖动
+jitter:    20ms 基础延迟 + 220ms 抖动
+congested: 180ms 基础延迟 + 320ms 抖动
+```
+
+测试结论：
+
+```text
+固定恢复 fixed:
+  在 congested 阶段可能因为固定 RTO 太短而断开
+
+动态恢复 dynamic-recovery:
+  能根据 ACK RTT 自动拉长 PTO
+  在 1 小时动态网络模拟中保持 Connected
+```
+
+示例结果：
+
+```text
+sim dynamic now=3600s
+host_state=Connected
+mcu_state=Connected
+host_sent=957929
+mcu_sent=957983
+host_received=949376
+mcu_received=949356
+max_host_queue=70
+max_mcu_queue=74
+```
+
+这说明 dynamic recovery 的价值主要在动态网络，而不是串口。串口/MCU 默认仍然应该使用固定 RTO；UDP、公网或高抖动链路可以显式启用 `dynamic-recovery`。
+
+## Tracing 诊断
+
+压力测试早期使用 `eprintln!` 直接打印库内部状态。现在正式架构改为：
+
+```text
+库代码:
+  tracing::debug!
+
+bin / adapter / application:
+  配置 tracing subscriber
+  决定是否打印文件名、行号、写入文件或过滤 target
+```
+
+`tracing` 是独立 feature，默认不开：
+
+```bash
+cargo run --features tracing --bin ...
+cargo run --features tracing,dynamic-recovery --bin ...
+```
+
+库内部诊断 target 当前包括：
+
+```text
+msrt::recovery
+msrt::scheduler
+```
+
+这样既保留故障分析能力，又不会让普通库用户和 MCU 构建默认引入日志依赖。

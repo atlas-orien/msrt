@@ -62,6 +62,40 @@ endpoint
   在 engine 之上管理连接生命周期和 peer -> Engine 映射
 ```
 
+## Cargo Features
+
+MSRT 的 feature 边界要保持小而明确：
+
+```text
+default = ["std"]
+std
+serial
+dynamic-recovery
+tracing
+```
+
+- `std`：默认启用，面向普通 host/bin/test 使用。
+- `serial`：启用正式串口前端需要的 `serialport` 依赖。CI 或纯库构建不应该默认拉这个 feature。
+- `dynamic-recovery`：启用 RTT/PTO 动态恢复策略，适合动态网络、UDP、公网或延迟抖动明显的链路。
+- `tracing`：启用库内部结构化诊断日志。默认不开，不跟随 `std`，库也不配置 subscriber。
+
+库代码里不应该使用 `println!` / `eprintln!` 做诊断输出。需要诊断时使用 `tracing` feature；真正把日志打印到终端、文件，或者附带文件名和行号，是 bin、adapter 或应用层的责任。
+
+默认配置服务于 MCU/串口这类短链路：
+
+```text
+固定 RTO
+固定 retry limit
+无 tracing 依赖
+```
+
+动态网络测试或公网 UDP 可以显式启用：
+
+```bash
+cargo run --release --features dynamic-recovery --bin msrt-sim-dynamic
+cargo run --release --features tracing,dynamic-recovery --bin msrt-sim-dynamic
+```
+
 ## 临时实现文档
 
 未来持续开发时，可以在本地创建：
