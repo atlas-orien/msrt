@@ -1,6 +1,6 @@
 //! Packet header length constants.
 
-use crate::core::message::{CHANNEL_ID_LEN, FRAGMENT_OFFSET_LEN, MESSAGE_ID_LEN, MESSAGE_LEN_LEN};
+use crate::core::message::{FRAGMENT_OFFSET_LEN, MESSAGE_ID_LEN, MESSAGE_LEN_LEN};
 
 /// Encoded packet type length in bytes.
 pub(crate) const PACKET_TYPE_LEN: usize = core::mem::size_of::<u8>();
@@ -8,14 +8,6 @@ pub(crate) const PACKET_TYPE_LEN: usize = core::mem::size_of::<u8>();
 pub(crate) const PACKET_FLAGS_LEN: usize = core::mem::size_of::<u8>();
 /// Encoded message-scoped packet index length in bytes.
 pub(crate) const PACKET_INDEX_LEN: usize = core::mem::size_of::<u16>();
-/// Encoded legacy packet header length in bytes.
-pub(crate) const PACKET_HEADER_LEN: usize = PACKET_TYPE_LEN
-    + PACKET_FLAGS_LEN
-    + CHANNEL_ID_LEN
-    + MESSAGE_ID_LEN
-    + PACKET_INDEX_LEN
-    + MESSAGE_LEN_LEN
-    + FRAGMENT_OFFSET_LEN;
 /// Target encoded DATA packet header length after channel removal.
 pub const DATA_PACKET_HEADER_LEN: usize = PACKET_TYPE_LEN
     + PACKET_FLAGS_LEN

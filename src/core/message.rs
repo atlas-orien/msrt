@@ -1,7 +1,5 @@
 //! Message identity primitives.
 
-/// Encoded channel identifier length in bytes.
-pub(crate) const CHANNEL_ID_LEN: usize = core::mem::size_of::<u8>();
 /// Encoded message identifier length in bytes.
 pub(crate) const MESSAGE_ID_LEN: usize = core::mem::size_of::<u32>();
 /// Encoded complete message length field size in bytes.

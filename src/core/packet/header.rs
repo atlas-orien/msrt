@@ -12,7 +12,6 @@ pub use ack::AckHeader;
 pub use body::PacketHeaderBody;
 pub use data::DataHeader;
 pub use flags::Flags;
-pub(crate) use len::PACKET_HEADER_LEN;
 pub use len::{
     ACK_PACKET_HEADER_LEN, DATA_PACKET_HEADER_LEN, LIVENESS_PACKET_HEADER_LEN,
     LOG_PACKET_HEADER_LEN,

@@ -547,10 +547,7 @@ fn engine_encodes_v1_draft_packet_and_frame_headers() {
     );
     assert_eq!(u16::from_le_bytes(packet[9..11].try_into().unwrap()), 5);
     assert_eq!(u16::from_le_bytes(packet[11..13].try_into().unwrap()), 0);
-    assert_eq!(
-        &packet[crate::core::packet::header::PACKET_HEADER_LEN..],
-        b"hello"
-    );
+    assert_eq!(&packet[legacy_data_packet_header_len()..], b"hello");
 }
 
 #[test]
@@ -659,6 +656,14 @@ fn engine_log_channel_defaults_to_best_effort_and_log_profile() {
 
     let write = next_write(&mut sender);
 
+    assert_eq!(
+        packet_type_from_wire(write.as_bytes()),
+        crate::core::PacketType::Log
+    );
+    assert_eq!(
+        packet_len_from_wire(write.as_bytes()),
+        crate::core::LOG_PACKET_HEADER_LEN + b"log line".len()
+    );
     assert_eq!(
         packet_flags_from_wire(write.as_bytes()),
         crate::core::Flags::EMPTY.bits()
@@ -807,12 +812,28 @@ fn engine_send_failed_suppresses_same_tick_message_retransmits() {
 
 fn fragment_len_from_wire(bytes: &[u8]) -> usize {
     let packet_len = bytes[crate::wire::WIRE_PACKET_LEN_OFFSET] as usize;
+    let header_len = match packet_type_from_wire(bytes) {
+        crate::core::PacketType::Data => legacy_data_packet_header_len(),
+        crate::core::PacketType::Log => crate::core::LOG_PACKET_HEADER_LEN,
+        crate::core::PacketType::Ack => crate::core::ACK_PACKET_HEADER_LEN,
+        crate::core::PacketType::Ping | crate::core::PacketType::Pong => {
+            crate::core::LIVENESS_PACKET_HEADER_LEN
+        }
+    };
 
-    packet_len - crate::core::packet::header::PACKET_HEADER_LEN
+    packet_len - header_len
+}
+
+const fn legacy_data_packet_header_len() -> usize {
+    13
 }
 
 fn packet_flags_from_wire(bytes: &[u8]) -> u8 {
-    bytes[crate::wire::WIRE_HEADER_LEN + 1]
+    if matches!(packet_type_from_wire(bytes), crate::core::PacketType::Data) {
+        bytes[crate::wire::WIRE_HEADER_LEN + 1]
+    } else {
+        crate::core::Flags::EMPTY.bits()
+    }
 }
 
 fn channel_id_from_wire(bytes: &[u8]) -> u8 {
@@ -824,12 +845,28 @@ fn packet_type_from_wire(bytes: &[u8]) -> crate::core::PacketType {
         .expect("packet type should decode")
 }
 
+fn packet_len_from_wire(bytes: &[u8]) -> usize {
+    usize::from(bytes[crate::wire::WIRE_PACKET_LEN_OFFSET])
+}
+
 fn packet_key_from_wire(bytes: &[u8]) -> crate::core::PacketKey {
     let packet = &bytes[crate::wire::WIRE_HEADER_LEN..];
-    crate::core::PacketKey::new(
-        crate::core::MessageId::new(u32::from_le_bytes(packet[3..7].try_into().unwrap())),
-        crate::core::PacketIndex::new(u16::from_le_bytes(packet[7..9].try_into().unwrap())),
-    )
+    match packet_type_from_wire(bytes) {
+        crate::core::PacketType::Data => crate::core::PacketKey::new(
+            crate::core::MessageId::new(u32::from_le_bytes(packet[3..7].try_into().unwrap())),
+            crate::core::PacketIndex::new(u16::from_le_bytes(packet[7..9].try_into().unwrap())),
+        ),
+        crate::core::PacketType::Log | crate::core::PacketType::Ack => crate::core::PacketKey::new(
+            crate::core::MessageId::new(u32::from_le_bytes(packet[1..5].try_into().unwrap())),
+            crate::core::PacketIndex::new(u16::from_le_bytes(packet[5..7].try_into().unwrap())),
+        ),
+        crate::core::PacketType::Ping | crate::core::PacketType::Pong => {
+            crate::core::PacketKey::new(
+                crate::core::MessageId::ZERO,
+                crate::core::PacketIndex::ZERO,
+            )
+        }
+    }
 }
 
 fn next_write(engine: &mut Engine) -> WriteEvent {

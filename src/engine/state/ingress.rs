@@ -132,6 +132,19 @@ impl EngineState {
 
                 report
             }
+            PacketDecode::Log(fragment) => {
+                let packet_index = fragment.header.packet_index();
+
+                match self.reassembly.observe(fragment, self.clock.now_ms()) {
+                    Ok(Some(mut message)) => {
+                        message.profile = config.channel_profile(message.channel_id);
+                        self.message.push(message);
+                        ReceiveReport::Packet { packet_index }
+                    }
+                    Ok(None) => ReceiveReport::Packet { packet_index },
+                    Err(error) => ReceiveReport::Error(error),
+                }
+            }
             PacketDecode::Ack(ack) => {
                 let packet_index = ack.key.packet_index;
                 self.recovery.apply_ack(ack.key);

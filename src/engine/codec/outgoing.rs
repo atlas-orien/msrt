@@ -3,7 +3,7 @@
 use crate::core::{
     ChannelId, Error, ErrorKind, Flags, MessageId, PacketIndex, PacketKey, PacketType, Result,
     packet::header::{
-        ACK_PACKET_HEADER_LEN, LIVENESS_PACKET_HEADER_LEN, PACKET_HEADER_LEN, PacketHeader,
+        ACK_PACKET_HEADER_LEN, LIVENESS_PACKET_HEADER_LEN, LOG_PACKET_HEADER_LEN, PacketHeader,
     },
 };
 use crate::reliability::ReliabilityMode;
@@ -23,6 +23,7 @@ use crate::engine::{
 
 const ACK_PACKET_LEN: usize = ACK_PACKET_HEADER_LEN;
 const LIVENESS_PACKET_LEN: usize = LIVENESS_PACKET_HEADER_LEN;
+const LEGACY_DATA_PACKET_HEADER_LEN: usize = 13;
 
 impl EngineState {
     pub(crate) fn send_on_impl(
@@ -31,9 +32,10 @@ impl EngineState {
         channel_id: ChannelId,
         message: &[u8],
     ) -> Result<MessageId> {
-        let fragment_bytes = config
-            .fragment_bytes
-            .clamp(1, max_fragment_bytes(config.integrity.tag_len()));
+        let fragment_bytes = config.fragment_bytes.clamp(
+            1,
+            max_fragment_bytes(channel_id, config.integrity.tag_len()),
+        );
         let message_id = self.numbers.alloc_message_id();
         let mode = config.reliability_mode(channel_id);
         self.ensure_can_queue_message(message.len(), fragment_bytes, mode)?;
@@ -131,17 +133,13 @@ impl EngineState {
             let fragment = &message[offset..end];
             let mut wire = [0; MAX_WIRE_BYTES];
             let key = PacketKey::new(message_id, packet_index);
-            let header = PacketHeader::data(
-                packet_index,
-                if matches!(mode, ReliabilityMode::Reliable) {
-                    Flags::ACK_ELICITING
-                } else {
-                    Flags::EMPTY
-                },
+            let header = packet_header_for_fragment(
                 channel_id,
+                packet_index,
                 message_id,
                 message.len(),
                 offset,
+                mode,
             );
             let written = encode_message_fragment(header, fragment, &mut wire, integrity)?;
 
@@ -183,7 +181,14 @@ fn encode_message_fragment(
     out: &mut [u8],
     integrity: &impl Integrity,
 ) -> Result<usize> {
-    let packet_len = PACKET_HEADER_LEN + fragment.len();
+    let header_len = match header.packet_type {
+        PacketType::Data => LEGACY_DATA_PACKET_HEADER_LEN,
+        PacketType::Log => LOG_PACKET_HEADER_LEN,
+        PacketType::Ack | PacketType::Ping | PacketType::Pong => {
+            return Err(Error::new(ErrorKind::Engine));
+        }
+    };
+    let packet_len = header_len + fragment.len();
     let packet_len = u8::try_from(packet_len).map_err(|_| Error::new(ErrorKind::Engine))?;
     let message_len =
         u16::try_from(header.message_len()).map_err(|_| Error::new(ErrorKind::Engine))?;
@@ -201,19 +206,82 @@ fn encode_message_fragment(
     out[WIRE_PACKET_LEN_OFFSET] = envelope_header.packet_len;
     out[WIRE_HEADER_CRC_OFFSET] = envelope_header.header_crc;
     let packet = &mut out[WIRE_HEADER_LEN..];
-    packet[0] = header.packet_type.code();
-    packet[1] = header.flags().bits();
-    packet[2] = header.channel_id().get();
-    packet[3..7].copy_from_slice(&header.message_id().get().to_le_bytes());
-    packet[7..9].copy_from_slice(&header.packet_index().get().to_le_bytes());
-    packet[9..11].copy_from_slice(&message_len.to_le_bytes());
-    packet[11..13].copy_from_slice(&fragment_offset.to_le_bytes());
-    packet[PACKET_HEADER_LEN..PACKET_HEADER_LEN + fragment.len()].copy_from_slice(fragment);
+    encode_fragment_header(header, message_len, fragment_offset, packet)?;
+    packet[header_len..header_len + fragment.len()].copy_from_slice(fragment);
 
     let (authenticated, tag) = out[..total_len].split_at_mut(total_len - integrity_tag_len);
     integrity.seal(authenticated, tag);
 
     Ok(total_len)
+}
+
+fn packet_header_for_fragment(
+    channel_id: ChannelId,
+    packet_index: PacketIndex,
+    message_id: MessageId,
+    message_len: usize,
+    fragment_offset: usize,
+    mode: ReliabilityMode,
+) -> PacketHeader {
+    if channel_id.is_log() {
+        return PacketHeader::log(
+            packet_index,
+            channel_id,
+            message_id,
+            message_len,
+            fragment_offset,
+        );
+    }
+
+    PacketHeader::data(
+        packet_index,
+        if matches!(mode, ReliabilityMode::Reliable) {
+            Flags::ACK_ELICITING
+        } else {
+            Flags::EMPTY
+        },
+        channel_id,
+        message_id,
+        message_len,
+        fragment_offset,
+    )
+}
+
+fn encode_fragment_header(
+    header: PacketHeader,
+    message_len: u16,
+    fragment_offset: u16,
+    packet: &mut [u8],
+) -> Result<()> {
+    packet[0] = header.packet_type.code();
+
+    match header.packet_type {
+        PacketType::Data => {
+            if packet.len() < LEGACY_DATA_PACKET_HEADER_LEN {
+                return Err(Error::buffer_too_small());
+            }
+            packet[1] = header.flags().bits();
+            packet[2] = header.channel_id().get();
+            packet[3..7].copy_from_slice(&header.message_id().get().to_le_bytes());
+            packet[7..9].copy_from_slice(&header.packet_index().get().to_le_bytes());
+            packet[9..11].copy_from_slice(&message_len.to_le_bytes());
+            packet[11..13].copy_from_slice(&fragment_offset.to_le_bytes());
+        }
+        PacketType::Log => {
+            if packet.len() < LOG_PACKET_HEADER_LEN {
+                return Err(Error::buffer_too_small());
+            }
+            packet[1..5].copy_from_slice(&header.message_id().get().to_le_bytes());
+            packet[5..7].copy_from_slice(&header.packet_index().get().to_le_bytes());
+            packet[7..9].copy_from_slice(&message_len.to_le_bytes());
+            packet[9..11].copy_from_slice(&fragment_offset.to_le_bytes());
+        }
+        PacketType::Ack | PacketType::Ping | PacketType::Pong => {
+            return Err(Error::new(ErrorKind::Engine));
+        }
+    }
+
+    Ok(())
 }
 
 pub(crate) fn encode_ack_packet(
@@ -271,8 +339,14 @@ fn encode_liveness_packet(
     Ok(total_len)
 }
 
-const fn max_fragment_bytes(integrity_tag_len: usize) -> usize {
-    MAX_WIRE_BYTES - crate::wire::WIRE_HEADER_LEN - PACKET_HEADER_LEN - integrity_tag_len
+const fn max_fragment_bytes(channel_id: ChannelId, integrity_tag_len: usize) -> usize {
+    let header_len = if channel_id.is_log() {
+        LOG_PACKET_HEADER_LEN
+    } else {
+        LEGACY_DATA_PACKET_HEADER_LEN
+    };
+
+    MAX_WIRE_BYTES - crate::wire::WIRE_HEADER_LEN - header_len - integrity_tag_len
 }
 
 const fn fragment_count(message_len: usize, fragment_bytes: usize) -> usize {
