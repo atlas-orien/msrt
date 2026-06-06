@@ -1,16 +1,220 @@
-//! Host-side protocol benchmarks for the MSRT facade.
+//! Library-side protocol benchmarks for the MSRT facade.
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use msrt::{
     Engine, EngineConfig,
+    core::{ChannelId, Flags, MessageId, PacketHeader, PacketIndex, PacketKey},
+    endpoint::{ClientEndpoint, EndpointPoll, PassiveEndpoint},
     engine::{EnginePoll, ReceiveReport},
+    integrity::{Aead, Crc8, Crc16, Crc32, Crc64, Integrity, IntegrityConfig},
+    reliability::{
+        AckTracker, Dedup, FragmentRange, MessageFragment, PacketAckTracker, PacketDedup,
+        RetransmitPolicy, RetryLimitPolicy, TimeoutEvent,
+    },
+    wire::{EnvelopeHeader, StreamDecodeOutcome, StreamingDecoder, WireEnvelope},
 };
+use std::hint::black_box;
 
 const SMALL_MESSAGE: &[u8] = b"hello msrt";
 const MEDIUM_MESSAGE: &[u8] =
     b"msrt benchmark message split into several packets for host-side regression tracking";
 const LARGE_MESSAGE: &[u8] = &[0x55; 192];
 const TX_BUF_BYTES: usize = 256;
+const WIRE_DECODE_BYTES: usize = 512;
+
+fn core_primitives(c: &mut Criterion) {
+    c.bench_function("core_packet_header_key", |b| {
+        b.iter(|| {
+            let header = PacketHeader::data(
+                PacketIndex::new(black_box(7)),
+                Flags::ACK_ELICITING,
+                ChannelId::new(black_box(3)),
+                MessageId::new(black_box(99)),
+                black_box(128),
+                black_box(32),
+            );
+
+            black_box((header.key(), header.is_ack_eliciting()))
+        });
+    });
+
+    c.bench_function("core_fragment_range_check", |b| {
+        b.iter(|| {
+            let range = FragmentRange::new(black_box(32), black_box(64));
+            black_box((range.end(), range.fits_in(black_box(128))))
+        });
+    });
+}
+
+fn integrity_backends(c: &mut Criterion) {
+    let mut group = c.benchmark_group("integrity");
+    let bytes = [0x5a; 96];
+
+    group.bench_function("crc8_header", |b| {
+        b.iter(|| black_box(Crc8.calculate(black_box(&bytes[..2]))));
+    });
+
+    group.bench_function("crc16_seal_verify", |b| {
+        let integrity = Crc16;
+        let mut tag = [0; Crc16::TAG_LEN];
+
+        b.iter(|| {
+            integrity.seal(black_box(&bytes), black_box(&mut tag));
+            black_box(integrity.verify(black_box(&bytes), black_box(&tag)))
+        });
+    });
+
+    group.bench_function("crc32_seal_verify", |b| {
+        let integrity = Crc32;
+        let mut tag = [0; Crc32::TAG_LEN];
+
+        b.iter(|| {
+            integrity.seal(black_box(&bytes), black_box(&mut tag));
+            black_box(integrity.verify(black_box(&bytes), black_box(&tag)))
+        });
+    });
+
+    group.bench_function("crc64_seal_verify", |b| {
+        let integrity = Crc64;
+        let mut tag = [0; Crc64::TAG_LEN];
+
+        b.iter(|| {
+            integrity.seal(black_box(&bytes), black_box(&mut tag));
+            black_box(integrity.verify(black_box(&bytes), black_box(&tag)))
+        });
+    });
+
+    group.bench_function("aead_seal_verify", |b| {
+        let integrity = Aead::DEFAULT;
+        let mut tag = [0; Aead::TAG_LEN];
+
+        b.iter(|| {
+            integrity.seal(black_box(&bytes), black_box(&mut tag));
+            black_box(integrity.verify(black_box(&bytes), black_box(&tag)))
+        });
+    });
+
+    group.bench_function("integrity_config_crc16_dispatch", |b| {
+        let integrity = IntegrityConfig::crc16();
+        let mut tag = [0; Crc16::TAG_LEN];
+
+        b.iter(|| {
+            integrity.seal(black_box(&bytes), black_box(&mut tag));
+            black_box(integrity.verify(black_box(&bytes), black_box(&tag)))
+        });
+    });
+
+    group.finish();
+}
+
+fn wire_boundaries(c: &mut Criterion) {
+    let fixture = Fixture::new(MEDIUM_MESSAGE, 16);
+    let first = fixture.writes[0].expect("fixture should contain one packet");
+
+    c.bench_function("wire_envelope_header", |b| {
+        b.iter(|| {
+            let header = EnvelopeHeader::new(black_box(64));
+            black_box((
+                header.has_valid_header_crc(),
+                header.total_len(Crc16::TAG_LEN),
+            ))
+        });
+    });
+
+    c.bench_function("wire_envelope_view", |b| {
+        b.iter(|| {
+            let header = EnvelopeHeader::new(black_box(first.len as u8));
+            let envelope = WireEnvelope::new(header, black_box(first.as_bytes()));
+            black_box((envelope.total_len(Crc16::TAG_LEN), envelope.has_valid_len()))
+        });
+    });
+
+    c.bench_function("wire_streaming_decode_packet", |b| {
+        b.iter(|| {
+            let mut decoder = StreamingDecoder::<WIRE_DECODE_BYTES>::new();
+            match decoder
+                .feed(
+                    black_box(first.as_bytes()),
+                    black_box(&IntegrityConfig::DEFAULT),
+                )
+                .expect("decode fixture packet")
+            {
+                StreamDecodeOutcome::Packet { consumed, .. } => black_box(consumed),
+                other => panic!("wire benchmark expected packet, got {other:?}"),
+            }
+        });
+    });
+
+    c.bench_function("wire_streaming_bytewise_decode_packet", |b| {
+        b.iter(|| {
+            let mut decoder = StreamingDecoder::<WIRE_DECODE_BYTES>::new();
+            let mut consumed = 0;
+
+            for byte in first.as_bytes() {
+                if let StreamDecodeOutcome::Packet { consumed: len, .. } = decoder
+                    .feed(black_box(&[*byte]), black_box(&IntegrityConfig::DEFAULT))
+                    .expect("decode bytewise fixture packet")
+                {
+                    consumed = len;
+                }
+            }
+
+            black_box(consumed)
+        });
+    });
+}
+
+fn reliability_primitives(c: &mut Criterion) {
+    c.bench_function("reliability_dedup_16_observe", |b| {
+        b.iter(|| {
+            let mut dedup = PacketDedup::<16>::new();
+
+            for index in 0..16 {
+                let key = packet_key(index);
+                black_box(dedup.observe_packet(black_box(key)).expect("dedup observe"));
+            }
+
+            black_box(dedup.is_duplicate(packet_key(15)))
+        });
+    });
+
+    c.bench_function("reliability_ack_tracker_16", |b| {
+        b.iter(|| {
+            let mut tracker = PacketAckTracker::<16>::new();
+
+            for index in 0..16 {
+                tracker.on_packet_sent(black_box(packet_key(index)));
+            }
+
+            black_box(tracker.on_ack(packet_key(8)))
+        });
+    });
+
+    c.bench_function("reliability_retry_limit_policy", |b| {
+        b.iter(|| {
+            let mut policy = RetryLimitPolicy::new(black_box(10));
+            let event = TimeoutEvent::new(packet_key(3), black_box(250), black_box(3));
+            black_box(policy.on_timeout(event))
+        });
+    });
+
+    c.bench_function("reliability_message_fragment_from_header", |b| {
+        b.iter(|| {
+            let header = PacketHeader::data(
+                PacketIndex::new(black_box(4)),
+                Flags::ACK_ELICITING,
+                ChannelId::DEFAULT,
+                MessageId::new(black_box(10)),
+                black_box(128),
+                black_box(64),
+            );
+            black_box(
+                MessageFragment::try_from_packet_header(header, black_box(16))
+                    .expect("fragment should fit"),
+            )
+        });
+    });
+}
 
 fn send_fragmentation(c: &mut Criterion) {
     let mut group = c.benchmark_group("send_fragmentation");
@@ -114,6 +318,36 @@ fn retransmit_scan(c: &mut Criterion) {
             assert_eq!(initial_writes, 16);
 
             drain_writes(&mut engine, 1)
+        });
+    });
+}
+
+fn endpoint_handshake(c: &mut Criterion) {
+    c.bench_function("endpoint_client_passive_handshake", |b| {
+        b.iter(|| {
+            let mut client = ClientEndpoint::default();
+            let mut passive = PassiveEndpoint::default();
+            let mut client_tx = [0; TX_BUF_BYTES];
+            let mut passive_tx = [0; TX_BUF_BYTES];
+
+            client.connect(black_box(1)).expect("client connect");
+            let EndpointPoll::Transmit {
+                bytes: hello_bytes, ..
+            } = client.poll(1, &mut client_tx).expect("client poll")
+            else {
+                panic!("client should transmit hello");
+            };
+
+            passive.receive(2, hello_bytes);
+            let EndpointPoll::Transmit {
+                bytes: ack_bytes, ..
+            } = passive.poll(2, &mut passive_tx).expect("passive poll")
+            else {
+                panic!("passive should transmit ack");
+            };
+
+            client.receive(3, ack_bytes);
+            black_box((client.peer().state(), passive.peer().state()))
         });
     });
 }
@@ -262,11 +496,24 @@ fn receive_ok(engine: &mut Engine, bytes: &[u8]) {
     }
 }
 
+fn packet_key(index: u16) -> PacketKey {
+    PacketKey::new(
+        ChannelId::DEFAULT,
+        MessageId::new(7),
+        PacketIndex::new(index),
+    )
+}
+
 criterion_group!(
     benches,
+    core_primitives,
+    integrity_backends,
+    wire_boundaries,
+    reliability_primitives,
     send_fragmentation,
     receive_reassembly,
     lossless_duplex_roundtrip,
-    retransmit_scan
+    retransmit_scan,
+    endpoint_handshake
 );
 criterion_main!(benches);
