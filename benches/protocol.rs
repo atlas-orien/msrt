@@ -497,11 +497,7 @@ fn receive_ok(engine: &mut Engine, bytes: &[u8]) {
 }
 
 fn packet_key(index: u16) -> PacketKey {
-    PacketKey::new(
-        ChannelId::DEFAULT,
-        MessageId::new(7),
-        PacketIndex::new(index),
-    )
+    PacketKey::new(MessageId::new(7), PacketIndex::new(index))
 }
 
 criterion_group!(

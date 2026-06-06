@@ -82,7 +82,7 @@ impl EngineState {
         let mut wire = [0; MAX_WIRE_BYTES];
         let written =
             encode_liveness_packet(PacketHeader::ping(message_id), &mut wire, &config.integrity)?;
-        let key = PacketKey::new(ChannelId::LIVENESS, message_id, packet_index);
+        let key = PacketKey::new(message_id, packet_index);
 
         self.scheduler.push(EngineOutput::Write(WriteEvent {
             key,
@@ -114,7 +114,7 @@ impl EngineState {
         let mut wire = [0; MAX_WIRE_BYTES];
         let written =
             encode_liveness_packet(PacketHeader::pong(message_id), &mut wire, &config.integrity)?;
-        let key = PacketKey::new(ChannelId::LIVENESS, message_id, packet_index);
+        let key = PacketKey::new(message_id, packet_index);
 
         self.scheduler.push(EngineOutput::Write(WriteEvent {
             key,
@@ -147,7 +147,7 @@ impl EngineState {
             let end = core::cmp::min(offset + fragment_bytes, message.len());
             let fragment = &message[offset..end];
             let mut wire = [0; MAX_WIRE_BYTES];
-            let key = PacketKey::new(channel_id, message_id, packet_index);
+            let key = PacketKey::new(message_id, packet_index);
             let header = PacketHeader::data(
                 packet_index,
                 if matches!(mode, ReliabilityMode::Reliable) {

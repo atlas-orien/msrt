@@ -138,14 +138,14 @@ impl TrackedPacket {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::{ChannelId, MessageId, PacketIndex, PacketKey};
+    use crate::core::{MessageId, PacketIndex, PacketKey};
 
     use super::{AckOutcome, AckTracker, PacketAckTracker, PacketState};
 
     #[test]
     fn ack_tracker_marks_in_flight_packet_acked() {
         let mut tracker = PacketAckTracker::<2>::new();
-        let key = PacketKey::new(ChannelId::DEFAULT, MessageId::new(7), PacketIndex::ZERO);
+        let key = PacketKey::new(MessageId::new(7), PacketIndex::ZERO);
 
         tracker.on_packet_sent(key);
 

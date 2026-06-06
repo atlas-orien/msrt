@@ -394,7 +394,6 @@ fn engine_receives_half_packet() {
 fn engine_treats_semantically_malformed_packet_as_corrupted() {
     let mut engine = Engine::new(EngineConfig::default());
     let mut malformed = ack_packet_for_key(crate::core::PacketKey::new(
-        crate::core::ChannelId::DEFAULT,
         crate::core::MessageId::new(7),
         crate::core::PacketIndex::ZERO,
     ));
@@ -825,7 +824,6 @@ fn packet_type_from_wire(bytes: &[u8]) -> crate::core::PacketType {
 fn packet_key_from_wire(bytes: &[u8]) -> crate::core::PacketKey {
     let packet = &bytes[crate::wire::WIRE_HEADER_LEN..];
     crate::core::PacketKey::new(
-        crate::core::ChannelId::new(packet[2]),
         crate::core::MessageId::new(u32::from_le_bytes(packet[3..7].try_into().unwrap())),
         crate::core::PacketIndex::new(u16::from_le_bytes(packet[7..9].try_into().unwrap())),
     )
@@ -883,7 +881,7 @@ fn ack_packet_for_key(key: crate::core::PacketKey) -> WriteEvent {
     let packet = &mut bytes[crate::wire::WIRE_HEADER_LEN..];
     packet[0] = crate::core::PacketType::Ack.code();
     packet[1] = 0;
-    packet[2] = key.channel_id.get();
+    packet[2] = crate::core::ChannelId::DEFAULT.get();
     packet[3..7].copy_from_slice(&key.message_id.get().to_le_bytes());
     packet[7..9].copy_from_slice(&key.packet_index.get().to_le_bytes());
     packet[9..11].copy_from_slice(&0u16.to_le_bytes());

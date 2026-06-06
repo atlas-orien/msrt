@@ -8,13 +8,14 @@ pub(super) fn log_event(now_ms: u64, queue: &str, offset: usize, event: &EngineO
             let packet_type = packet_type(write.as_bytes())
                 .map(|packet_type| packet_type.code())
                 .unwrap_or_default();
+            let channel_id = legacy_channel_id(write.as_bytes()).unwrap_or_default();
             eprintln!(
                 "msrt scheduler event now={} queue={} offset={} kind=write packet_type={} ch={} msg={} idx={} attempts={} len={} priority={:?}",
                 now_ms,
                 queue,
                 offset,
                 packet_type,
-                write.key.channel_id.get(),
+                channel_id,
                 write.key.message_id.get(),
                 write.key.packet_index.get(),
                 write.attempts,
@@ -37,4 +38,8 @@ pub(super) fn log_event(now_ms: u64, queue: &str, offset: usize, event: &EngineO
 
 fn packet_type(bytes: &[u8]) -> Option<crate::core::PacketType> {
     crate::core::PacketType::from_code(*bytes.get(crate::wire::WIRE_HEADER_LEN)?)
+}
+
+fn legacy_channel_id(bytes: &[u8]) -> Option<u8> {
+    bytes.get(crate::wire::WIRE_HEADER_LEN + 2).copied()
 }

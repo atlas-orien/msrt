@@ -105,10 +105,16 @@ impl PacketHeader {
     /// Creates an ACK packet header.
     #[must_use]
     pub const fn ack(key: PacketKey) -> Self {
+        Self::ack_on(ChannelId::DEFAULT, key)
+    }
+
+    /// Creates a legacy ACK packet header with a wire channel field.
+    #[must_use]
+    pub const fn ack_on(channel_id: ChannelId, key: PacketKey) -> Self {
         Self {
             packet_type: PacketType::Ack,
             body: PacketHeaderBody::Ack {
-                channel_id: key.channel_id,
+                channel_id,
                 header: AckHeader::new(key.message_id, key.packet_index),
             },
         }
@@ -227,6 +233,6 @@ impl PacketHeader {
     /// Returns this packet's stable message-scoped identity.
     #[must_use]
     pub const fn key(self) -> PacketKey {
-        PacketKey::new(self.channel_id(), self.message_id(), self.packet_index())
+        PacketKey::new(self.message_id(), self.packet_index())
     }
 }

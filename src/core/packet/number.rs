@@ -1,6 +1,6 @@
 //! Message-scoped packet index primitives.
 
-use crate::core::{ChannelId, MessageId};
+use crate::core::MessageId;
 
 /// A packet index scoped to one message.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -32,8 +32,6 @@ impl PacketIndex {
 /// Stable identity of a packet fragment inside one message.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct PacketKey {
-    /// Logical channel carrying the message.
-    pub channel_id: ChannelId,
     /// Message this packet belongs to.
     pub message_id: MessageId,
     /// Packet index scoped to `message_id`.
@@ -43,13 +41,8 @@ pub struct PacketKey {
 impl PacketKey {
     /// Creates a packet key.
     #[must_use]
-    pub const fn new(
-        channel_id: ChannelId,
-        message_id: MessageId,
-        packet_index: PacketIndex,
-    ) -> Self {
+    pub const fn new(message_id: MessageId, packet_index: PacketIndex) -> Self {
         Self {
-            channel_id,
             message_id,
             packet_index,
         }

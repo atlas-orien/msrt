@@ -80,7 +80,6 @@ impl<'a> Packet<'a> {
                 PacketHeader::from_log_header(crate::core::ChannelId::LOG, header)
             }
             PacketBody::Ack { header } => PacketHeader::ack(crate::core::PacketKey::new(
-                crate::core::ChannelId::DEFAULT,
                 header.message_id,
                 header.packet_index,
             )),
@@ -211,7 +210,6 @@ mod tests {
     #[test]
     fn ack_packet_has_no_payload() {
         let header = PacketHeader::ack(crate::core::PacketKey::new(
-            ChannelId::DEFAULT,
             MessageId::new(7),
             PacketIndex::new(0),
         ));

@@ -64,13 +64,13 @@ impl RetransmitPolicy for RetryLimitPolicy {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::{ChannelId, MessageId, PacketIndex, PacketKey};
+    use crate::core::{MessageId, PacketIndex, PacketKey};
 
     use super::{RetransmitDecision, RetransmitPolicy, RetryLimitPolicy, TimeoutEvent};
 
     #[test]
     fn retry_limit_policy_drops_after_limit() {
-        let key = PacketKey::new(ChannelId::DEFAULT, MessageId::new(3), PacketIndex::ZERO);
+        let key = PacketKey::new(MessageId::new(3), PacketIndex::ZERO);
         let mut policy = RetryLimitPolicy::new(2);
 
         assert_eq!(

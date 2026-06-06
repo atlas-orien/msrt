@@ -59,13 +59,13 @@ impl AckState {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::{ChannelId, MessageId, PacketIndex, PacketKey};
+    use crate::core::{MessageId, PacketIndex, PacketKey};
 
     use super::AckState;
 
     #[test]
     fn ack_state_keeps_duplicate_ack_keys() {
-        let key = PacketKey::new(ChannelId::DEFAULT, MessageId::new(7), PacketIndex::new(1));
+        let key = PacketKey::new(MessageId::new(7), PacketIndex::new(1));
         let mut state = AckState::new();
 
         assert!(state.observe(key));

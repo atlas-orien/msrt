@@ -128,11 +128,10 @@ fn packet_header_from_bytes(bytes: &[u8]) -> Option<PacketHeader> {
                 return None;
             }
 
-            Some(PacketHeader::ack(crate::core::PacketKey::new(
+            Some(PacketHeader::ack_on(
                 channel_id,
-                message_id,
-                packet_index,
-            )))
+                crate::core::PacketKey::new(message_id, packet_index),
+            ))
         }
         PacketType::Ping => {
             if flags != Flags::EMPTY

@@ -91,14 +91,14 @@ impl<const N: usize> Dedup for PacketDedup<N> {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::{ChannelId, MessageId, PacketIndex, PacketKey};
+    use crate::core::{MessageId, PacketIndex, PacketKey};
 
     use super::{Dedup, DedupDecision, PacketDedup};
 
     #[test]
     fn packet_dedup_detects_duplicates() {
         let mut dedup = PacketDedup::<2>::new();
-        let key = PacketKey::new(ChannelId::DEFAULT, MessageId::new(1), PacketIndex::ZERO);
+        let key = PacketKey::new(MessageId::new(1), PacketIndex::ZERO);
 
         assert_eq!(dedup.observe(key), DedupDecision::Accept);
         assert_eq!(dedup.observe(key), DedupDecision::Duplicate);
@@ -107,9 +107,9 @@ mod tests {
     #[test]
     fn packet_dedup_forgets_oldest_packet_when_full() {
         let mut dedup = PacketDedup::<2>::new();
-        let first = PacketKey::new(ChannelId::DEFAULT, MessageId::new(1), PacketIndex::ZERO);
-        let second = PacketKey::new(ChannelId::DEFAULT, MessageId::new(2), PacketIndex::ZERO);
-        let third = PacketKey::new(ChannelId::DEFAULT, MessageId::new(3), PacketIndex::ZERO);
+        let first = PacketKey::new(MessageId::new(1), PacketIndex::ZERO);
+        let second = PacketKey::new(MessageId::new(2), PacketIndex::ZERO);
+        let third = PacketKey::new(MessageId::new(3), PacketIndex::ZERO);
 
         assert_eq!(dedup.observe(first), DedupDecision::Accept);
         assert_eq!(dedup.observe(second), DedupDecision::Accept);

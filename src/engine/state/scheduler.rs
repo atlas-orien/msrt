@@ -150,7 +150,7 @@ impl SchedulerState {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::{ChannelId, MessageId, PacketIndex, PacketKey, PacketType};
+    use crate::core::{MessageId, PacketIndex, PacketKey, PacketType};
     use crate::engine::state::{EngineOutput, WriteEvent};
     use crate::wire::WIRE_HEADER_LEN;
 
@@ -228,7 +228,7 @@ mod tests {
     ) -> WriteEvent {
         let mut bytes = [0; crate::engine::config::MAX_WIRE_BYTES];
         bytes[WIRE_HEADER_LEN] = packet_type.code();
-        let key = PacketKey::new(ChannelId::DEFAULT, MessageId::new(1), packet_index);
+        let key = PacketKey::new(MessageId::new(1), packet_index);
 
         WriteEvent {
             key,
