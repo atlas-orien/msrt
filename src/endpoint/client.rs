@@ -1,14 +1,13 @@
 //! Client-side endpoint manager.
 
-use crate::core::{MessageId, Result};
-use crate::endpoint::{EndpointPoll, PeerSlot};
-use crate::engine::{Engine, EngineConfig, ReceiveReport};
+use crate::core::Result;
+use crate::endpoint::{EndpointPoll, EngineConfig, MessageId, PeerSlot, ReceiveReport};
 
 /// Client-side endpoint with at most one active peer session.
 ///
 /// This is the frontend-shaped endpoint manager: the adapter owns the actual
-/// link, while this type owns the single `Engine` used for the current peer
-/// session. Reconnect means dropping the old engine and creating a fresh one.
+/// link, while this type owns the single protocol session used for the current peer
+/// session. Reconnect means dropping the old session and creating a fresh one.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ClientEndpoint {
     peer: PeerSlot,
@@ -34,7 +33,7 @@ impl ClientEndpoint {
         &mut self.peer
     }
 
-    /// Starts a fresh session and returns its engine.
+    /// Starts a fresh session and returns the hello message id.
     pub fn connect(&mut self, now_ms: u64) -> Result<MessageId> {
         self.peer.connect(now_ms)
     }
@@ -44,14 +43,9 @@ impl ClientEndpoint {
         self.peer.disconnect();
     }
 
-    /// Returns the active engine, creating a fresh session if needed.
-    pub fn engine_or_connect(&mut self, now_ms: u64) -> Result<&mut Engine> {
-        self.peer.engine_or_connect(now_ms)
-    }
-
-    /// Returns the active engine if the client is connected.
-    pub fn engine_mut(&mut self) -> Option<&mut Engine> {
-        self.peer.engine_mut()
+    /// Queues an application message if a session exists.
+    pub fn send(&mut self, message: &[u8]) -> Result<Option<MessageId>> {
+        self.peer.send(message)
     }
 
     /// Feeds received bytes into the active peer engine.
@@ -80,12 +74,12 @@ mod tests {
     fn client_reconnect_creates_fresh_engine() {
         let mut endpoint = ClientEndpoint::default();
 
-        let first_engine = endpoint.engine_or_connect(1).unwrap();
-        let expected_after_reconnect = first_engine.send(b"hello").unwrap();
+        endpoint.connect(1).unwrap();
+        let expected_after_reconnect = endpoint.send(b"hello").unwrap();
         endpoint.disconnect();
-        let engine = endpoint.engine_or_connect(2).unwrap();
+        endpoint.connect(2).unwrap();
 
-        assert_eq!(engine.send(b"hello").unwrap(), expected_after_reconnect);
+        assert_eq!(endpoint.send(b"hello").unwrap(), expected_after_reconnect);
     }
 
     #[test]
@@ -103,7 +97,7 @@ mod tests {
             panic!("client should transmit hello");
         };
 
-        server.engine_or_accept(7, 1).unwrap();
+        server.accept(7, 1).unwrap();
         server.receive(7, 2, hello_bytes).unwrap();
         assert_eq!(server.peer_mut(7).unwrap().state(), PeerState::Connected);
 
@@ -146,7 +140,7 @@ mod tests {
 
         assert!(matches!(
             passive.receive(1_005, ping_bytes),
-            crate::engine::ReceiveReport::Ping
+            crate::endpoint::ReceiveReport::Ping
         ));
 
         let pong_bytes = loop {
@@ -159,7 +153,7 @@ mod tests {
 
         assert!(matches!(
             client.receive(5_006, pong_bytes),
-            crate::engine::ReceiveReport::Pong
+            crate::endpoint::ReceiveReport::Pong
         ));
         assert_eq!(client.peer().state(), PeerState::Connected);
     }

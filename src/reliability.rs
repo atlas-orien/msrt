@@ -1,4 +1,5 @@
 #![doc = "Reliability boundaries for MSRT."]
+#![allow(dead_code, unused_imports)]
 
 pub mod message;
 pub mod packet;

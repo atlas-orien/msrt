@@ -9,18 +9,16 @@
 )]
 
 /// Core protocol primitives.
-pub mod core;
+pub(crate) mod core;
 /// Endpoint session lifecycle helpers.
 pub mod endpoint;
 /// Protocol engine boundaries.
-pub mod engine;
+pub(crate) mod engine;
 /// Shared protocol errors.
 pub mod error;
 /// Packet integrity backends.
-pub mod integrity;
+pub(crate) mod integrity;
 /// Reliability policy boundaries.
-pub mod reliability;
+pub(crate) mod reliability;
 /// Wire envelope boundaries.
-pub mod wire;
-
-pub use crate::engine::{Engine, EngineConfig};
+pub(crate) mod wire;

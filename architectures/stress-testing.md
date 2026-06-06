@@ -252,11 +252,7 @@ burst-drop 是当前最强破坏模型
 
 ## 动态网络测试
 
-在固定 RTO 策略稳定以后，新增了 `msrt-sim-dynamic` 用来模拟动态网络：
-
-```bash
-cargo run --release --features dynamic-recovery --bin msrt-sim-dynamic
-```
+在固定 RTO 策略稳定以后，曾经新增过 `msrt-sim-dynamic` 用来模拟动态网络。这个 binary 现在已经从主 crate 移除，后续同类测试应该放在 adapter、仿真项目或独立测试项目里。
 
 这个测试不是简单字节噪声，而是给链路增加可变化的 delivery time。每个 packet 入队后带有 `deliver_at_ms`，因此会自然产生：
 
@@ -311,16 +307,16 @@ max_mcu_queue=74
 库代码:
   tracing::debug!
 
-bin / adapter / application:
+adapter / application:
   配置 tracing subscriber
   决定是否打印文件名、行号、写入文件或过滤 target
 ```
 
 `tracing` 是独立 feature，默认不开：
 
-```bash
-cargo run --features tracing --bin ...
-cargo run --features tracing,dynamic-recovery --bin ...
+```toml
+msrt = { version = "0.1", features = ["tracing"] }
+msrt = { version = "0.1", features = ["tracing", "dynamic-recovery"] }
 ```
 
 库内部诊断 target 当前包括：

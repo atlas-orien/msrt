@@ -4,7 +4,7 @@ pub mod aead;
 pub mod crc;
 
 pub use aead::Aead;
-pub use crc::{Crc8, Crc16, Crc32, Crc64};
+pub use crc::{Crc16, Crc32, Crc64};
 
 /// Packet integrity backend selected by engine configuration.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

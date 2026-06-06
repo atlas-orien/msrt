@@ -1,178 +1,178 @@
-use msrt::{
-    Engine,
-    core::PacketType,
-    engine::{EnginePoll, MessageEvent, ReceiveReport},
-};
+use msrt::endpoint::{ClientEndpoint, EndpointPoll, MessageEvent, PassiveEndpoint, ReceiveReport};
 
 const TX_BUF_BYTES: usize = 128;
 
 #[test]
 fn default_message_is_acked_without_adapter() {
-    let mut host = Engine::default();
-    let mut mcu = Engine::default();
+    let mut host = ClientEndpoint::default();
+    let mut mcu = PassiveEndpoint::default();
+
+    host.connect(0).expect("connect host");
+    complete_hello(&mut host, &mut mcu);
 
     host.send(b"host ping").expect("queue host message");
+    deliver_next_host_write(&mut host, &mut mcu);
+    deliver_next_mcu_write(&mut mcu, &mut host);
 
-    let host_write = next_write(&mut host);
-    assert!(matches!(
-        mcu.receive(host_write.as_bytes()),
-        ReceiveReport::Packet { .. }
-    ));
-
-    let ack = next_write(&mut mcu);
-    assert!(matches!(
-        host.receive(ack.as_bytes()),
-        ReceiveReport::Ack { .. }
-    ));
-
-    let mcu_message = next_message(&mut mcu);
-    assert_eq!(mcu_message.packet_type, PacketType::Data);
+    let mcu_message = next_mcu_message(&mut mcu);
     assert_eq!(mcu_message.as_bytes(), b"host ping");
 
-    assert_no_send_failed(&mut host);
+    assert_no_send_failed(&mut host, &mut mcu);
 }
 
 #[test]
-fn mcu_can_debug_after_receiving_default_message_without_adapter() {
-    let mut host = Engine::default();
-    let mut mcu = Engine::default();
+fn mcu_can_reply_after_receiving_default_message_without_adapter() {
+    let mut host = ClientEndpoint::default();
+    let mut mcu = PassiveEndpoint::default();
+
+    host.connect(0).expect("connect host");
+    complete_hello(&mut host, &mut mcu);
 
     host.send(b"host ping").expect("queue host message");
-    deliver_next_write(&mut host, &mut mcu);
-
-    deliver_next_write(&mut mcu, &mut host);
-
-    let mcu_message = next_message(&mut mcu);
-    assert_eq!(mcu_message.packet_type, PacketType::Data);
+    deliver_next_host_write(&mut host, &mut mcu);
+    deliver_next_mcu_write(&mut mcu, &mut host);
+    let mcu_message = next_mcu_message(&mut mcu);
     assert_eq!(mcu_message.as_bytes(), b"host ping");
 
-    mcu.send_log(b"mcu received host message")
-        .expect("queue mcu debug");
+    mcu.send(b"mcu received host message")
+        .expect("queue mcu reply");
+    deliver_next_mcu_write(&mut mcu, &mut host);
 
-    deliver_next_write(&mut mcu, &mut host);
+    let reply = next_host_message(&mut host);
+    assert_eq!(reply.as_bytes(), b"mcu received host message");
 
-    let debug = next_message(&mut host);
-    assert_eq!(debug.packet_type, PacketType::Log);
-    assert_eq!(debug.as_bytes(), b"mcu received host message");
-
-    assert_no_send_failed(&mut host);
-    assert_no_send_failed(&mut mcu);
+    assert_no_send_failed(&mut host, &mut mcu);
 }
 
 #[test]
-fn split_serial_reads_still_ack_and_debug_without_adapter() {
-    let mut host = Engine::default();
-    let mut mcu = Engine::default();
+fn split_serial_reads_still_ack_and_deliver_message_without_adapter() {
+    let mut host = ClientEndpoint::default();
+    let mut mcu = PassiveEndpoint::default();
+
+    host.connect(0).expect("connect host");
+    complete_hello(&mut host, &mut mcu);
 
     host.send(b"host ping").expect("queue host message");
-
-    let host_write = next_write(&mut host);
+    let host_write = next_host_write(&mut host);
     for byte in host_write.as_bytes() {
-        let _ = mcu.receive(core::slice::from_ref(byte));
+        let _ = mcu.receive(0, core::slice::from_ref(byte));
     }
 
-    let ack = next_write(&mut mcu);
+    let ack = next_mcu_write(&mut mcu);
     for byte in ack.as_bytes() {
-        let _ = host.receive(core::slice::from_ref(byte));
+        let _ = host.receive(0, core::slice::from_ref(byte));
     }
 
-    let mcu_message = next_message(&mut mcu);
+    let mcu_message = next_mcu_message(&mut mcu);
     assert_eq!(mcu_message.as_bytes(), b"host ping");
 
-    mcu.send_log(b"mcu received host message")
-        .expect("queue mcu debug");
-    let debug_write = next_write(&mut mcu);
-    for byte in debug_write.as_bytes() {
-        let _ = host.receive(core::slice::from_ref(byte));
+    mcu.send(b"mcu received host message")
+        .expect("queue mcu reply");
+    let reply_write = next_mcu_write(&mut mcu);
+    for byte in reply_write.as_bytes() {
+        let _ = host.receive(0, core::slice::from_ref(byte));
     }
 
-    let debug = next_message(&mut host);
-    assert_eq!(debug.packet_type, PacketType::Log);
-    assert_eq!(debug.as_bytes(), b"mcu received host message");
+    let reply = next_host_message(&mut host);
+    assert_eq!(reply.as_bytes(), b"mcu received host message");
 
-    assert_no_send_failed(&mut host);
-    assert_no_send_failed(&mut mcu);
+    assert_no_send_failed(&mut host, &mut mcu);
 }
 
-#[test]
-fn poll_copies_transmit_bytes_into_external_buffer() {
-    let mut host = Engine::default();
-    let mut mcu = Engine::default();
-    let mut host_tx = [0; TX_BUF_BYTES];
-    let mut mcu_tx = [0; TX_BUF_BYTES];
-
-    host.send(b"host ping").expect("queue host message");
-
-    let bytes = next_transmit(&mut host, &mut host_tx);
-    assert!(matches!(mcu.receive(bytes), ReceiveReport::Packet { .. }));
-
-    let bytes = next_transmit(&mut mcu, &mut mcu_tx);
-    assert!(matches!(host.receive(bytes), ReceiveReport::Ack { .. }));
-
-    let message = next_polled_message(&mut mcu, &mut mcu_tx);
-    assert_eq!(message.packet_type, PacketType::Data);
-    assert_eq!(message.as_bytes(), b"host ping");
-
-    mcu.send_log(b"mcu received host message")
-        .expect("queue mcu debug");
-
-    let bytes = next_transmit(&mut mcu, &mut mcu_tx);
-    assert!(matches!(host.receive(bytes), ReceiveReport::Packet { .. }));
-
-    let message = next_polled_message(&mut host, &mut host_tx);
-    assert_eq!(message.packet_type, PacketType::Log);
-    assert_eq!(message.as_bytes(), b"mcu received host message");
+fn complete_hello(host: &mut ClientEndpoint, mcu: &mut PassiveEndpoint) {
+    deliver_next_host_write(host, mcu);
+    deliver_next_mcu_write(mcu, host);
+    assert_eq!(next_mcu_message(mcu).as_bytes(), &[0]);
 }
 
-fn deliver_next_write(src: &mut Engine, dst: &mut Engine) {
-    let write = next_write(src);
-    match dst.receive(write.as_bytes()) {
-        ReceiveReport::Packet { .. }
-        | ReceiveReport::Ack { .. }
-        | ReceiveReport::Ping
-        | ReceiveReport::Pong => {}
-        other => panic!("unexpected receive report: {other:?}"),
-    }
+fn deliver_next_host_write(src: &mut ClientEndpoint, dst: &mut PassiveEndpoint) {
+    let write = next_host_write(src);
+    receive_ok(dst.receive(0, write.as_bytes()));
 }
 
-fn next_write(engine: &mut Engine) -> TestWrite {
+fn deliver_next_mcu_write(src: &mut PassiveEndpoint, dst: &mut ClientEndpoint) {
+    let write = next_mcu_write(src);
+    receive_ok(dst.receive(0, write.as_bytes()));
+}
+
+fn next_host_write(endpoint: &mut ClientEndpoint) -> TestWrite {
     let mut tx_buf = [0; TX_BUF_BYTES];
-    let bytes = next_transmit(engine, &mut tx_buf);
+    let bytes = next_host_transmit(endpoint, &mut tx_buf);
     TestWrite::from_bytes(bytes)
 }
 
-fn next_message(engine: &mut Engine) -> MessageEvent {
+fn next_mcu_write(endpoint: &mut PassiveEndpoint) -> TestWrite {
     let mut tx_buf = [0; TX_BUF_BYTES];
-    next_polled_message(engine, &mut tx_buf)
+    let bytes = next_mcu_transmit(endpoint, &mut tx_buf);
+    TestWrite::from_bytes(bytes)
 }
 
-fn assert_no_send_failed(engine: &mut Engine) {
+fn next_host_message(endpoint: &mut ClientEndpoint) -> MessageEvent {
     let mut tx_buf = [0; TX_BUF_BYTES];
-
     loop {
-        match engine.poll(0, &mut tx_buf).expect("poll engine") {
-            EnginePoll::SendFailed(failed) => panic!("unexpected send failure: {failed:?}"),
-            EnginePoll::Idle => break,
-            EnginePoll::Transmit { .. } | EnginePoll::Message(_) => {}
+        match endpoint.poll(0, &mut tx_buf).expect("poll client") {
+            EndpointPoll::Message(message) => return message,
+            EndpointPoll::Transmit { .. } => {}
+            EndpointPoll::SendFailed(failed) => panic!("unexpected send failure: {failed:?}"),
+            EndpointPoll::Idle => panic!("client should produce a message event"),
         }
     }
 }
 
-fn next_transmit<'a>(engine: &mut Engine, tx_buf: &'a mut [u8]) -> &'a [u8] {
-    match engine.poll(0, tx_buf).expect("poll engine") {
-        EnginePoll::Transmit { bytes, .. } => bytes,
-        other => panic!("engine should produce transmit bytes, got {other:?}"),
+fn next_mcu_message(endpoint: &mut PassiveEndpoint) -> MessageEvent {
+    let mut tx_buf = [0; TX_BUF_BYTES];
+    loop {
+        match endpoint.poll(0, &mut tx_buf).expect("poll passive") {
+            EndpointPoll::Message(message) => return message,
+            EndpointPoll::Transmit { .. } => {}
+            EndpointPoll::SendFailed(failed) => panic!("unexpected send failure: {failed:?}"),
+            EndpointPoll::Idle => panic!("passive endpoint should produce a message event"),
+        }
     }
 }
 
-fn next_polled_message(engine: &mut Engine, tx_buf: &mut [u8]) -> MessageEvent {
+fn assert_no_send_failed(host: &mut ClientEndpoint, mcu: &mut PassiveEndpoint) {
+    let mut tx_buf = [0; TX_BUF_BYTES];
+
     loop {
-        match engine.poll(0, tx_buf).expect("poll engine") {
-            EnginePoll::Message(message) => return message,
-            EnginePoll::Transmit { .. } => {}
-            EnginePoll::SendFailed(failed) => panic!("unexpected send failure: {failed:?}"),
-            EnginePoll::Idle => panic!("engine should produce a message event"),
+        match host.poll(0, &mut tx_buf).expect("poll client") {
+            EndpointPoll::SendFailed(failed) => panic!("unexpected host send failure: {failed:?}"),
+            EndpointPoll::Idle => break,
+            EndpointPoll::Transmit { .. } | EndpointPoll::Message(_) => {}
         }
+    }
+
+    loop {
+        match mcu.poll(0, &mut tx_buf).expect("poll passive") {
+            EndpointPoll::SendFailed(failed) => panic!("unexpected mcu send failure: {failed:?}"),
+            EndpointPoll::Idle => break,
+            EndpointPoll::Transmit { .. } | EndpointPoll::Message(_) => {}
+        }
+    }
+}
+
+fn next_host_transmit<'a>(endpoint: &mut ClientEndpoint, tx_buf: &'a mut [u8]) -> &'a [u8] {
+    match endpoint.poll(0, tx_buf).expect("poll client") {
+        EndpointPoll::Transmit { bytes, .. } => bytes,
+        other => panic!("client should produce transmit bytes, got {other:?}"),
+    }
+}
+
+fn next_mcu_transmit<'a>(endpoint: &mut PassiveEndpoint, tx_buf: &'a mut [u8]) -> &'a [u8] {
+    match endpoint.poll(0, tx_buf).expect("poll passive") {
+        EndpointPoll::Transmit { bytes, .. } => bytes,
+        other => panic!("passive endpoint should produce transmit bytes, got {other:?}"),
+    }
+}
+
+fn receive_ok(report: ReceiveReport) {
+    match report {
+        ReceiveReport::Packet { .. }
+        | ReceiveReport::Ack { .. }
+        | ReceiveReport::Duplicate { .. }
+        | ReceiveReport::Ping
+        | ReceiveReport::Pong => {}
+        other => panic!("unexpected receive report: {other:?}"),
     }
 }
 

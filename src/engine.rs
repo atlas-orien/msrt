@@ -50,6 +50,7 @@ impl Engine {
     ///
     /// Log messages use the protocol `Log` packet kind. They are never tracked
     /// in-flight and do not elicit acknowledgements.
+    #[allow(dead_code)]
     pub fn send_log(&mut self, message: &[u8]) -> Result<MessageId> {
         self.state.send_log(&self.config, message)
     }

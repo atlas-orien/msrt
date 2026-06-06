@@ -1,4 +1,5 @@
 #![doc = "Wire envelope boundaries for MSRT."]
+#![allow(dead_code, unused_imports)]
 
 pub mod codec;
 pub mod envelope;

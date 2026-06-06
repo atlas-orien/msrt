@@ -89,6 +89,7 @@ impl EngineState {
         self.send_data_impl(config, message)
     }
 
+    #[allow(dead_code)]
     pub(crate) fn send_log(&mut self, config: &EngineConfig, message: &[u8]) -> Result<MessageId> {
         self.send_log_impl(config, message)
     }

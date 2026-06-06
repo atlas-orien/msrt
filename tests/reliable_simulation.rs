@@ -1,21 +1,17 @@
-//! Deterministic long-run reliable transport simulation.
+//! Deterministic long-run reliable transport simulation through the public endpoint API.
 
-use msrt::{
-    Engine, EngineConfig,
-    core::PacketType,
-    engine::{EnginePoll, ReceiveReport},
-};
+use msrt::endpoint::{ClientEndpoint, EndpointPoll, EngineConfig, PassiveEndpoint, ReceiveReport};
 
 const TX_BUF_BYTES: usize = 128;
 
 #[test]
 fn reliable_transport_survives_drops_corruption_reordering_and_duplex_load() {
-    let mut mac = Engine::new(EngineConfig {
+    let mut mac = ClientEndpoint::new(EngineConfig {
         fragment_bytes: 8,
         retransmit_timeout_ms: 1,
         ..EngineConfig::default()
     });
-    let mut mcu = Engine::new(EngineConfig {
+    let mut mcu = PassiveEndpoint::new(EngineConfig {
         fragment_bytes: 9,
         retransmit_timeout_ms: 1,
         ..EngineConfig::default()
@@ -34,12 +30,9 @@ fn reliable_transport_survives_drops_corruption_reordering_and_duplex_load() {
     let mut mac_delivered = DeliveredMessages::new();
     let mut mcu_delivered = DeliveredMessages::new();
 
+    mac.connect(0).expect("client connect");
     for message in mac_messages {
         mac.send(message.bytes).expect("queue mac message");
-    }
-
-    for message in mcu_messages {
-        mcu.send(message.bytes).expect("queue mcu message");
     }
 
     for _ in 0..64 {
@@ -50,6 +43,15 @@ fn reliable_transport_survives_drops_corruption_reordering_and_duplex_load() {
             &mut mac_delivered,
             &mut mcu_delivered,
         );
+
+        if mcu.peer().is_connected() {
+            for message in mcu_messages {
+                if !mcu_delivered.contains(message.bytes) {
+                    mcu.send(message.bytes).expect("queue mcu message");
+                }
+            }
+        }
+
         link.flush_reordered(&mut mac, &mut mcu);
         pump_until_idle(
             &mut mac,
@@ -60,8 +62,7 @@ fn reliable_transport_survives_drops_corruption_reordering_and_duplex_load() {
         );
 
         if mac_delivered.contains_all(&mcu_messages) && mcu_delivered.contains_all(&mac_messages) {
-            assert_no_unexpected_events(&mut mac);
-            assert_no_unexpected_events(&mut mcu);
+            assert_no_unexpected_events(&mut mac, &mut mcu);
             return;
         }
     }
@@ -73,8 +74,8 @@ fn reliable_transport_survives_drops_corruption_reordering_and_duplex_load() {
 }
 
 fn pump_until_idle(
-    mac: &mut Engine,
-    mcu: &mut Engine,
+    mac: &mut ClientEndpoint,
+    mcu: &mut PassiveEndpoint,
     link: &mut SimLink,
     mac_delivered: &mut DeliveredMessages,
     mcu_delivered: &mut DeliveredMessages,
@@ -82,8 +83,8 @@ fn pump_until_idle(
     for _ in 0..256 {
         let mut progressed = false;
 
-        progressed |= pump_one(mac, mcu, &mut link.mac_to_mcu, mac_delivered);
-        progressed |= pump_one(mcu, mac, &mut link.mcu_to_mac, mcu_delivered);
+        progressed |= pump_mac(mac, mcu, &mut link.mac_to_mcu, mac_delivered);
+        progressed |= pump_mcu(mcu, mac, &mut link.mcu_to_mac, mcu_delivered);
 
         if !progressed {
             break;
@@ -91,41 +92,74 @@ fn pump_until_idle(
     }
 }
 
-fn pump_one(
-    src: &mut Engine,
-    dst: &mut Engine,
+fn pump_mac(
+    src: &mut ClientEndpoint,
+    dst: &mut PassiveEndpoint,
     direction: &mut SimDirection,
     delivered: &mut DeliveredMessages,
 ) -> bool {
     let mut tx_buf = [0; TX_BUF_BYTES];
 
-    match src.poll(0, &mut tx_buf).expect("poll engine") {
-        EnginePoll::Transmit { bytes, .. } => {
-            let write = SimWrite::from_bytes(bytes);
-            direction.deliver(dst, write);
+    match src.poll(0, &mut tx_buf).expect("poll client") {
+        EndpointPoll::Transmit { bytes, .. } => {
+            direction.deliver_to_passive(dst, SimWrite::from_bytes(bytes));
             true
         }
-        EnginePoll::Message(message) => {
+        EndpointPoll::Message(message) => {
             delivered.push(message.as_bytes());
             true
         }
-        EnginePoll::SendFailed(failed) => {
+        EndpointPoll::SendFailed(failed) => {
             panic!("reliable simulation should not fail sends: {failed:?}");
         }
-        EnginePoll::Idle => false,
+        EndpointPoll::Idle => false,
     }
 }
 
-fn assert_no_unexpected_events(engine: &mut Engine) {
+fn pump_mcu(
+    src: &mut PassiveEndpoint,
+    dst: &mut ClientEndpoint,
+    direction: &mut SimDirection,
+    delivered: &mut DeliveredMessages,
+) -> bool {
+    let mut tx_buf = [0; TX_BUF_BYTES];
+
+    match src.poll(0, &mut tx_buf).expect("poll passive") {
+        EndpointPoll::Transmit { bytes, .. } => {
+            direction.deliver_to_client(dst, SimWrite::from_bytes(bytes));
+            true
+        }
+        EndpointPoll::Message(message) => {
+            delivered.push(message.as_bytes());
+            true
+        }
+        EndpointPoll::SendFailed(failed) => {
+            panic!("reliable simulation should not fail sends: {failed:?}");
+        }
+        EndpointPoll::Idle => false,
+    }
+}
+
+fn assert_no_unexpected_events(mac: &mut ClientEndpoint, mcu: &mut PassiveEndpoint) {
     let mut tx_buf = [0; TX_BUF_BYTES];
 
     loop {
-        match engine.poll(0, &mut tx_buf).expect("poll engine") {
-            EnginePoll::Transmit { .. } | EnginePoll::Message(_) => {}
-            EnginePoll::SendFailed(failed) => {
-                panic!("simulation completed but found send failure: {failed:?}");
+        match mac.poll(0, &mut tx_buf).expect("poll client") {
+            EndpointPoll::Transmit { .. } | EndpointPoll::Message(_) => {}
+            EndpointPoll::SendFailed(failed) => {
+                panic!("simulation completed but found client send failure: {failed:?}");
             }
-            EnginePoll::Idle => break,
+            EndpointPoll::Idle => break,
+        }
+    }
+
+    loop {
+        match mcu.poll(0, &mut tx_buf).expect("poll passive") {
+            EndpointPoll::Transmit { .. } | EndpointPoll::Message(_) => {}
+            EndpointPoll::SendFailed(failed) => {
+                panic!("simulation completed but found passive send failure: {failed:?}");
+            }
+            EndpointPoll::Idle => break,
         }
     }
 }
@@ -162,6 +196,10 @@ impl DeliveredMessages {
         );
         assert!(bytes.len() <= 64, "delivered message too large for test");
 
+        if self.contains(bytes) {
+            return;
+        }
+
         let mut stored = [0; 64];
         stored[..bytes.len()].copy_from_slice(bytes);
         self.messages[self.len] = (stored, bytes.len());
@@ -193,47 +231,48 @@ impl SimLink {
         }
     }
 
-    fn flush_reordered(&mut self, mac: &mut Engine, mcu: &mut Engine) {
-        self.mac_to_mcu.flush(mcu);
-        self.mcu_to_mac.flush(mac);
+    fn flush_reordered(&mut self, mac: &mut ClientEndpoint, mcu: &mut PassiveEndpoint) {
+        self.mac_to_mcu.flush_to_passive(mcu);
+        self.mcu_to_mac.flush_to_client(mac);
     }
 }
 
 #[derive(Debug)]
 struct SimDirection {
-    seen_data: [bool; 64],
     held: [Option<SimWrite>; 8],
     held_len: usize,
+    delivered: usize,
 }
 
 impl SimDirection {
     const fn new() -> Self {
         Self {
-            seen_data: [false; 64],
             held: [None; 8],
             held_len: 0,
+            delivered: 0,
         }
     }
 
-    fn deliver(&mut self, dst: &mut Engine, write: SimWrite) {
-        if !is_data(write) {
-            receive_ok(dst, write.as_bytes());
-            return;
-        }
+    fn deliver_to_passive(&mut self, dst: &mut PassiveEndpoint, write: SimWrite) {
+        self.delivered += 1;
 
-        let packet_index = packet_index(write.as_bytes()) as usize;
-        let first_seen = packet_index < self.seen_data.len() && !self.seen_data[packet_index];
-
-        if packet_index < self.seen_data.len() {
-            self.seen_data[packet_index] = true;
-        }
-
-        if first_seen && packet_index % 4 == 3 {
+        if self.delivered.is_multiple_of(7) {
             self.hold(write);
             return;
         }
 
-        receive_ok(dst, write.as_bytes());
+        receive_ok(dst.receive(0, write.as_bytes()));
+    }
+
+    fn deliver_to_client(&mut self, dst: &mut ClientEndpoint, write: SimWrite) {
+        self.delivered += 1;
+
+        if self.delivered.is_multiple_of(7) {
+            self.hold(write);
+            return;
+        }
+
+        receive_ok(dst.receive(0, write.as_bytes()));
     }
 
     fn hold(&mut self, write: SimWrite) {
@@ -243,18 +282,27 @@ impl SimDirection {
         self.held_len += 1;
     }
 
-    fn flush(&mut self, dst: &mut Engine) {
+    fn flush_to_passive(&mut self, dst: &mut PassiveEndpoint) {
         while self.held_len > 0 {
             self.held_len -= 1;
             let write = self.held[self.held_len].take().expect("held packet");
 
-            receive_ok(dst, write.as_bytes());
+            receive_ok(dst.receive(0, write.as_bytes()));
+        }
+    }
+
+    fn flush_to_client(&mut self, dst: &mut ClientEndpoint) {
+        while self.held_len > 0 {
+            self.held_len -= 1;
+            let write = self.held[self.held_len].take().expect("held packet");
+
+            receive_ok(dst.receive(0, write.as_bytes()));
         }
     }
 }
 
-fn receive_ok(dst: &mut Engine, bytes: &[u8]) {
-    match dst.receive(bytes) {
+fn receive_ok(report: ReceiveReport) {
+    match report {
         ReceiveReport::Packet { .. }
         | ReceiveReport::Duplicate { .. }
         | ReceiveReport::Ack { .. }
@@ -262,18 +310,6 @@ fn receive_ok(dst: &mut Engine, bytes: &[u8]) {
         | ReceiveReport::Pong => {}
         other => panic!("unexpected receive report in simulation: {other:?}"),
     }
-}
-
-fn is_data(write: SimWrite) -> bool {
-    write.as_bytes().get(8).copied() == Some(PacketType::Data.code())
-}
-
-fn packet_index(bytes: &[u8]) -> u16 {
-    u16::from_le_bytes(
-        bytes[msrt::wire::WIRE_HEADER_LEN + 6..msrt::wire::WIRE_HEADER_LEN + 8]
-            .try_into()
-            .expect("packet index bytes"),
-    )
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

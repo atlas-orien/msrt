@@ -1,72 +1,55 @@
-//! Integration tests for the no_std MSRT protocol facade.
+//! Integration tests for the public MSRT facade.
+
+use msrt::{
+    endpoint::{
+        ClientEndpoint, EndpointPoll, EngineConfig, IntegrityConfig, MessageId, PassiveEndpoint,
+        PeerState, ReceiveReport,
+    },
+    error::{Error, ErrorKind},
+};
 
 const TX_BUF_BYTES: usize = 128;
 
-use msrt::{
-    Engine,
-    core::{DataHeader, Flags, MessageId, Packet, PacketIndex},
-    engine::EnginePoll,
-    reliability::{FragmentRange, MessageFragment, MessageKey},
-    wire::{EnvelopeHeader, EnvelopeMagic, WireEnvelope},
-};
-
 #[test]
-fn facade_exposes_core_packet_and_wire_envelope() {
-    let payload = [0x01, 0x02, 0x03];
-    let header = DataHeader::new(
-        Flags::ACK_ELICITING,
-        MessageId::new(7),
-        PacketIndex::new(0),
-        payload.len(),
-        0,
-    );
-    let packet = Packet::data_parts(header, &payload);
-
-    let envelope_header = EnvelopeHeader::new(packet.payload_len() as u8);
-    let envelope = WireEnvelope::new(envelope_header, packet.payload_bytes());
-
-    assert_eq!(EnvelopeMagic::MSRT.bytes(), [0xA5]);
-    assert_eq!(envelope.packet_bytes, &payload);
-    assert!(envelope.has_valid_len());
-    assert!(envelope.header.has_valid_header_crc());
-    assert_eq!(envelope.header.packet_len, 3);
-}
-
-#[test]
-fn facade_exposes_reliability_fragment_view() {
-    let header = DataHeader::new(
-        Flags::ACK_ELICITING,
-        MessageId::new(9),
-        PacketIndex::new(0),
-        8,
-        2,
-    );
-
-    let fragment = MessageFragment::try_from_data_header(header, 4).unwrap();
-
-    assert_eq!(fragment.key, MessageKey::new(MessageId::new(9)));
-    assert_eq!(fragment.range, FragmentRange::new(2, 4));
-}
-
-#[test]
-fn facade_exposes_concrete_engine_api() {
-    let mut engine = Engine::default();
+fn facade_exposes_endpoint_config_api() {
+    let mut client = ClientEndpoint::new(EngineConfig {
+        initial_message_id: MessageId::new(7),
+        integrity: IntegrityConfig::crc32(),
+        ..EngineConfig::default()
+    });
     let mut tx_buf = [0; TX_BUF_BYTES];
-    let message_id = engine.send(b"hello").unwrap();
+    let message_id = client.connect(0).unwrap();
 
     assert_ne!(message_id, MessageId::ZERO);
 
-    let EnginePoll::Transmit { bytes, .. } = engine.poll(0, &mut tx_buf).unwrap() else {
-        panic!("engine should produce transmit bytes");
+    let EndpointPoll::Transmit { bytes, .. } = client.poll(0, &mut tx_buf).unwrap() else {
+        panic!("client should produce hello bytes");
     };
 
-    assert_eq!(
-        u16::from_le_bytes(
-            bytes[msrt::wire::WIRE_HEADER_LEN + 6..msrt::wire::WIRE_HEADER_LEN + 8]
-                .try_into()
-                .unwrap()
-        ),
-        PacketIndex::ZERO.get()
-    );
     assert!(!bytes.is_empty());
+}
+
+#[test]
+fn facade_exposes_endpoint_receive_api() {
+    let mut client = ClientEndpoint::default();
+    let mut passive = PassiveEndpoint::default();
+    let mut tx_buf = [0; TX_BUF_BYTES];
+
+    client.connect(1).unwrap();
+    let EndpointPoll::Transmit { bytes, .. } = client.poll(1, &mut tx_buf).unwrap() else {
+        panic!("client should transmit hello");
+    };
+
+    assert!(matches!(
+        passive.receive(2, bytes),
+        ReceiveReport::Packet { .. }
+    ));
+    assert_eq!(passive.peer().state(), PeerState::Connected);
+}
+
+#[test]
+fn facade_exposes_error_api() {
+    let error = Error::new(ErrorKind::Engine);
+
+    assert_eq!(error.kind(), ErrorKind::Engine);
 }

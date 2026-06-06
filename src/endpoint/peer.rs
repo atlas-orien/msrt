@@ -1,7 +1,8 @@
 //! Peer session slot shared by endpoint managers.
 
-use crate::core::{Error, ErrorKind, MessageId, Result};
-use crate::engine::{Engine, EngineConfig, EnginePoll, ReceiveReport, SendFailedEvent};
+use crate::core::{Error, ErrorKind, Result};
+use crate::endpoint::{EngineConfig, MessageEvent, MessageId, ReceiveReport, SendFailedEvent};
+use crate::engine::{Engine, EnginePoll};
 
 const HELLO_MESSAGE: &[u8] = &[0];
 const DEFAULT_PING_INTERVAL_MS: u64 = 5_000;
@@ -30,7 +31,7 @@ pub enum EndpointPoll<'a> {
         attempts: u8,
     },
     /// A complete application message has been reassembled.
-    Message(crate::engine::MessageEvent),
+    Message(MessageEvent),
     /// A message could not be sent reliably.
     SendFailed(crate::engine::SendFailedEvent),
     /// The peer endpoint has no pending action.
@@ -39,8 +40,8 @@ pub enum EndpointPoll<'a> {
 
 /// A single peer session slot.
 ///
-/// `Engine` represents one active peer session. `PeerSlot` owns that optional
-/// engine and tracks whether the peer has actually confirmed connectivity.
+/// `PeerSlot` owns one optional protocol session and tracks whether the peer
+/// has actually confirmed connectivity.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PeerSlot {
     config: EngineConfig,
@@ -121,22 +122,8 @@ impl PeerSlot {
         self.pending_ping = false;
     }
 
-    /// Creates an engine if needed and returns the active engine.
-    pub fn engine_or_connect(&mut self, now_ms: u64) -> Result<&mut Engine> {
-        if self.engine.is_none() {
-            self.connect(now_ms)?;
-        }
-
-        self.last_seen_ms = now_ms;
-        let Some(engine) = self.engine.as_mut() else {
-            return Err(Error::new(ErrorKind::Engine));
-        };
-
-        Ok(engine)
-    }
-
     /// Creates a passive engine if needed and returns the active engine.
-    pub fn engine_or_accept_passive(&mut self, now_ms: u64) -> Result<&mut Engine> {
+    pub(crate) fn engine_or_accept_passive(&mut self, now_ms: u64) -> Result<&mut Engine> {
         if self.engine.is_none() {
             self.accept_passive(now_ms);
         }
@@ -147,11 +134,6 @@ impl PeerSlot {
         };
 
         Ok(engine)
-    }
-
-    /// Returns the active engine if a session exists.
-    pub fn engine_mut(&mut self) -> Option<&mut Engine> {
-        self.engine.as_mut()
     }
 
     /// Queues an application message on the active engine.
@@ -283,7 +265,7 @@ mod tests {
         assert!(!peer.has_session());
         assert!(!peer.is_connected());
 
-        peer.engine_or_connect(10).unwrap();
+        peer.connect(10).unwrap();
         assert!(peer.has_session());
         assert_eq!(peer.state(), super::PeerState::Connecting);
         assert_eq!(peer.last_seen_ms(), 10);
@@ -299,12 +281,12 @@ mod tests {
     fn reconnect_replaces_engine_state() {
         let mut peer = PeerSlot::default();
 
-        let first_engine = peer.engine_or_connect(1).unwrap();
-        let expected_after_reconnect = first_engine.send(b"hello").unwrap();
+        peer.connect(1).unwrap();
+        let expected_after_reconnect = peer.send(b"hello").unwrap();
         peer.disconnect();
-        let engine = peer.engine_or_connect(2).unwrap();
+        peer.connect(2).unwrap();
 
-        assert_eq!(engine.send(b"hello").unwrap(), expected_after_reconnect);
+        assert_eq!(peer.send(b"hello").unwrap(), expected_after_reconnect);
     }
 
     #[test]
@@ -324,7 +306,7 @@ mod tests {
     #[test]
     fn poll_error_drops_engine_session() {
         let mut peer = PeerSlot::default();
-        peer.engine_or_connect(1).unwrap();
+        peer.connect(1).unwrap();
 
         let mut tx_buf = [];
         assert!(peer.poll(1, &mut tx_buf).is_err());
@@ -335,8 +317,8 @@ mod tests {
     #[test]
     fn send_failed_drops_engine_session() {
         let mut peer = PeerSlot::new(test_retransmit_config(1, 1));
-        let engine = peer.engine_or_connect(1).unwrap();
-        engine.send(b"hello").unwrap();
+        peer.connect(1).unwrap();
+        peer.send(b"hello").unwrap();
 
         let mut tx_buf = [0; 128];
         while !matches!(peer.poll(1, &mut tx_buf).unwrap(), EndpointPoll::Idle) {}

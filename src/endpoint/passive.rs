@@ -1,14 +1,13 @@
 //! Passive single-peer endpoint manager.
 
-use crate::core::{MessageId, Result};
-use crate::endpoint::{EndpointPoll, PeerSlot};
-use crate::engine::{Engine, EngineConfig, ReceiveReport};
+use crate::core::Result;
+use crate::endpoint::{EndpointPoll, EngineConfig, MessageId, PeerSlot, ReceiveReport};
 
 /// Passive single-peer endpoint.
 ///
-/// This endpoint owns at most one `Engine`. It does not actively send hello on
-/// startup; instead, it creates the engine lazily when bytes arrive from the
-/// peer. Disconnect drops the engine so the next peer connection starts with a
+/// This endpoint owns at most one protocol session. It does not actively send hello on
+/// startup; instead, it creates the session lazily when bytes arrive from the
+/// peer. Disconnect drops the session so the next peer connection starts with a
 /// fresh protocol session.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct PassiveEndpoint {
@@ -38,16 +37,6 @@ impl PassiveEndpoint {
     /// Drops the active host session if one exists.
     pub fn disconnect(&mut self) {
         self.peer.disconnect();
-    }
-
-    /// Returns the active engine, creating a passive session if needed.
-    pub fn engine_or_accept(&mut self, now_ms: u64) -> Result<&mut Engine> {
-        self.peer.engine_or_accept_passive(now_ms)
-    }
-
-    /// Returns the active engine if a peer session exists.
-    pub fn engine_mut(&mut self) -> Option<&mut Engine> {
-        self.peer.engine_mut()
     }
 
     /// Queues an application message if a host session exists.
@@ -117,7 +106,7 @@ mod tests {
     fn passive_disconnect_drops_engine_until_next_receive() {
         let mut passive = PassiveEndpoint::default();
 
-        passive.engine_or_accept(1).unwrap();
+        passive.receive(1, &[]);
         assert!(passive.peer().has_session());
 
         passive.disconnect();

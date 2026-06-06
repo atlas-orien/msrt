@@ -34,6 +34,7 @@ impl EngineState {
         self.send_fragmented_message(config, PacketType::Data, message)
     }
 
+    #[allow(dead_code)]
     pub(crate) fn send_log_impl(
         &mut self,
         config: &EngineConfig,

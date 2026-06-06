@@ -1,18 +1,7 @@
-//! Library-side protocol benchmarks for the MSRT facade.
+//! Library-side protocol benchmarks for the public MSRT endpoint facade.
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use msrt::{
-    Engine, EngineConfig,
-    core::{DataHeader, Flags, MessageId, PacketIndex, PacketKey},
-    endpoint::{ClientEndpoint, EndpointPoll, PassiveEndpoint},
-    engine::{EnginePoll, ReceiveReport},
-    integrity::{Aead, Crc8, Crc16, Crc32, Crc64, Integrity, IntegrityConfig},
-    reliability::{
-        AckTracker, Dedup, FragmentRange, MessageFragment, PacketAckTracker, PacketDedup,
-        RetransmitPolicy, RetryLimitPolicy, TimeoutEvent,
-    },
-    wire::{EnvelopeHeader, StreamDecodeOutcome, StreamingDecoder, WireEnvelope},
-};
+use msrt::endpoint::{ClientEndpoint, EndpointPoll, EngineConfig, PassiveEndpoint, ReceiveReport};
 use std::hint::black_box;
 
 const SMALL_MESSAGE: &[u8] = b"hello msrt";
@@ -20,202 +9,6 @@ const MEDIUM_MESSAGE: &[u8] =
     b"msrt benchmark message split into several packets for host-side regression tracking";
 const LARGE_MESSAGE: &[u8] = &[0x55; 192];
 const TX_BUF_BYTES: usize = 256;
-const WIRE_DECODE_BYTES: usize = 512;
-
-fn core_primitives(c: &mut Criterion) {
-    c.bench_function("core_data_header_key", |b| {
-        b.iter(|| {
-            let header = DataHeader::new(
-                Flags::ACK_ELICITING,
-                MessageId::new(black_box(99)),
-                PacketIndex::new(black_box(7)),
-                black_box(128),
-                black_box(32),
-            );
-
-            black_box((
-                PacketKey::new(header.message_id, header.packet_index),
-                header.is_ack_eliciting(),
-            ))
-        });
-    });
-
-    c.bench_function("core_fragment_range_check", |b| {
-        b.iter(|| {
-            let range = FragmentRange::new(black_box(32), black_box(64));
-            black_box((range.end(), range.fits_in(black_box(128))))
-        });
-    });
-}
-
-fn integrity_backends(c: &mut Criterion) {
-    let mut group = c.benchmark_group("integrity");
-    let bytes = [0x5a; 96];
-
-    group.bench_function("crc8_header", |b| {
-        b.iter(|| black_box(Crc8.calculate(black_box(&bytes[..2]))));
-    });
-
-    group.bench_function("crc16_seal_verify", |b| {
-        let integrity = Crc16;
-        let mut tag = [0; Crc16::TAG_LEN];
-
-        b.iter(|| {
-            integrity.seal(black_box(&bytes), black_box(&mut tag));
-            black_box(integrity.verify(black_box(&bytes), black_box(&tag)))
-        });
-    });
-
-    group.bench_function("crc32_seal_verify", |b| {
-        let integrity = Crc32;
-        let mut tag = [0; Crc32::TAG_LEN];
-
-        b.iter(|| {
-            integrity.seal(black_box(&bytes), black_box(&mut tag));
-            black_box(integrity.verify(black_box(&bytes), black_box(&tag)))
-        });
-    });
-
-    group.bench_function("crc64_seal_verify", |b| {
-        let integrity = Crc64;
-        let mut tag = [0; Crc64::TAG_LEN];
-
-        b.iter(|| {
-            integrity.seal(black_box(&bytes), black_box(&mut tag));
-            black_box(integrity.verify(black_box(&bytes), black_box(&tag)))
-        });
-    });
-
-    group.bench_function("aead_seal_verify", |b| {
-        let integrity = Aead::DEFAULT;
-        let mut tag = [0; Aead::TAG_LEN];
-
-        b.iter(|| {
-            integrity.seal(black_box(&bytes), black_box(&mut tag));
-            black_box(integrity.verify(black_box(&bytes), black_box(&tag)))
-        });
-    });
-
-    group.bench_function("integrity_config_crc16_dispatch", |b| {
-        let integrity = IntegrityConfig::crc16();
-        let mut tag = [0; Crc16::TAG_LEN];
-
-        b.iter(|| {
-            integrity.seal(black_box(&bytes), black_box(&mut tag));
-            black_box(integrity.verify(black_box(&bytes), black_box(&tag)))
-        });
-    });
-
-    group.finish();
-}
-
-fn wire_boundaries(c: &mut Criterion) {
-    let fixture = Fixture::new(MEDIUM_MESSAGE, 16);
-    let first = fixture.writes[0].expect("fixture should contain one packet");
-
-    c.bench_function("wire_envelope_header", |b| {
-        b.iter(|| {
-            let header = EnvelopeHeader::new(black_box(64));
-            black_box((
-                header.has_valid_header_crc(),
-                header.total_len(Crc16::TAG_LEN),
-            ))
-        });
-    });
-
-    c.bench_function("wire_envelope_view", |b| {
-        b.iter(|| {
-            let header = EnvelopeHeader::new(black_box(first.len as u8));
-            let envelope = WireEnvelope::new(header, black_box(first.as_bytes()));
-            black_box((envelope.total_len(Crc16::TAG_LEN), envelope.has_valid_len()))
-        });
-    });
-
-    c.bench_function("wire_streaming_decode_packet", |b| {
-        b.iter(|| {
-            let mut decoder = StreamingDecoder::<WIRE_DECODE_BYTES>::new();
-            match decoder
-                .feed(
-                    black_box(first.as_bytes()),
-                    black_box(&IntegrityConfig::DEFAULT),
-                )
-                .expect("decode fixture packet")
-            {
-                StreamDecodeOutcome::Packet { consumed, .. } => black_box(consumed),
-                other => panic!("wire benchmark expected packet, got {other:?}"),
-            }
-        });
-    });
-
-    c.bench_function("wire_streaming_bytewise_decode_packet", |b| {
-        b.iter(|| {
-            let mut decoder = StreamingDecoder::<WIRE_DECODE_BYTES>::new();
-            let mut consumed = 0;
-
-            for byte in first.as_bytes() {
-                if let StreamDecodeOutcome::Packet { consumed: len, .. } = decoder
-                    .feed(black_box(&[*byte]), black_box(&IntegrityConfig::DEFAULT))
-                    .expect("decode bytewise fixture packet")
-                {
-                    consumed = len;
-                }
-            }
-
-            black_box(consumed)
-        });
-    });
-}
-
-fn reliability_primitives(c: &mut Criterion) {
-    c.bench_function("reliability_dedup_16_observe", |b| {
-        b.iter(|| {
-            let mut dedup = PacketDedup::<16>::new();
-
-            for index in 0..16 {
-                let key = packet_key(index);
-                black_box(dedup.observe_packet(black_box(key)).expect("dedup observe"));
-            }
-
-            black_box(dedup.is_duplicate(packet_key(15)))
-        });
-    });
-
-    c.bench_function("reliability_ack_tracker_16", |b| {
-        b.iter(|| {
-            let mut tracker = PacketAckTracker::<16>::new();
-
-            for index in 0..16 {
-                tracker.on_packet_sent(black_box(packet_key(index)));
-            }
-
-            black_box(tracker.on_ack(packet_key(8)))
-        });
-    });
-
-    c.bench_function("reliability_retry_limit_policy", |b| {
-        b.iter(|| {
-            let mut policy = RetryLimitPolicy::new(black_box(10));
-            let event = TimeoutEvent::new(packet_key(3), black_box(250), black_box(3));
-            black_box(policy.on_timeout(event))
-        });
-    });
-
-    c.bench_function("reliability_message_fragment_from_data_header", |b| {
-        b.iter(|| {
-            let header = DataHeader::new(
-                Flags::ACK_ELICITING,
-                MessageId::new(black_box(10)),
-                PacketIndex::new(black_box(4)),
-                black_box(128),
-                black_box(64),
-            );
-            black_box(
-                MessageFragment::try_from_data_header(header, black_box(16))
-                    .expect("fragment should fit"),
-            )
-        });
-    });
-}
 
 fn send_fragmentation(c: &mut Criterion) {
     let mut group = c.benchmark_group("send_fragmentation");
@@ -227,13 +20,11 @@ fn send_fragmentation(c: &mut Criterion) {
     ] {
         group.bench_with_input(BenchmarkId::from_parameter(name), message, |b, message| {
             b.iter(|| {
-                let mut engine = Engine::new(EngineConfig {
-                    fragment_bytes: 16,
-                    ..EngineConfig::default()
-                });
+                let mut endpoint = client_with_fragment_bytes(16);
 
-                engine.send(message).expect("send benchmark message");
-                drain_writes(&mut engine, 0)
+                endpoint.connect(0).expect("client connect");
+                endpoint.send(message).expect("send benchmark message");
+                drain_client_writes(&mut endpoint, 0)
             });
         });
     }
@@ -253,13 +44,13 @@ fn receive_reassembly(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::from_parameter(name), &fixture, |b, fixture| {
             b.iter(|| {
-                let mut receiver = Engine::new(EngineConfig::default());
+                let mut receiver = PassiveEndpoint::default();
 
                 for write in fixture.writes() {
-                    receive_ok(&mut receiver, write.as_bytes());
+                    receive_ok(receiver.receive(0, write.as_bytes()));
                 }
 
-                drain_messages(&mut receiver, 0)
+                drain_passive_messages(&mut receiver, 0)
             });
         });
     }
@@ -270,30 +61,30 @@ fn receive_reassembly(c: &mut Criterion) {
 fn lossless_duplex_roundtrip(c: &mut Criterion) {
     c.bench_function("lossless_duplex_roundtrip", |b| {
         b.iter(|| {
-            let mut mac = Engine::new(EngineConfig {
-                fragment_bytes: 16,
-                ..EngineConfig::default()
-            });
-            let mut mcu = Engine::new(EngineConfig {
-                fragment_bytes: 16,
-                ..EngineConfig::default()
-            });
+            let mut mac = client_with_fragment_bytes(16);
+            let mut mcu = passive_with_fragment_bytes(16);
 
+            mac.connect(0).expect("client connect");
             mac.send(MEDIUM_MESSAGE).expect("queue mac message");
-            mcu.send(LARGE_MESSAGE).expect("queue mcu message");
 
             let mut mac_messages = 0;
             let mut mcu_messages = 0;
+            let mut mcu_queued = false;
 
             for _ in 0..64 {
-                let progressed = pump_lossless(&mut mac, &mut mcu, &mut mac_messages, 0)
-                    | pump_lossless(&mut mcu, &mut mac, &mut mcu_messages, 0);
+                let progressed = pump_client_to_passive(&mut mac, &mut mcu, &mut mac_messages, 0)
+                    | pump_passive_to_client(&mut mcu, &mut mac, &mut mcu_messages, 0);
+
+                if !mcu_queued && mcu.peer().is_connected() {
+                    mcu.send(LARGE_MESSAGE).expect("queue mcu message");
+                    mcu_queued = true;
+                }
 
                 if mac_messages == 1 && mcu_messages == 1 {
                     return mac_messages + mcu_messages;
                 }
 
-                if !progressed {
+                if !progressed && mcu_queued {
                     break;
                 }
             }
@@ -306,19 +97,17 @@ fn lossless_duplex_roundtrip(c: &mut Criterion) {
 fn retransmit_scan(c: &mut Criterion) {
     c.bench_function("retransmit_scan_16_in_flight", |b| {
         b.iter(|| {
-            let mut engine = Engine::new(EngineConfig {
-                fragment_bytes: 8,
-                ..EngineConfig::default()
-            });
+            let mut endpoint = client_with_fragment_bytes(8);
 
-            engine
+            endpoint.connect(0).expect("client connect");
+            endpoint
                 .send(&[0xaa; 128])
                 .expect("queue retransmit benchmark message");
-            let initial_writes = drain_writes(&mut engine, 0);
+            let initial_writes = drain_client_writes(&mut endpoint, 0);
 
-            assert_eq!(initial_writes, 16);
+            assert_eq!(initial_writes, 17);
 
-            drain_writes(&mut engine, 1)
+            drain_client_writes(&mut endpoint, 1)
         });
     });
 }
@@ -388,19 +177,17 @@ struct Fixture {
 
 impl Fixture {
     fn new(message: &[u8], fragment_bytes: usize) -> Self {
-        let mut sender = Engine::new(EngineConfig {
-            fragment_bytes,
-            ..EngineConfig::default()
-        });
+        let mut sender = client_with_fragment_bytes(fragment_bytes);
         let mut fixture = Self {
             writes: [None; 32],
             len: 0,
         };
 
+        sender.connect(0).expect("client connect");
         sender.send(message).expect("queue fixture message");
 
         loop {
-            match poll_owned(&mut sender, 0) {
+            match poll_client_owned(&mut sender, 0) {
                 BenchPoll::Transmit(write) => {
                     fixture.writes[fixture.len] = Some(write);
                     fixture.len += 1;
@@ -426,15 +213,29 @@ enum BenchPoll {
     Idle,
 }
 
-fn pump_lossless(
-    src: &mut Engine,
-    dst: &mut Engine,
+fn client_with_fragment_bytes(fragment_bytes: usize) -> ClientEndpoint {
+    ClientEndpoint::new(EngineConfig {
+        fragment_bytes,
+        ..EngineConfig::default()
+    })
+}
+
+fn passive_with_fragment_bytes(fragment_bytes: usize) -> PassiveEndpoint {
+    PassiveEndpoint::new(EngineConfig {
+        fragment_bytes,
+        ..EngineConfig::default()
+    })
+}
+
+fn pump_client_to_passive(
+    src: &mut ClientEndpoint,
+    dst: &mut PassiveEndpoint,
     received_messages: &mut usize,
     now_ms: u64,
 ) -> bool {
-    match poll_owned(src, now_ms) {
+    match poll_client_owned(src, now_ms) {
         BenchPoll::Transmit(write) => {
-            receive_ok(dst, write.as_bytes());
+            receive_ok(dst.receive(now_ms, write.as_bytes()));
             true
         }
         BenchPoll::Message => {
@@ -445,11 +246,30 @@ fn pump_lossless(
     }
 }
 
-fn drain_writes(engine: &mut Engine, now_ms: u64) -> usize {
+fn pump_passive_to_client(
+    src: &mut PassiveEndpoint,
+    dst: &mut ClientEndpoint,
+    received_messages: &mut usize,
+    now_ms: u64,
+) -> bool {
+    match poll_passive_owned(src, now_ms) {
+        BenchPoll::Transmit(write) => {
+            receive_ok(dst.receive(now_ms, write.as_bytes()));
+            true
+        }
+        BenchPoll::Message => {
+            *received_messages += 1;
+            true
+        }
+        BenchPoll::Idle => false,
+    }
+}
+
+fn drain_client_writes(endpoint: &mut ClientEndpoint, now_ms: u64) -> usize {
     let mut writes = 0;
 
     loop {
-        match poll_owned(engine, now_ms) {
+        match poll_client_owned(endpoint, now_ms) {
             BenchPoll::Transmit(_) => writes += 1,
             BenchPoll::Message => {}
             BenchPoll::Idle => break,
@@ -459,11 +279,11 @@ fn drain_writes(engine: &mut Engine, now_ms: u64) -> usize {
     writes
 }
 
-fn drain_messages(engine: &mut Engine, now_ms: u64) -> usize {
+fn drain_passive_messages(endpoint: &mut PassiveEndpoint, now_ms: u64) -> usize {
     let mut messages = 0;
 
     loop {
-        match poll_owned(engine, now_ms) {
+        match poll_passive_owned(endpoint, now_ms) {
             BenchPoll::Transmit(_) => {}
             BenchPoll::Message => messages += 1,
             BenchPoll::Idle => break,
@@ -473,21 +293,34 @@ fn drain_messages(engine: &mut Engine, now_ms: u64) -> usize {
     messages
 }
 
-fn poll_owned(engine: &mut Engine, now_ms: u64) -> BenchPoll {
+fn poll_client_owned(endpoint: &mut ClientEndpoint, now_ms: u64) -> BenchPoll {
     let mut tx_buf = [0; TX_BUF_BYTES];
 
-    match engine.poll(now_ms, &mut tx_buf).expect("poll engine") {
-        EnginePoll::Transmit { bytes, .. } => BenchPoll::Transmit(BenchWrite::new(bytes)),
-        EnginePoll::Message(_) => BenchPoll::Message,
-        EnginePoll::SendFailed(failed) => {
+    match endpoint.poll(now_ms, &mut tx_buf).expect("poll client") {
+        EndpointPoll::Transmit { bytes, .. } => BenchPoll::Transmit(BenchWrite::new(bytes)),
+        EndpointPoll::Message(_) => BenchPoll::Message,
+        EndpointPoll::SendFailed(failed) => {
             panic!("benchmark should not fail sends: {failed:?}");
         }
-        EnginePoll::Idle => BenchPoll::Idle,
+        EndpointPoll::Idle => BenchPoll::Idle,
     }
 }
 
-fn receive_ok(engine: &mut Engine, bytes: &[u8]) {
-    match engine.receive(bytes) {
+fn poll_passive_owned(endpoint: &mut PassiveEndpoint, now_ms: u64) -> BenchPoll {
+    let mut tx_buf = [0; TX_BUF_BYTES];
+
+    match endpoint.poll(now_ms, &mut tx_buf).expect("poll passive") {
+        EndpointPoll::Transmit { bytes, .. } => BenchPoll::Transmit(BenchWrite::new(bytes)),
+        EndpointPoll::Message(_) => BenchPoll::Message,
+        EndpointPoll::SendFailed(failed) => {
+            panic!("benchmark should not fail sends: {failed:?}");
+        }
+        EndpointPoll::Idle => BenchPoll::Idle,
+    }
+}
+
+fn receive_ok(report: ReceiveReport) {
+    match report {
         ReceiveReport::Packet { .. }
         | ReceiveReport::Duplicate { .. }
         | ReceiveReport::Ack { .. }
@@ -497,16 +330,8 @@ fn receive_ok(engine: &mut Engine, bytes: &[u8]) {
     }
 }
 
-fn packet_key(index: u16) -> PacketKey {
-    PacketKey::new(MessageId::new(7), PacketIndex::new(index))
-}
-
 criterion_group!(
     benches,
-    core_primitives,
-    integrity_backends,
-    wire_boundaries,
-    reliability_primitives,
     send_fragmentation,
     receive_reassembly,
     lossless_duplex_roundtrip,

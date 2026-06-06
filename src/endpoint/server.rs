@@ -1,8 +1,7 @@
 //! Server-side endpoint manager.
 
 use crate::core::{Error, ErrorKind};
-use crate::endpoint::{EndpointPoll, PeerSlot};
-use crate::engine::{Engine, EngineConfig, ReceiveReport};
+use crate::endpoint::{EndpointPoll, EngineConfig, PeerSlot, ReceiveReport};
 
 /// Error returned when a server endpoint cannot accept a peer.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -43,7 +42,7 @@ impl<P> PeerEntry<P> {
 ///
 /// `P` is a transport-adapter peer key, such as an index, UART port id, or UDP
 /// remote address wrapper. This type does not listen on sockets and does not
-/// perform IO; it only maps each peer key to one `Engine`.
+/// perform IO; it only maps each peer key to one protocol session.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ServerEndpoint<P, const N: usize> {
     config: EngineConfig,
@@ -67,11 +66,7 @@ where
     ///
     /// Use this when the adapter has decided that the remote side started a new
     /// logical connection and old protocol state must be dropped.
-    pub fn accept(
-        &mut self,
-        peer_id: P,
-        now_ms: u64,
-    ) -> core::result::Result<&mut Engine, AcceptError> {
+    pub fn accept(&mut self, peer_id: P, now_ms: u64) -> core::result::Result<(), AcceptError> {
         if let Some(index) = self.find_index(peer_id) {
             return self.reconnect_at(index, now_ms);
         }
@@ -85,28 +80,6 @@ where
         self.reconnect_at(index, now_ms)
     }
 
-    /// Returns the peer engine, accepting the peer if it is not already known.
-    ///
-    /// Use this for connectionless transports where receiving bytes from an
-    /// unknown peer should lazily create that peer session.
-    pub fn engine_or_accept(
-        &mut self,
-        peer_id: P,
-        now_ms: u64,
-    ) -> core::result::Result<&mut Engine, AcceptError> {
-        if let Some(index) = self.find_index(peer_id) {
-            let Some(entry) = self.peers[index].as_mut() else {
-                return Err(AcceptError::Engine(Error::new(ErrorKind::Engine)));
-            };
-            return entry
-                .slot
-                .engine_or_connect(now_ms)
-                .map_err(AcceptError::Engine);
-        }
-
-        self.accept(peer_id, now_ms)
-    }
-
     /// Drops the peer session and frees the server slot.
     pub fn disconnect(&mut self, peer_id: P) -> bool {
         let Some(index) = self.find_index(peer_id) else {
@@ -115,12 +88,6 @@ where
 
         self.peers[index] = None;
         true
-    }
-
-    /// Returns the active engine for `peer_id` if the peer is known.
-    pub fn engine_mut(&mut self, peer_id: P) -> Option<&mut Engine> {
-        let index = self.find_index(peer_id)?;
-        self.peers[index].as_mut()?.slot.engine_mut()
     }
 
     /// Feeds received bytes into the engine for `peer_id`.
@@ -146,6 +113,16 @@ where
         Some(&mut self.peers[index].as_mut()?.slot)
     }
 
+    /// Queues an application message for `peer_id` if the peer is known.
+    pub fn send(
+        &mut self,
+        peer_id: P,
+        message: &[u8],
+    ) -> Option<crate::core::Result<Option<crate::core::MessageId>>> {
+        let index = self.find_index(peer_id)?;
+        Some(self.peers[index].as_mut()?.slot.send(message))
+    }
+
     /// Drops every peer session idle for at least `timeout_ms`.
     pub fn disconnect_idle(&mut self, now_ms: u64, timeout_ms: u64) -> usize {
         let mut disconnected = 0;
@@ -169,20 +146,12 @@ where
         self.peers.iter().filter_map(Option::as_ref)
     }
 
-    fn reconnect_at(
-        &mut self,
-        index: usize,
-        now_ms: u64,
-    ) -> core::result::Result<&mut Engine, AcceptError> {
+    fn reconnect_at(&mut self, index: usize, now_ms: u64) -> core::result::Result<(), AcceptError> {
         let Some(entry) = self.peers[index].as_mut() else {
             return Err(AcceptError::Engine(Error::new(ErrorKind::Engine)));
         };
         entry.slot.connect(now_ms).map_err(AcceptError::Engine)?;
-        let Some(engine) = entry.slot.engine_mut() else {
-            return Err(AcceptError::Engine(Error::new(ErrorKind::Engine)));
-        };
-
-        Ok(engine)
+        Ok(())
     }
 
     fn find_index(&self, peer_id: P) -> Option<usize> {
@@ -213,8 +182,8 @@ mod tests {
     fn server_accepts_multiple_peers() {
         let mut endpoint = ServerEndpoint::<u8, 2>::default();
 
-        endpoint.engine_or_accept(1, 10).unwrap();
-        endpoint.engine_or_accept(2, 20).unwrap();
+        endpoint.accept(1, 10).unwrap();
+        endpoint.accept(2, 20).unwrap();
 
         assert!(endpoint.peer_mut(1).unwrap().has_session());
         assert!(endpoint.peer_mut(2).unwrap().has_session());
@@ -225,28 +194,31 @@ mod tests {
     fn server_reports_full_when_slots_are_occupied() {
         let mut endpoint = ServerEndpoint::<u8, 1>::default();
 
-        endpoint.engine_or_accept(1, 10).unwrap();
+        endpoint.accept(1, 10).unwrap();
 
-        assert_eq!(endpoint.engine_or_accept(2, 20), Err(AcceptError::Full));
+        assert_eq!(endpoint.accept(2, 20), Err(AcceptError::Full));
     }
 
     #[test]
     fn accept_replaces_existing_peer_engine() {
         let mut endpoint = ServerEndpoint::<u8, 1>::default();
 
-        let first_engine = endpoint.engine_or_accept(1, 1).unwrap();
-        let expected_after_reconnect = first_engine.send(b"hello").unwrap();
-        let engine = endpoint.accept(1, 2).unwrap();
+        endpoint.accept(1, 1).unwrap();
+        let expected_after_reconnect = endpoint.send(1, b"hello").unwrap().unwrap();
+        endpoint.accept(1, 2).unwrap();
 
-        assert_eq!(engine.send(b"hello").unwrap(), expected_after_reconnect);
+        assert_eq!(
+            endpoint.send(1, b"hello").unwrap().unwrap(),
+            expected_after_reconnect
+        );
     }
 
     #[test]
     fn server_disconnects_idle_peers() {
         let mut endpoint = ServerEndpoint::<u8, 2>::default();
 
-        endpoint.engine_or_accept(1, 10).unwrap();
-        endpoint.engine_or_accept(2, 20).unwrap();
+        endpoint.accept(1, 10).unwrap();
+        endpoint.accept(2, 20).unwrap();
 
         assert_eq!(endpoint.disconnect_idle(19, 10), 0);
         assert_eq!(endpoint.disconnect_idle(20, 10), 1);

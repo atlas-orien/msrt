@@ -1,6 +1,6 @@
 [package]
 name = "msrt"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2024"
 license = "Apache-2.0"
 authors = ["Atlas Orein <gamesworldcraft@gamil.com>"]
@@ -17,6 +17,7 @@ include = [
     "ROADMAP.md",
     "SPEC.md",
     "benches/**",
+    "examples/**",
     "src/**",
     "tests/**",
 ]
@@ -24,12 +25,10 @@ include = [
 [features]
 default = ["std"]
 std = []
-serial = ["std", "dep:serialport"]
 dynamic-recovery = []
 tracing = ["dep:tracing"]
 
 [dependencies]
-serialport = { version = "4", optional = true }
 tracing = { version = "0.1", optional = true }
 
 [dev-dependencies]
@@ -42,7 +41,3 @@ harness = false
 [[bench]]
 name = "poll"
 harness = false
-
-[[bin]]
-name = "msrt-serial-frontend"
-required-features = ["serial"]
