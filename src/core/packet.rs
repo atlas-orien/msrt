@@ -26,22 +26,22 @@ pub struct Packet<'a> {
 }
 
 impl<'a> Packet<'a> {
-    /// Creates a borrowed packet from a legacy header.
+    /// Creates a borrowed packet from a packet header.
     #[must_use]
     pub const fn new(header: PacketHeader, payload: &'a [u8]) -> Self {
-        Self::from_legacy_header(header, payload)
+        Self::from_header(header, payload)
     }
 
     /// Creates a borrowed DATA packet.
     #[must_use]
     pub const fn data(header: PacketHeader, payload: &'a [u8]) -> Self {
-        Self::from_legacy_header(header, payload)
+        Self::from_header(header, payload)
     }
 
     /// Creates a borrowed control packet without payload.
     #[must_use]
     pub const fn control(header: PacketHeader) -> Self {
-        Self::from_legacy_header(header, &[])
+        Self::from_header(header, &[])
     }
 
     /// Creates a borrowed packet from explicit kind-specific content.
@@ -50,7 +50,7 @@ impl<'a> Packet<'a> {
         Self { packet_type, body }
     }
 
-    const fn from_legacy_header(header: PacketHeader, payload: &'a [u8]) -> Self {
+    const fn from_header(header: PacketHeader, payload: &'a [u8]) -> Self {
         let packet_type = header.packet_type;
         let body = match header.body {
             header::PacketHeaderBody::Data { header, .. } => PacketBody::Data {
@@ -69,7 +69,7 @@ impl<'a> Packet<'a> {
         Self { packet_type, body }
     }
 
-    /// Returns a legacy header view for compatibility with old facade code.
+    /// Returns a packet header view for this packet.
     #[must_use]
     pub const fn header(self) -> PacketHeader {
         match self.body {
@@ -79,8 +79,8 @@ impl<'a> Packet<'a> {
                 header.message_id,
                 header.packet_index,
             )),
-            PacketBody::Ping { .. } => PacketHeader::ping(crate::core::MessageId::ZERO),
-            PacketBody::Pong { .. } => PacketHeader::pong(crate::core::MessageId::ZERO),
+            PacketBody::Ping { .. } => PacketHeader::ping(),
+            PacketBody::Pong { .. } => PacketHeader::pong(),
         }
     }
 

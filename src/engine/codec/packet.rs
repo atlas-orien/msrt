@@ -1,10 +1,10 @@
 //! v1 draft packet byte layout glue.
 
 use crate::core::{
-    Error, Flags, MessageId, PacketIndex, PacketKey, PacketType, Result,
+    DataHeader, Error, Flags, LogHeader, MessageId, PacketIndex, PacketKey, PacketType, Result,
     packet::header::{
         ACK_PACKET_HEADER_LEN, DATA_PACKET_HEADER_LEN, LIVENESS_PACKET_HEADER_LEN,
-        LOG_PACKET_HEADER_LEN, PacketHeader,
+        LOG_PACKET_HEADER_LEN, PacketHeader, PacketHeaderBody,
     },
 };
 
@@ -14,15 +14,15 @@ use crate::engine::config::MAX_WIRE_BYTES;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum PacketDecode<'a> {
     /// Data packet carrying one message fragment.
-    Data(DecodedFragment<'a>),
+    Data(DecodedData<'a>),
     /// Log packet carrying one best-effort log fragment.
-    Log(DecodedFragment<'a>),
+    Log(DecodedLog<'a>),
     /// ACK packet.
     Ack(DecodedAck),
     /// PING packet.
-    Ping(DecodedLiveness),
+    Ping,
     /// PONG packet.
-    Pong(DecodedLiveness),
+    Pong,
     /// Malformed packet bytes.
     Malformed,
 }
@@ -33,17 +33,26 @@ pub(crate) struct DecodedAck {
     pub(crate) key: PacketKey,
 }
 
-/// Decoded liveness packet.
+/// Decoded DATA packet.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct DecodedLiveness {
-    pub(crate) packet_type: PacketType,
+pub(crate) struct DecodedData<'a> {
+    pub(crate) header: DataHeader,
+    pub(crate) fragment: MessageFragment<'a>,
+}
+
+/// Decoded LOG packet.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct DecodedLog<'a> {
+    pub(crate) header: LogHeader,
+    pub(crate) fragment: MessageFragment<'a>,
 }
 
 /// Decoded message fragment.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct DecodedFragment<'a> {
-    pub(crate) header: PacketHeader,
+pub(crate) struct MessageFragment<'a> {
     pub(crate) packet_type: PacketType,
+    pub(crate) packet_index: PacketIndex,
+    pub(crate) ack_eliciting: bool,
     pub(crate) message_id: MessageId,
     pub(crate) message_len: usize,
     pub(crate) fragment_offset: usize,
@@ -95,13 +104,13 @@ fn decode_packet_bytes(bytes: &[u8]) -> PacketDecode<'_> {
         bytes.first().and_then(|code| PacketType::from_code(*code)),
         Some(PacketType::Ping | PacketType::Pong)
     ) {
-        return liveness_from_packet_bytes(bytes)
-            .map(|liveness| match liveness.packet_type {
-                PacketType::Ping => PacketDecode::Ping(liveness),
-                PacketType::Pong => PacketDecode::Pong(liveness),
-                PacketType::Data | PacketType::Log | PacketType::Ack => PacketDecode::Malformed,
-            })
-            .unwrap_or(PacketDecode::Malformed);
+        return match liveness_from_packet_bytes(bytes) {
+            Some(PacketType::Ping) => PacketDecode::Ping,
+            Some(PacketType::Pong) => PacketDecode::Pong,
+            Some(PacketType::Data | PacketType::Log | PacketType::Ack) | None => {
+                PacketDecode::Malformed
+            }
+        };
     }
 
     let Some(header) = packet_header_from_bytes(bytes) else {
@@ -109,10 +118,10 @@ fn decode_packet_bytes(bytes: &[u8]) -> PacketDecode<'_> {
     };
 
     match header.packet_type {
-        PacketType::Data => fragment_from_packet_bytes(header, bytes)
+        PacketType::Data => data_from_packet_bytes(header, bytes)
             .map(PacketDecode::Data)
             .unwrap_or(PacketDecode::Malformed),
-        PacketType::Log => fragment_from_packet_bytes(header, bytes)
+        PacketType::Log => log_from_packet_bytes(header, bytes)
             .map(PacketDecode::Log)
             .unwrap_or(PacketDecode::Malformed),
         PacketType::Ack => PacketDecode::Malformed,
@@ -182,7 +191,34 @@ fn ack_from_packet_bytes(bytes: &[u8]) -> Option<DecodedAck> {
     })
 }
 
-fn fragment_from_packet_bytes(header: PacketHeader, bytes: &[u8]) -> Option<DecodedFragment<'_>> {
+fn data_from_packet_bytes(header: PacketHeader, bytes: &[u8]) -> Option<DecodedData<'_>> {
+    let PacketHeaderBody::Data {
+        header: data_header,
+    } = header.body
+    else {
+        return None;
+    };
+    let fragment = fragment_from_packet_bytes(header, bytes)?;
+
+    Some(DecodedData {
+        header: data_header,
+        fragment,
+    })
+}
+
+fn log_from_packet_bytes(header: PacketHeader, bytes: &[u8]) -> Option<DecodedLog<'_>> {
+    let PacketHeaderBody::Log { header: log_header } = header.body else {
+        return None;
+    };
+    let fragment = fragment_from_packet_bytes(header, bytes)?;
+
+    Some(DecodedLog {
+        header: log_header,
+        fragment,
+    })
+}
+
+fn fragment_from_packet_bytes(header: PacketHeader, bytes: &[u8]) -> Option<MessageFragment<'_>> {
     let header_len = match header.packet_type {
         PacketType::Data => DATA_PACKET_HEADER_LEN,
         PacketType::Log => LOG_PACKET_HEADER_LEN,
@@ -201,9 +237,10 @@ fn fragment_from_packet_bytes(header: PacketHeader, bytes: &[u8]) -> Option<Deco
         return None;
     }
 
-    Some(DecodedFragment {
-        header,
+    Some(MessageFragment {
         packet_type: header.packet_type,
+        packet_index: header.packet_index(),
+        ack_eliciting: header.is_ack_eliciting(),
         message_id: header.message_id(),
         message_len: header.message_len(),
         fragment_offset: header.fragment_offset(),
@@ -211,7 +248,7 @@ fn fragment_from_packet_bytes(header: PacketHeader, bytes: &[u8]) -> Option<Deco
     })
 }
 
-fn liveness_from_packet_bytes(bytes: &[u8]) -> Option<DecodedLiveness> {
+fn liveness_from_packet_bytes(bytes: &[u8]) -> Option<PacketType> {
     if bytes.len() != LIVENESS_PACKET_HEADER_LEN {
         return None;
     }
@@ -221,5 +258,5 @@ fn liveness_from_packet_bytes(bytes: &[u8]) -> Option<DecodedLiveness> {
         return None;
     }
 
-    Some(DecodedLiveness { packet_type })
+    Some(packet_type)
 }

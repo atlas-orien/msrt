@@ -4,7 +4,7 @@ use crate::core::{Error, ErrorKind, MessageId, PacketType, Result};
 
 use crate::engine::{
     MessageEvent,
-    codec::packet::DecodedFragment,
+    codec::packet::MessageFragment,
     config::{MAX_MESSAGE_BYTES, MAX_REASSEMBLY_MESSAGES},
 };
 
@@ -23,7 +23,7 @@ impl ReassemblyState {
 
     pub(crate) fn observe(
         &mut self,
-        fragment: DecodedFragment<'_>,
+        fragment: MessageFragment<'_>,
         now_ms: u64,
     ) -> Result<Option<MessageEvent>> {
         if fragment.message_len > MAX_MESSAGE_BYTES {
@@ -59,7 +59,7 @@ impl ReassemblyState {
     fn allocate_slot(
         &mut self,
         key: MessageKey,
-        fragment: DecodedFragment<'_>,
+        fragment: MessageFragment<'_>,
         now_ms: u64,
     ) -> Result<usize> {
         let index = self
@@ -126,7 +126,7 @@ impl ReassemblySlot {
 
     fn observe(
         &mut self,
-        fragment: DecodedFragment<'_>,
+        fragment: MessageFragment<'_>,
         now_ms: u64,
     ) -> Result<Option<MessageEvent>> {
         if self.expected_len != fragment.message_len {

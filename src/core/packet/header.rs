@@ -108,24 +108,22 @@ impl PacketHeader {
 
     /// Creates a PING packet header.
     #[must_use]
-    pub const fn ping(message_id: MessageId) -> Self {
+    pub const fn ping() -> Self {
         Self {
             packet_type: PacketType::Ping,
             body: PacketHeaderBody::Ping {
                 header: PingHeader::new(),
-                legacy_message_id: message_id,
             },
         }
     }
 
     /// Creates a PONG packet header.
     #[must_use]
-    pub const fn pong(message_id: MessageId) -> Self {
+    pub const fn pong() -> Self {
         Self {
             packet_type: PacketType::Pong,
             body: PacketHeaderBody::Pong {
                 header: PongHeader::new(),
-                legacy_message_id: message_id,
             },
         }
     }
@@ -161,12 +159,7 @@ impl PacketHeader {
             PacketHeaderBody::Data { header, .. } => header.message_id,
             PacketHeaderBody::Log { header, .. } => header.message_id,
             PacketHeaderBody::Ack { header, .. } => header.message_id,
-            PacketHeaderBody::Ping {
-                legacy_message_id, ..
-            }
-            | PacketHeaderBody::Pong {
-                legacy_message_id, ..
-            } => legacy_message_id,
+            PacketHeaderBody::Ping { .. } | PacketHeaderBody::Pong { .. } => MessageId::ZERO,
         }
     }
 

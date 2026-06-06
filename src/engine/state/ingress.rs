@@ -1,6 +1,6 @@
 //! Incoming wire byte handling.
 
-use crate::core::{Error, ErrorKind};
+use crate::core::{Error, ErrorKind, PacketKey};
 use crate::integrity::Integrity;
 use crate::reliability::{Dedup, DedupDecision};
 use crate::wire::{StreamDecodeOutcome, StreamingDecoder};
@@ -93,9 +93,9 @@ impl EngineState {
     ) -> ReceiveReport {
         match packet.decode() {
             PacketDecode::Data(fragment) => {
-                let packet_index = fragment.header.packet_index();
-                let key = fragment.header.key();
-                let ack_eliciting = fragment.header.is_ack_eliciting();
+                let packet_index = fragment.fragment.packet_index;
+                let key = PacketKey::new(fragment.fragment.message_id, packet_index);
+                let ack_eliciting = fragment.fragment.ack_eliciting;
 
                 if self.receive.dedup().is_duplicate(key) {
                     if ack_eliciting && self.queue_ack(key).is_err() {
@@ -104,7 +104,10 @@ impl EngineState {
                     return ReceiveReport::Duplicate { packet_index };
                 }
 
-                let report = match self.reassembly.observe(fragment, self.clock.now_ms()) {
+                let report = match self
+                    .reassembly
+                    .observe(fragment.fragment, self.clock.now_ms())
+                {
                     Ok(Some(mut message)) => {
                         let _ = config;
                         message.packet_type = crate::core::PacketType::Data;
@@ -134,9 +137,12 @@ impl EngineState {
                 report
             }
             PacketDecode::Log(fragment) => {
-                let packet_index = fragment.header.packet_index();
+                let packet_index = fragment.fragment.packet_index;
 
-                match self.reassembly.observe(fragment, self.clock.now_ms()) {
+                match self
+                    .reassembly
+                    .observe(fragment.fragment, self.clock.now_ms())
+                {
                     Ok(Some(mut message)) => {
                         message.packet_type = crate::core::PacketType::Log;
                         self.message.push(message);
@@ -151,14 +157,13 @@ impl EngineState {
                 self.recovery.apply_ack(ack.key);
                 ReceiveReport::Ack { packet_index }
             }
-            PacketDecode::Ping(ping) => {
-                let _ = ping;
+            PacketDecode::Ping => {
                 if self.queue_pong(config).is_err() {
                     return ReceiveReport::Error(Error::new(ErrorKind::Engine));
                 }
                 ReceiveReport::Ping
             }
-            PacketDecode::Pong(_) => ReceiveReport::Pong,
+            PacketDecode::Pong => ReceiveReport::Pong,
             PacketDecode::Malformed => ReceiveReport::Corrupted,
         }
     }
