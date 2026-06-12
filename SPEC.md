@@ -1,6 +1,6 @@
 # MSRT Protocol Standard
 
-MSRT, MSRT, is a protocol standard for message-oriented realtime serial links.
+MSRT is a protocol standard for message-oriented realtime serial links.
 
 This document is intentionally high level. The current goal is to keep protocol ownership and crate boundaries clear while the first no-std draft is hardened.
 
@@ -13,11 +13,13 @@ The MSRT standard owns:
 - core protocol primitive types
 - packet and protocol frame boundaries
 - wire envelope boundaries
-- channel identity and routing semantics
 - acknowledgement and partial-reliability concepts
-- ordering, deduplication, timeout, and sliding-window contracts
+- deduplication, timeout, and retransmission contracts
 - protocol engine behavior for send, receive, response, and progress
 - error surfaces shared by all implementations
+
+Application routing belongs inside the payload format. The MSRT packet header
+has no channel field.
 
 The MSRT standard does not own:
 
@@ -54,5 +56,4 @@ The crate enables `std` by default, but it can be built with `default-features =
 
 Packet integrity is selected when an `Engine` is initialized. The default `EngineConfig` uses CRC-16/XMODEM. Other backends, such as CRC-32, CRC-64, or lightweight keyed validation, are selected in code through `EngineConfig::integrity`; no runtime configuration file is required by the protocol core.
 
-See [MSRT v1 Stable Protocol Draft](architectures/v1/srt-stable-protocol-draft.md) for the current v1 draft wire and packet model.
-See [MSRT v1 Reliable Transport Plan](architectures/v1/srt-reliable-transport-plan.md) for the remaining v1 reliability work.
+See the documents under [architectures/](architectures/README.md) for the current wire, packet, reliability, and endpoint boundaries.

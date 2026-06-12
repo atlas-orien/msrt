@@ -1,10 +1,15 @@
 //! Packet integrity backends.
+//!
+//! CRC backends detect random corruption with a collision probability of
+//! 2^-16 to 2^-64 depending on width. [`SipTag`] is a 128-bit keyed tag for
+//! links where even rare CRC false accepts are unacceptable; see the module
+//! documentation in [`sip`] for the rationale and the security boundary.
 
-pub mod aead;
 pub mod crc;
+pub mod sip;
 
-pub use aead::Aead;
 pub use crc::{Crc16, Crc32, Crc64};
+pub use sip::SipTag;
 
 /// Packet integrity backend selected by engine configuration.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -15,8 +20,8 @@ pub enum IntegrityConfig {
     Crc32(Crc32),
     /// CRC-64/ECMA-182 packet integrity.
     Crc64(Crc64),
-    /// Lightweight keyed packet integrity.
-    Aead(Aead),
+    /// Keyed 128-bit packet integrity tag.
+    SipTag(SipTag),
 }
 
 impl IntegrityConfig {
@@ -41,16 +46,16 @@ impl IntegrityConfig {
         Self::Crc64(Crc64)
     }
 
-    /// Creates a lightweight keyed integrity configuration.
+    /// Creates a keyed integrity tag configuration with the library default key.
     #[must_use]
-    pub const fn aead() -> Self {
-        Self::Aead(Aead::DEFAULT)
+    pub const fn sip_tag() -> Self {
+        Self::SipTag(SipTag::DEFAULT)
     }
 
-    /// Creates a lightweight keyed integrity configuration with a custom key.
+    /// Creates a keyed integrity tag configuration with a custom key.
     #[must_use]
-    pub const fn aead_with_key(key: [u8; Aead::KEY_LEN]) -> Self {
-        Self::Aead(Aead::new(key))
+    pub const fn sip_tag_with_key(key: [u8; SipTag::KEY_LEN]) -> Self {
+        Self::SipTag(SipTag::new(key))
     }
 }
 
@@ -66,7 +71,7 @@ impl Integrity for IntegrityConfig {
             Self::Crc16(integrity) => integrity.tag_len(),
             Self::Crc32(integrity) => integrity.tag_len(),
             Self::Crc64(integrity) => integrity.tag_len(),
-            Self::Aead(integrity) => integrity.tag_len(),
+            Self::SipTag(integrity) => integrity.tag_len(),
         }
     }
 
@@ -75,7 +80,7 @@ impl Integrity for IntegrityConfig {
             Self::Crc16(integrity) => integrity.seal(bytes, out),
             Self::Crc32(integrity) => integrity.seal(bytes, out),
             Self::Crc64(integrity) => integrity.seal(bytes, out),
-            Self::Aead(integrity) => integrity.seal(bytes, out),
+            Self::SipTag(integrity) => integrity.seal(bytes, out),
         }
     }
 
@@ -84,7 +89,7 @@ impl Integrity for IntegrityConfig {
             Self::Crc16(integrity) => integrity.verify(bytes, tag),
             Self::Crc32(integrity) => integrity.verify(bytes, tag),
             Self::Crc64(integrity) => integrity.verify(bytes, tag),
-            Self::Aead(integrity) => integrity.verify(bytes, tag),
+            Self::SipTag(integrity) => integrity.verify(bytes, tag),
         }
     }
 }

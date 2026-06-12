@@ -1,22 +1,35 @@
-//! Lightweight keyed packet integrity backend.
+//! Keyed packet integrity tag backend (SipHash-2-4-128).
 //!
-//! This backend authenticates wire bytes with a fixed-size keyed tag. It does
-//! not encrypt payload bytes; its purpose is to reject packets that are not
-//! valid MSRT data for the configured key.
+//! This backend authenticates wire bytes with a 128-bit keyed tag. It does
+//! not encrypt payload bytes and it does not provide confidentiality; its
+//! purpose is to reject packets that are not valid MSRT data for the
+//! configured key.
+//!
+//! Why this exists: stress testing showed that CRC-16 accepts a corrupted
+//! packet roughly once per ten million noisy packets (the expected 2^-16
+//! collision rate). An accepted corrupt packet can never be retransmitted,
+//! so reliable delivery silently breaks. A 128-bit keyed tag pushes the
+//! false-accept probability to 2^-128, which is effectively never.
+//!
+//! The tag is the official 128-bit output variant of SipHash-2-4. The
+//! library default key is a fixed public constant: it provides corruption
+//! rejection and cross-protocol discrimination, not protection against an
+//! active attacker. Applications that want sender authentication must supply
+//! their own key via [`crate::integrity::IntegrityConfig::sip_tag_with_key`].
 
 use super::Integrity;
 
-const DEFAULT_KEY: [u8; Aead::KEY_LEN] = [
+const DEFAULT_KEY: [u8; SipTag::KEY_LEN] = [
     0x6d, 0x73, 0x72, 0x74, 0x2d, 0x61, 0x65, 0x61, 0x64, 0x2d, 0x76, 0x31, 0x2d, 0x74, 0x61, 0x67,
 ];
 
-/// Lightweight keyed packet integrity backend.
+/// Keyed packet integrity tag backend.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct Aead {
+pub struct SipTag {
     key: [u8; Self::KEY_LEN],
 }
 
-impl Aead {
+impl SipTag {
     /// Encoded authentication tag length.
     pub const TAG_LEN: usize = 16;
 
@@ -36,18 +49,7 @@ impl Aead {
     #[must_use]
     pub fn calculate(self, bytes: &[u8]) -> [u8; Self::TAG_LEN] {
         let (k0, k1) = self.keys();
-        let left = siphash24(bytes, k0, k1);
-        let right = siphash24(
-            bytes,
-            k0 ^ 0x736f_6d65_7073_6575,
-            k1 ^ 0x646f_7261_6e64_6f6d,
-        );
-        let mut tag = [0; Self::TAG_LEN];
-
-        tag[..8].copy_from_slice(&left.to_le_bytes());
-        tag[8..].copy_from_slice(&right.to_le_bytes());
-
-        tag
+        siphash24_128(bytes, k0, k1)
     }
 
     fn keys(self) -> (u64, u64) {
@@ -76,13 +78,13 @@ impl Aead {
     }
 }
 
-impl Default for Aead {
+impl Default for SipTag {
     fn default() -> Self {
         Self::DEFAULT
     }
 }
 
-impl Integrity for Aead {
+impl Integrity for SipTag {
     fn tag_len(&self) -> usize {
         Self::TAG_LEN
     }
@@ -106,10 +108,11 @@ impl Integrity for Aead {
     }
 }
 
-fn siphash24(bytes: &[u8], k0: u64, k1: u64) -> u64 {
+/// Official SipHash-2-4 with 128-bit output.
+fn siphash24_128(bytes: &[u8], k0: u64, k1: u64) -> [u8; 16] {
     let mut state = SipState {
         v0: k0 ^ 0x736f_6d65_7073_6575,
-        v1: k1 ^ 0x646f_7261_6e64_6f6d,
+        v1: k1 ^ 0x646f_7261_6e64_6f6d ^ 0xee,
         v2: k0 ^ 0x6c79_6765_6e65_7261,
         v3: k1 ^ 0x7465_6462_7974_6573,
     };
@@ -140,7 +143,7 @@ impl SipState {
         self.v0 ^= word;
     }
 
-    fn finish(mut self, len: usize, tail: &[u8]) -> u64 {
+    fn finish(mut self, len: usize, tail: &[u8]) -> [u8; 16] {
         let mut last = (len as u64) << 56;
         let mut index = 0;
 
@@ -150,10 +153,19 @@ impl SipState {
         }
 
         self.compress(last);
-        self.v2 ^= 0xff;
+        self.v2 ^= 0xee;
         self.rounds(4);
+        let left = self.v0 ^ self.v1 ^ self.v2 ^ self.v3;
 
-        self.v0 ^ self.v1 ^ self.v2 ^ self.v3
+        self.v1 ^= 0xdd;
+        self.rounds(4);
+        let right = self.v0 ^ self.v1 ^ self.v2 ^ self.v3;
+
+        let mut tag = [0; 16];
+        tag[..8].copy_from_slice(&left.to_le_bytes());
+        tag[8..].copy_from_slice(&right.to_le_bytes());
+
+        tag
     }
 
     fn rounds(&mut self, count: u8) {
@@ -188,13 +200,13 @@ impl SipState {
 
 #[cfg(test)]
 mod tests {
-    use super::{Aead, Integrity, siphash24};
+    use super::{Integrity, SipTag, siphash24_128};
 
     #[test]
-    fn aead_verifies_calculated_value() {
-        let integrity = Aead::DEFAULT;
+    fn sip_tag_verifies_calculated_value() {
+        let integrity = SipTag::DEFAULT;
         let bytes = [1, 2, 3];
-        let mut tag = [0; Aead::TAG_LEN];
+        let mut tag = [0; SipTag::TAG_LEN];
 
         integrity.seal(&bytes, &mut tag);
 
@@ -204,11 +216,11 @@ mod tests {
     }
 
     #[test]
-    fn aead_rejects_different_keys() {
-        let left = Aead::new([1; Aead::KEY_LEN]);
-        let right = Aead::new([2; Aead::KEY_LEN]);
+    fn sip_tag_rejects_different_keys() {
+        let left = SipTag::new([1; SipTag::KEY_LEN]);
+        let right = SipTag::new([2; SipTag::KEY_LEN]);
         let bytes = b"msrt";
-        let mut tag = [0; Aead::TAG_LEN];
+        let mut tag = [0; SipTag::TAG_LEN];
 
         left.seal(bytes, &mut tag);
 
@@ -216,10 +228,33 @@ mod tests {
     }
 
     #[test]
-    fn siphash24_matches_reference_vector() {
+    fn siphash24_128_matches_reference_vectors() {
+        // Reference vectors from the SipHash reference implementation
+        // (vectors_sip128) with key 00 01 .. 0f.
+        let k0 = 0x0706_0504_0302_0100;
+        let k1 = 0x0f0e_0d0c_0b0a_0908;
+        let input: [u8; 15] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
+
         assert_eq!(
-            siphash24(&[], 0x0706_0504_0302_0100, 0x0f0e_0d0c_0b0a_0908),
-            0x726f_db47_dd0e_0e31
+            siphash24_128(&[], k0, k1),
+            [
+                0xa3, 0x81, 0x7f, 0x04, 0xba, 0x25, 0xa8, 0xe6, 0x6d, 0xf6, 0x72, 0x14, 0xc7, 0x55,
+                0x02, 0x93,
+            ]
+        );
+        assert_eq!(
+            siphash24_128(&[0], k0, k1),
+            [
+                0xda, 0x87, 0xc1, 0xd8, 0x6b, 0x99, 0xaf, 0x44, 0x34, 0x76, 0x59, 0x11, 0x9b, 0x22,
+                0xfc, 0x45,
+            ]
+        );
+        assert_eq!(
+            siphash24_128(&input, k0, k1),
+            [
+                0x54, 0x93, 0xe9, 0x99, 0x33, 0xb0, 0xa8, 0x11, 0x7e, 0x08, 0xec, 0x0f, 0x97, 0xcf,
+                0xc3, 0xd9,
+            ]
         );
     }
 }

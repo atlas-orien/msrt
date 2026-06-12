@@ -1,6 +1,6 @@
 //! Peer session slot shared by endpoint managers.
 
-use crate::core::{Error, ErrorKind, Result};
+use crate::core::Result;
 use crate::endpoint::{EngineConfig, MessageEvent, MessageId, ReceiveReport, SendFailedEvent};
 use crate::engine::{Engine, EnginePoll};
 
@@ -92,16 +92,14 @@ impl PeerSlot {
 
     /// Creates a fresh engine and queues a small hello message.
     pub fn connect(&mut self, now_ms: u64) -> Result<MessageId> {
-        self.engine = Some(Engine::new(self.config));
         self.state = PeerState::Connecting;
         self.last_seen_ms = now_ms;
         self.last_ping_ms = now_ms;
         self.pending_ping = false;
-        let Some(engine) = self.engine.as_mut() else {
-            return Err(Error::new(ErrorKind::Engine));
-        };
 
-        engine.send(HELLO_MESSAGE)
+        self.engine
+            .insert(Engine::new(self.config))
+            .send(HELLO_MESSAGE)
     }
 
     /// Creates a fresh engine without queueing a hello message.
@@ -122,21 +120,20 @@ impl PeerSlot {
         self.pending_ping = false;
     }
 
-    /// Creates a passive engine if needed and returns the active engine.
-    pub(crate) fn engine_or_accept_passive(&mut self, now_ms: u64) -> Result<&mut Engine> {
+    /// Creates a passive engine if needed and records peer activity.
+    pub(crate) fn accept_passive_if_needed(&mut self, now_ms: u64) {
         if self.engine.is_none() {
             self.accept_passive(now_ms);
         }
 
         self.last_seen_ms = now_ms;
-        let Some(engine) = self.engine.as_mut() else {
-            return Err(Error::new(ErrorKind::Engine));
-        };
-
-        Ok(engine)
     }
 
     /// Queues an application message on the active engine.
+    ///
+    /// Returns `Ok(None)` when no session exists; the message is **not**
+    /// queued and will not be sent later. Callers that require delivery must
+    /// check for `None` instead of treating any `Ok` as success.
     pub fn send(&mut self, message: &[u8]) -> Result<Option<MessageId>> {
         let Some(engine) = self.engine.as_mut() else {
             return Ok(None);
@@ -292,7 +289,7 @@ mod tests {
     #[test]
     fn receive_error_drops_engine_session() {
         let mut peer = PeerSlot::default();
-        peer.engine_or_accept_passive(1).unwrap();
+        peer.accept_passive_if_needed(1);
 
         let oversized = [0; crate::engine::config::MAX_INGRESS_BYTES + 1];
         assert!(matches!(

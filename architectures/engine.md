@@ -56,12 +56,18 @@ Engine::new(EngineConfig::default())
 
 ```rust
 Engine::new(EngineConfig {
-  integrity: IntegrityConfig::aead(),
+  integrity: IntegrityConfig::sip_tag(),
   ..EngineConfig::default()
 })
 ```
 
-两端必须使用相同的 `integrity` 配置。`IntegrityConfig::aead()` 使用库内默认 key；如果需要应用自己控制 key，可以使用 `IntegrityConfig::aead_with_key(key)`。
+两端必须使用相同的 `integrity` 配置。`IntegrityConfig::sip_tag()` 使用库内默认 key；如果需要应用自己控制 key，可以使用 `IntegrityConfig::sip_tag_with_key(key)`。
+
+选择 `sip_tag` 的依据来自压力测试：CRC-16 对随机损坏的漏检率是 2^-16，
+实测大约每一千万个噪声包出现一次"坏包通过校验"。被接受的坏包不会触发重传，
+可靠传输就会静默失效。`sip_tag` 是标准 SipHash-2-4-128 的 128-bit keyed tag，
+把漏检率压到 2^-128。它不加密载荷；默认 key 是公开常量，目标是拒绝损坏和
+串协议数据，不是对抗主动攻击者。
 
 `EngineConfig` 同时包含可靠发送的默认固定恢复参数：
 

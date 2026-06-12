@@ -43,8 +43,8 @@ impl Crc8 {
 /// CRC-16/XMODEM packet integrity.
 ///
 /// This backend is intended for random-noise detection, not adversarial
-/// authentication. Stronger keyed or AEAD backends can implement [`Integrity`]
-/// without changing engine or reliability logic.
+/// authentication. Stronger keyed backends such as [`super::SipTag`] implement
+/// [`Integrity`] without changing engine or reliability logic.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct Crc16;
 

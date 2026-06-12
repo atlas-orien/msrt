@@ -26,9 +26,9 @@ pub(crate) const DEFAULT_FRAGMENT_BYTES: usize = 64;
 /// Default maximum retransmission attempts before a send fails.
 ///
 /// This gives a reliable packet one initial send plus five retransmission
-/// opportunities. With the default 250 ms timeout, a missing ACK is reported
-/// after roughly 1.5 s, which is conservative for UART-like MCU links without
-/// hiding disconnects for too long.
+/// opportunities. With the default 50 ms timeout, a missing ACK is reported
+/// after roughly 300 ms, which is responsive for UART-like MCU links without
+/// declaring disconnects too eagerly.
 pub(crate) const DEFAULT_MAX_RETRANSMIT_ATTEMPTS: u8 = 5;
 /// Default retransmission timeout in engine ticks.
 pub(crate) const DEFAULT_RETRANSMIT_TIMEOUT_MS: u64 = 50;

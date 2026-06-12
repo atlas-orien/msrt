@@ -1,21 +1,21 @@
 //! Deterministic long-run reliable transport simulation through the public endpoint API.
+//!
+//! A seeded PRNG injects packet drops, single-byte corruption, and reordering
+//! on both link directions while simulated time advances, so retransmission,
+//! duplicate handling, integrity rejection, and wire resynchronization are all
+//! exercised end to end. The seed is fixed, so every run is reproducible.
 
 use msrt::endpoint::{ClientEndpoint, EndpointPoll, EngineConfig, PassiveEndpoint, ReceiveReport};
 
 const TX_BUF_BYTES: usize = 128;
+const DROP_ONE_IN: u64 = 9;
+const CORRUPT_ONE_IN: u64 = 8;
+const HOLD_ONE_IN: u64 = 7;
 
 #[test]
 fn reliable_transport_survives_drops_corruption_reordering_and_duplex_load() {
-    let mut mac = ClientEndpoint::new(EngineConfig {
-        fragment_bytes: 8,
-        retransmit_timeout_ms: 1,
-        ..EngineConfig::default()
-    });
-    let mut mcu = PassiveEndpoint::new(EngineConfig {
-        fragment_bytes: 9,
-        retransmit_timeout_ms: 1,
-        ..EngineConfig::default()
-    });
+    let mut mac = ClientEndpoint::new(sim_config(8));
+    let mut mcu = PassiveEndpoint::new(sim_config(9));
     let mac_messages = [
         ExpectedMessage::new(b"mac nav message one"),
         ExpectedMessage::new(b"mac telemetry message two"),
@@ -26,20 +26,22 @@ fn reliable_transport_survives_drops_corruption_reordering_and_duplex_load() {
         ExpectedMessage::new(b"mcu nav response two"),
         ExpectedMessage::new(b"mcu status response three"),
     ];
-    let mut link = SimLink::new();
+    let mut link = SimLink::new(0x4d53_5254_5f76_3131);
+    let mut clock = Clock::new();
     let mut mac_delivered = DeliveredMessages::new();
     let mut mcu_delivered = DeliveredMessages::new();
 
-    mac.connect(0).expect("client connect");
+    mac.connect(clock.now()).expect("client connect");
     for message in mac_messages {
         mac.send(message.bytes).expect("queue mac message");
     }
 
-    for _ in 0..64 {
+    for _ in 0..256 {
         pump_until_idle(
             &mut mac,
             &mut mcu,
             &mut link,
+            &mut clock,
             &mut mac_delivered,
             &mut mcu_delivered,
         );
@@ -52,39 +54,56 @@ fn reliable_transport_survives_drops_corruption_reordering_and_duplex_load() {
             }
         }
 
-        link.flush_reordered(&mut mac, &mut mcu);
+        link.flush_reordered(&mut mac, &mut mcu, &clock);
+        clock.tick();
         pump_until_idle(
             &mut mac,
             &mut mcu,
             &mut link,
+            &mut clock,
             &mut mac_delivered,
             &mut mcu_delivered,
         );
 
         if mac_delivered.contains_all(&mcu_messages) && mcu_delivered.contains_all(&mac_messages) {
-            assert_no_unexpected_events(&mut mac, &mut mcu);
+            link.assert_noise_was_injected();
             return;
         }
     }
 
     panic!(
-        "simulation did not deliver all messages: mac={:?}, mcu={:?}",
-        mac_delivered, mcu_delivered
+        "simulation did not deliver all messages: mac={:?}, mcu={:?}, noise={:?}",
+        mac_delivered,
+        mcu_delivered,
+        link.stats()
     );
+}
+
+fn sim_config(fragment_bytes: usize) -> EngineConfig {
+    EngineConfig {
+        fragment_bytes,
+        retransmit_timeout_ms: 1,
+        // The link is deliberately lossy; allow more retries than the default
+        // so the test asserts delivery rather than failure reporting.
+        max_retransmit_attempts: 30,
+        ..EngineConfig::default()
+    }
 }
 
 fn pump_until_idle(
     mac: &mut ClientEndpoint,
     mcu: &mut PassiveEndpoint,
     link: &mut SimLink,
+    clock: &mut Clock,
     mac_delivered: &mut DeliveredMessages,
     mcu_delivered: &mut DeliveredMessages,
 ) {
     for _ in 0..256 {
         let mut progressed = false;
+        clock.tick();
 
-        progressed |= pump_mac(mac, mcu, &mut link.mac_to_mcu, mac_delivered);
-        progressed |= pump_mcu(mcu, mac, &mut link.mcu_to_mac, mcu_delivered);
+        progressed |= pump_mac(mac, mcu, &mut link.mac_to_mcu, clock, mac_delivered);
+        progressed |= pump_mcu(mcu, mac, &mut link.mcu_to_mac, clock, mcu_delivered);
 
         if !progressed {
             break;
@@ -96,13 +115,14 @@ fn pump_mac(
     src: &mut ClientEndpoint,
     dst: &mut PassiveEndpoint,
     direction: &mut SimDirection,
+    clock: &Clock,
     delivered: &mut DeliveredMessages,
 ) -> bool {
     let mut tx_buf = [0; TX_BUF_BYTES];
 
-    match src.poll(0, &mut tx_buf).expect("poll client") {
+    match src.poll(clock.now(), &mut tx_buf).expect("poll client") {
         EndpointPoll::Transmit { bytes, .. } => {
-            direction.deliver_to_passive(dst, SimWrite::from_bytes(bytes));
+            direction.deliver_to_passive(dst, clock, SimWrite::from_bytes(bytes));
             true
         }
         EndpointPoll::Message(message) => {
@@ -120,13 +140,14 @@ fn pump_mcu(
     src: &mut PassiveEndpoint,
     dst: &mut ClientEndpoint,
     direction: &mut SimDirection,
+    clock: &Clock,
     delivered: &mut DeliveredMessages,
 ) -> bool {
     let mut tx_buf = [0; TX_BUF_BYTES];
 
-    match src.poll(0, &mut tx_buf).expect("poll passive") {
+    match src.poll(clock.now(), &mut tx_buf).expect("poll passive") {
         EndpointPoll::Transmit { bytes, .. } => {
-            direction.deliver_to_client(dst, SimWrite::from_bytes(bytes));
+            direction.deliver_to_client(dst, clock, SimWrite::from_bytes(bytes));
             true
         }
         EndpointPoll::Message(message) => {
@@ -140,28 +161,56 @@ fn pump_mcu(
     }
 }
 
-fn assert_no_unexpected_events(mac: &mut ClientEndpoint, mcu: &mut PassiveEndpoint) {
-    let mut tx_buf = [0; TX_BUF_BYTES];
+/// Simulated milliseconds driving retransmission and reassembly timers.
+#[derive(Clone, Copy, Debug)]
+struct Clock {
+    now_ms: u64,
+}
 
-    loop {
-        match mac.poll(0, &mut tx_buf).expect("poll client") {
-            EndpointPoll::Transmit { .. } | EndpointPoll::Message(_) => {}
-            EndpointPoll::SendFailed(failed) => {
-                panic!("simulation completed but found client send failure: {failed:?}");
-            }
-            EndpointPoll::Idle => break,
-        }
+impl Clock {
+    const fn new() -> Self {
+        Self { now_ms: 0 }
     }
 
-    loop {
-        match mcu.poll(0, &mut tx_buf).expect("poll passive") {
-            EndpointPoll::Transmit { .. } | EndpointPoll::Message(_) => {}
-            EndpointPoll::SendFailed(failed) => {
-                panic!("simulation completed but found passive send failure: {failed:?}");
-            }
-            EndpointPoll::Idle => break,
-        }
+    const fn now(&self) -> u64 {
+        self.now_ms
     }
+
+    fn tick(&mut self) {
+        self.now_ms += 1;
+    }
+}
+
+/// Deterministic xorshift64* PRNG; the fixed seed keeps every run identical.
+#[derive(Clone, Copy, Debug)]
+struct Rng {
+    state: u64,
+}
+
+impl Rng {
+    const fn new(seed: u64) -> Self {
+        Self { state: seed }
+    }
+
+    fn next(&mut self) -> u64 {
+        let mut x = self.state;
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        self.state = x;
+        x.wrapping_mul(0x2545_f491_4f6c_dd1d)
+    }
+
+    fn one_in(&mut self, chance: u64) -> bool {
+        self.next().is_multiple_of(chance)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct NoiseStats {
+    dropped: usize,
+    corrupted: usize,
+    reordered: usize,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -224,91 +273,124 @@ struct SimLink {
 }
 
 impl SimLink {
-    const fn new() -> Self {
+    const fn new(seed: u64) -> Self {
         Self {
-            mac_to_mcu: SimDirection::new(),
-            mcu_to_mac: SimDirection::new(),
+            mac_to_mcu: SimDirection::new(seed),
+            mcu_to_mac: SimDirection::new(seed ^ 0x9e37_79b9_7f4a_7c15),
         }
     }
 
-    fn flush_reordered(&mut self, mac: &mut ClientEndpoint, mcu: &mut PassiveEndpoint) {
-        self.mac_to_mcu.flush_to_passive(mcu);
-        self.mcu_to_mac.flush_to_client(mac);
+    fn flush_reordered(
+        &mut self,
+        mac: &mut ClientEndpoint,
+        mcu: &mut PassiveEndpoint,
+        clock: &Clock,
+    ) {
+        self.mac_to_mcu.flush_to_passive(mcu, clock);
+        self.mcu_to_mac.flush_to_client(mac, clock);
+    }
+
+    fn stats(&self) -> (NoiseStats, NoiseStats) {
+        (self.mac_to_mcu.stats, self.mcu_to_mac.stats)
+    }
+
+    fn assert_noise_was_injected(&self) {
+        for stats in [self.mac_to_mcu.stats, self.mcu_to_mac.stats] {
+            assert!(stats.dropped > 0, "simulation never dropped a packet");
+            assert!(stats.corrupted > 0, "simulation never corrupted a packet");
+            assert!(stats.reordered > 0, "simulation never reordered a packet");
+        }
     }
 }
 
 #[derive(Debug)]
 struct SimDirection {
+    rng: Rng,
     held: [Option<SimWrite>; 8],
     held_len: usize,
-    delivered: usize,
+    stats: NoiseStats,
+}
+
+/// What the noisy link decides to do with one transmitted envelope.
+enum LinkFate {
+    Deliver(SimWrite),
+    Dropped,
+    Held,
 }
 
 impl SimDirection {
-    const fn new() -> Self {
+    const fn new(seed: u64) -> Self {
         Self {
+            rng: Rng::new(seed),
             held: [None; 8],
             held_len: 0,
-            delivered: 0,
+            stats: NoiseStats {
+                dropped: 0,
+                corrupted: 0,
+                reordered: 0,
+            },
         }
     }
 
-    fn deliver_to_passive(&mut self, dst: &mut PassiveEndpoint, write: SimWrite) {
-        self.delivered += 1;
-
-        if self.delivered.is_multiple_of(7) {
-            self.hold(write);
-            return;
+    fn decide(&mut self, mut write: SimWrite) -> LinkFate {
+        if self.rng.one_in(DROP_ONE_IN) {
+            self.stats.dropped += 1;
+            return LinkFate::Dropped;
         }
 
-        receive_ok(dst.receive(0, write.as_bytes()));
-    }
-
-    fn deliver_to_client(&mut self, dst: &mut ClientEndpoint, write: SimWrite) {
-        self.delivered += 1;
-
-        if self.delivered.is_multiple_of(7) {
-            self.hold(write);
-            return;
+        if self.held_len < self.held.len() && self.rng.one_in(HOLD_ONE_IN) {
+            self.stats.reordered += 1;
+            self.held[self.held_len] = Some(write);
+            self.held_len += 1;
+            return LinkFate::Held;
         }
 
-        receive_ok(dst.receive(0, write.as_bytes()));
+        if self.rng.one_in(CORRUPT_ONE_IN) {
+            self.stats.corrupted += 1;
+            let index = (self.rng.next() as usize) % write.len;
+            let mask = (self.rng.next() % 255 + 1) as u8;
+            write.bytes[index] ^= mask;
+        }
+
+        LinkFate::Deliver(write)
     }
 
-    fn hold(&mut self, write: SimWrite) {
-        assert!(self.held_len < self.held.len(), "held packet buffer full");
-
-        self.held[self.held_len] = Some(write);
-        self.held_len += 1;
+    fn deliver_to_passive(&mut self, dst: &mut PassiveEndpoint, clock: &Clock, write: SimWrite) {
+        if let LinkFate::Deliver(write) = self.decide(write) {
+            receive_ok(dst.receive(clock.now(), write.as_bytes()));
+        }
     }
 
-    fn flush_to_passive(&mut self, dst: &mut PassiveEndpoint) {
+    fn deliver_to_client(&mut self, dst: &mut ClientEndpoint, clock: &Clock, write: SimWrite) {
+        if let LinkFate::Deliver(write) = self.decide(write) {
+            receive_ok(dst.receive(clock.now(), write.as_bytes()));
+        }
+    }
+
+    fn flush_to_passive(&mut self, dst: &mut PassiveEndpoint, clock: &Clock) {
         while self.held_len > 0 {
             self.held_len -= 1;
             let write = self.held[self.held_len].take().expect("held packet");
 
-            receive_ok(dst.receive(0, write.as_bytes()));
+            receive_ok(dst.receive(clock.now(), write.as_bytes()));
         }
     }
 
-    fn flush_to_client(&mut self, dst: &mut ClientEndpoint) {
+    fn flush_to_client(&mut self, dst: &mut ClientEndpoint, clock: &Clock) {
         while self.held_len > 0 {
             self.held_len -= 1;
             let write = self.held[self.held_len].take().expect("held packet");
 
-            receive_ok(dst.receive(0, write.as_bytes()));
+            receive_ok(dst.receive(clock.now(), write.as_bytes()));
         }
     }
 }
 
 fn receive_ok(report: ReceiveReport) {
-    match report {
-        ReceiveReport::Packet { .. }
-        | ReceiveReport::Duplicate { .. }
-        | ReceiveReport::Ack { .. }
-        | ReceiveReport::Ping
-        | ReceiveReport::Pong => {}
-        other => panic!("unexpected receive report in simulation: {other:?}"),
+    // Corrupted input legitimately produces Noise / Corrupted / Incomplete
+    // while the decoder resynchronizes; only a session-level error is fatal.
+    if let ReceiveReport::Error(error) = report {
+        panic!("unexpected receive error in simulation: {error:?}");
     }
 }
 

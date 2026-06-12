@@ -46,9 +46,7 @@ impl PassiveEndpoint {
 
     /// Creates a passive session if needed, then feeds received bytes into it.
     pub fn receive(&mut self, now_ms: u64, bytes: &[u8]) -> ReceiveReport {
-        if let Err(error) = self.peer.engine_or_accept_passive(now_ms) {
-            return ReceiveReport::Error(error);
-        }
+        self.peer.accept_passive_if_needed(now_ms);
 
         self.peer.receive(now_ms, bytes)
     }

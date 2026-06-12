@@ -55,9 +55,9 @@ fn engine_receives_fragments_as_one_message_event() {
 }
 
 #[test]
-fn engine_integrity_config_accepts_aead_packets() {
+fn engine_integrity_config_accepts_sip_tag_packets() {
     let config = EngineConfig {
-        integrity: IntegrityConfig::aead(),
+        integrity: IntegrityConfig::sip_tag(),
         ..EngineConfig::default()
     };
     let mut a = Engine::new(config);
@@ -74,13 +74,13 @@ fn engine_integrity_config_accepts_aead_packets() {
 }
 
 #[test]
-fn engine_integrity_config_rejects_different_aead_keys() {
+fn engine_integrity_config_rejects_different_sip_tag_keys() {
     let mut a = Engine::new(EngineConfig {
-        integrity: IntegrityConfig::aead_with_key([1; crate::integrity::Aead::KEY_LEN]),
+        integrity: IntegrityConfig::sip_tag_with_key([1; crate::integrity::SipTag::KEY_LEN]),
         ..EngineConfig::default()
     });
     let mut b = Engine::new(EngineConfig {
-        integrity: IntegrityConfig::aead_with_key([2; crate::integrity::Aead::KEY_LEN]),
+        integrity: IntegrityConfig::sip_tag_with_key([2; crate::integrity::SipTag::KEY_LEN]),
         ..EngineConfig::default()
     });
 

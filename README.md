@@ -119,10 +119,19 @@ Available integrity backends:
 - `IntegrityConfig::crc16()`
 - `IntegrityConfig::crc32()`
 - `IntegrityConfig::crc64()`
-- `IntegrityConfig::aead()`
-- `IntegrityConfig::aead_with_key(key)`
+- `IntegrityConfig::sip_tag()`
+- `IntegrityConfig::sip_tag_with_key(key)`
 
 Both peers must use the same integrity configuration.
+
+`sip_tag` is a 128-bit keyed tag (SipHash-2-4-128). It exists because CRC
+backends accept a corrupted packet at their collision rate — stress testing
+measured roughly one CRC-16 false accept per ten million noisy packets — and
+an accepted corrupt packet can never be retransmitted. The keyed tag pushes
+that probability to 2^-128. It does **not** encrypt payloads and the default
+key is a public constant, so it provides corruption rejection rather than
+protection against an active attacker; pass your own key via
+`sip_tag_with_key` if you need sender authentication.
 
 ## Recovery
 
