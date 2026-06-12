@@ -1,6 +1,6 @@
 [package]
 name = "msrt"
-version = "0.1.7"
+version = "0.1.8"
 edition = "2024"
 license = "Apache-2.0"
 authors = ["Atlas Orein <gamesworldcraft@gmail.com>"]
